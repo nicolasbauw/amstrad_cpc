@@ -1,0 +1,7 @@
+[package]
+name = "amstrad_cpc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+zilog_z80 = { git = "https://github.com/nicolasbauw/ZilogZ80.git", branch = "cpc" }
