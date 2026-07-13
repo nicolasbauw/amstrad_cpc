@@ -21,6 +21,6 @@ Les fichiers à créer au fur et à mesure :
 - [X] Étape 1 : Analyse de l'interface de la struct `CPU` et du trait `Bus` de la branche `cpc`.
 - [X] Étape 1.5 : Boot sur la ROM de diagnostic
 - [X] Étape 2 : Implémentation du système de Memory Banking du CPC (16 Ko ROM / 64 Ko RAM).
-- [ ] Étape 3 : Routage des ports d'I/O (Gate Array & CRTC).
+- [X] Étape 3 : Routage des ports d'I/O (Gate Array & CRTC).
 - [ ] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings.
 - [ ] Étape 5 : Intégration graphique (Rendu VRAM via SDL3).
