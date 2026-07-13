@@ -18,8 +18,8 @@ Les fichiers à créer au fur et à mesure :
 - `src/tape.rs` : Émulation du lecteur de cassettes (fichiers .CDT / .WAV) et gestion du moteur de lecture.
 
 ## Roadmap du projet
-- [ ] Étape 1 : Analyse de l'interface de la struct `CPU` et du trait `Bus` de la branche `cpc`.
-- [ ] Étape 1.5 : Boot sur la ROM de diagnostic
+- [X] Étape 1 : Analyse de l'interface de la struct `CPU` et du trait `Bus` de la branche `cpc`.
+- [X] Étape 1.5 : Boot sur la ROM de diagnostic
 - [ ] Étape 2 : Implémentation du système de Memory Banking du CPC (16 Ko ROM / 64 Ko RAM).
 - [ ] Étape 3 : Routage des ports d'I/O (Gate Array & CRTC).
 - [ ] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings.
