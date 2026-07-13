@@ -24,3 +24,5 @@ Les fichiers à créer au fur et à mesure :
 - [X] Étape 3 : Routage des ports d'I/O (Gate Array & CRTC).
 - [ ] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings.
 - [ ] Étape 5 : Intégration graphique (Rendu VRAM via SDL3).
+- [ ] Étape 6 : Émulation du PSG (src/psg.rs) pour la gestion du clavier et la génération du flux audio brut.
+- [ ] Étape 7 : Émulation du lecteur de cassettes (src/tape.rs) et finalisation.
