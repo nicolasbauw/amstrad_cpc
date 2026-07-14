@@ -1,28 +1,27 @@
-# Architecture de l'Émulateur Amstrad CPC
+# Architecture de l'Émulateur Amstrad CPC 6128
 
 ## Objectif
-Créer un émulateur Amstrad CPC 464 fonctionnel en Rust.
+Créer un émulateur Amstrad CPC 6128 fonctionnel en Rust.
 
 ## Contraintes Techniques
 - CPU : Utilisation exclusive de la crate `zilog_z80` (branche `cpc`).
-- L'architecture doit implémenter le Bus système du CPC pour interconnecter le CPU avec la mémoire (Banking), le Gate Array et le CRTC 6845.
+- L'architecture doit implémenter le Bus système du CPC pour interconnecter le CPU avec les 128 Ko de RAM, les ROMs (Système, BASIC, AMSDOS), le Gate Array, le CRTC 6845, et le contrôleur de disquette.
 
 ## Structure du Code (Modularité Stricte)
-Chaque composant matériel de l'Amstrad CPC doit être isolé dans son propre module Rust (un fichier `.rs` dédié). Le rôle du `Bus` sera uniquement d'orchestrer et de faire communiquer ces composants, sans embarquer leur logique interne.
-Les fichiers à créer au fur et à mesure :
-- `src/memory.rs` : Gestion des 64 Ko de RAM et de la commutation des ROMs (Banking).
-- `src/gate_array.rs` : Gestion des couleurs, de la palette, et des interruptions.
-- `src/crtc.rs` : Émulation du contrôleur vidéo 6845 (génération des signaux de synchronisation, timings écran).
-- `src/psg.rs` : Émulation de la puce sonore AY-3-8910 et lecture du clavier.
-- `src/bus.rs` : L'interconnexion centrale qui implémente le Trait de votre CPU.
-- `src/tape.rs` : Émulation du lecteur de cassettes (fichiers .CDT / .WAV) et gestion du moteur de lecture.
+Chaque composant matériel de l'Amstrad CPC doit être isolé dans son propre module Rust (un fichier `.rs` dédié) :
+- `src/memory.rs` : Gestion de la mémoire (128 Ko de RAM répartis en 8 banques de 16 Ko, ROM Système, ROM BASIC, ROM AMSDOS).
+- `src/gate_array.rs` : Gestion des couleurs, de la palette, des interruptions et de la sélection des banques mémoire RAM/ROM (configuration E/S `0x7F00`).
+- `src/crtc.rs` : Émulation du contrôleur vidéo 6845 (synchronisation, timings écran).
+- `src/psg.rs` : Émulation du générateur de son AY-3-8910 et gestion du clavier.
+- `src/fdc.rs` : Émulation du contrôleur de disquette uPD765A (fichiers .DSK).
+- `src/bus.rs` : L'interconnexion centrale qui implémente le Trait de notre CPU.
 
 ## Roadmap du projet
-- [X] Étape 1 : Analyse de l'interface de la struct `CPU` et du trait `Bus` de la branche `cpc`.
-- [X] Étape 1.5 : Boot sur la ROM de diagnostic
-- [X] Étape 2 : Implémentation du système de Memory Banking du CPC (16 Ko ROM / 64 Ko RAM).
-- [X] Étape 3 : Routage des ports d'I/O (Gate Array & CRTC).
-- [ ] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings.
-- [ ] Étape 5 : Intégration graphique (Rendu VRAM via SDL3).
-- [ ] Étape 6 : Émulation du PSG (src/psg.rs) pour la gestion du clavier et la génération du flux audio brut.
-- [ ] Étape 7 : Émulation du lecteur de cassettes (src/tape.rs) et finalisation.
+- [x] Étape 1 : Analyse de l'interface de la struct `CPU` et du trait `Bus`.
+- [x] Étape 2 : Implémentation du système de Memory Banking de base (64 Ko). *(À étendre à 128 Ko via le registre de banking du Gate Array)*
+- [x] Étape 3 : Routage des ports d'I/O (Gate Array & CRTC).
+- [X] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings fins.
+- [ ] Étape 5 : Intégration graphique (Rendu VRAM de base via SDL3).
+- [ ] Étape 6 : Émulation du PSG (src/psg.rs) pour la gestion du clavier et de l'audio.
+- [ ] Étape 7 : Émulation du contrôleur de disquette FDC (src/fdc.rs) pour charger des fichiers d'extension `.DSK`.
+- [ ] Étape 8 : Extension du Memory Banking à 128 Ko pour supporter les logiciels spécifiques au 6128.
