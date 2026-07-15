@@ -1,12 +1,46 @@
+/// Table des 27 couleurs physiques réelles de l'Amstrad CPC au format RGB (r, g, b).
+pub const CPC_COLORS_RGB: [(u8, u8, u8); 27] = [
+    (0, 0, 0),       // 0: Noir
+    (0, 0, 128),     // 1: Bleu
+    (0, 0, 255),     // 2: Bleu vif
+    (128, 0, 0),     // 3: Rouge
+    (128, 0, 128),   // 4: Magenta
+    (128, 0, 255),   // 5: Mauve
+    (255, 0, 0),     // 6: Rouge vif
+    (255, 0, 128),   // 7: Rose
+    (255, 0, 255),   // 8: Magenta vif
+    (0, 128, 0),     // 9: Vert
+    (0, 128, 128),   // 10: Cyan
+    (0, 128, 255),   // 11: Cyan vif
+    (128, 128, 0),   // 12: Jaune
+    (128, 128, 128), // 13: Blanc cassé / Gris
+    (128, 128, 255), // 14: Pastel Bleu
+    (255, 128, 0),   // 15: Orange
+    (255, 128, 128), // 16: Pastel Rouge
+    (255, 128, 255), // 17: Pastel Rose
+    (0, 255, 0),     // 18: Vert vif
+    (0, 255, 128),   // 19: Vert d'eau
+    (0, 255, 255),   // 20: Cyan vif / Turquoise
+    (128, 255, 0),   // 21: Vert lime
+    (128, 255, 128), // 22: Vert pastel
+    (128, 255, 255), // 23: Cyan pastel
+    (255, 255, 0),   // 24: Jaune vif
+    (255, 255, 128), // 25: Jaune pastel
+    (255, 255, 255), // 26: Blanc brillant
+];
+
+/// Table de conversion entre les index de couleurs matériels écrits par le CPU (0 à 31)
+/// et l'index de la couleur physique réelle (0 à 26).
+pub const HARDWARE_TO_PHYSICAL: [usize; 32] = [
+    13, 17, 19, 26, 4, 11, 1, 8, 15, 24, 20, 25, 6, 22, 3, 5, 14, 16, 18, 23, 2, 9, 0, 7, 12, 21,
+    10, 13, 13, 13, 13, 13,
+];
+
 /// Émulation du Gate Array de l'Amstrad CPC.
-///
-/// Le Gate Array gère :
-/// 1. La sélection des couleurs et de la palette (17 couleurs éditables parmi 27 physiques).
-/// 2. La configuration de la mémoire (banking).
-/// 3. Les interruptions matérielles (générées toutes les 52 lignes de balayage).
 pub struct GateArray {
-    pub selected_pen: u8, // Stylo sélectionné (0-15 pour les encres, 0x10 pour la bordure)
-    pub palette: [u8; 17], // Palette des 16 encres + la bordure (valeurs matérielles 0-26)
+    pub selected_pen: u8,   // Stylo sélectionné (0-15, ou 0x10 pour la bordure)
+    pub palette: [u8; 17],  // Palette des 16 encres + la bordure (valeurs matérielles 0-31)
+    pub video_mode: u8,     // Mode vidéo actuel (0, 1, 2)
     pub hsync_counter: u32, // Compteur de lignes HSYNC pour générer les interruptions
     pub interrupt_requested: bool, // Indique si une interruption est en attente
 }
@@ -14,11 +48,27 @@ pub struct GateArray {
 impl GateArray {
     /// Crée un Gate Array initialisé aux valeurs par défaut.
     pub fn new() -> Self {
-        Self {
+        let mut ga = Self {
             selected_pen: 0,
             palette: [0; 17],
+            video_mode: 1, // Mode 1 par défaut (utilisé par la ROM de diagnostic)
             hsync_counter: 0,
             interrupt_requested: false,
+        };
+        for i in 0..17 {
+            ga.palette[i] = 13; // Blanc cassé / Gris
+        }
+        ga
+    }
+
+    /// Récupère la couleur RGB (r, g, b) d'une encre de la palette (0 à 15 pour stylos, 16 pour la bordure).
+    pub fn get_rgb_color(&self, index: usize) -> (u8, u8, u8) {
+        if index < 17 {
+            let hw_color = self.palette[index] as usize & 0x1F;
+            let physical_color = HARDWARE_TO_PHYSICAL[hw_color];
+            CPC_COLORS_RGB[physical_color]
+        } else {
+            (0, 0, 0)
         }
     }
 
@@ -29,54 +79,48 @@ impl GateArray {
         val: u8,
         rom_low_enabled: &mut bool,
         rom_high_enabled: &mut bool,
+        ram_config: &mut u8,
     ) {
         match val >> 6 {
             0 => {
                 // Bit 7=0, Bit 6=0 : Sélection du stylo (Pen Selection)
-                // Le bit 4 détermine s'il s'agit de la bordure (1) ou d'une encre standard (0).
                 if (val & 0x10) != 0 {
-                    self.selected_pen = 0x10; // Bordure
+                    self.selected_pen = 16; // Bordure (mappée à l'index 16)
                 } else {
                     self.selected_pen = val & 0x0F; // Stylos 0 à 15
                 }
             }
             1 => {
                 // Bit 7=0, Bit 6=1 : Sélection de la couleur (Color Selection)
-                // Attribue la couleur physique (0-26) au stylo actuellement sélectionné.
                 if (self.selected_pen as usize) < self.palette.len() {
                     self.palette[self.selected_pen as usize] = val & 0x1F;
                 }
             }
             2 => {
-                // Bit 7=1, Bit 6=0 : Configuration mémoire (Banking)
-                // Géré conjointement avec Memory. Le bus distribuera cette configuration.
-                *rom_low_enabled = (val & 0x01) == 0;
-                *rom_high_enabled = (val & 0x02) == 0;
+                // Bit 7=1, Bit 6=0 : Configuration mémoire (Banking ROM)
+                // CORRECTION DE L'INVERSION DES BITS :
+                // - Bit 0 : Contrôle la ROM haute (0 = activée, 1 = désactivée)
+                // - Bit 1 : Contrôle la ROM basse (0 = activée, 1 = désactivée)
+                *rom_low_enabled = (val & 0x02) == 0;
+                *rom_high_enabled = (val & 0x01) == 0;
             }
             3 => {
-                // Bit 7=1, Bit 6=1 : Configuration du mode vidéo et des ROMs additionnelles
-                // Bit 0 & 1 : Choix du Mode d'affichage vidéo (Mode 0, 1, 2)
-                // Bit 2 : Reset du compteur de lignes HSYNC (remise à zéro de la demande d'interruption)
-                let video_mode = val & 0x03;
+                // Bit 7=1, Bit 6=1 : Configuration RAM 128 Ko (ou Mode vidéo + interrupt reset si bits spécifiques)
+                *ram_config = val & 0x07;
+
+                self.video_mode = val & 0x03;
                 let interrupt_reset = (val & 0x08) != 0;
 
                 if interrupt_reset {
                     self.hsync_counter = 0;
                     self.interrupt_requested = false;
                 }
-
-                // (Le mode vidéo sera utilisé par notre moteur de rendu graphique plus tard)
-                _ = video_mode;
             }
             _ => unreachable!(),
         }
     }
 
     /// Avance le compteur de cycles (Ticks) du Gate Array.
-    /// Sur Amstrad CPC, un signal HSYNC (balayage d'une ligne) se produit toutes les 64 microsecondes,
-    /// soit tous les 64 cycles CPU (ticks) à 4 MHz (ou 64 cycles NOP d'une longueur de 4 cycles machine, soit 4 T-states par cycle machine).
-    /// En réalité, le CRTC envoie un signal HSYNC qui incrémente le compteur du Gate Array.
-    /// Toutes les 52 lignes HSYNC, le Gate Array lève une interruption CPU.
     pub fn step_hsync(&mut self) -> bool {
         self.hsync_counter += 1;
         if self.hsync_counter >= 52 {
