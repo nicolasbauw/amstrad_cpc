@@ -100,7 +100,7 @@ fn main() {
     };
 
     let window = match video_subsystem
-        .window("Amstrad CPC 6128 - Noël Llopis Diagnostic", 640, 400)
+        .window("Amstrad CPC 6128", 640, 400)
         .position_centered()
         .build()
     {
