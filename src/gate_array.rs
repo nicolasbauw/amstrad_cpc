@@ -15,7 +15,7 @@ pub const CPC_COLORS_RGB: [(u8, u8, u8); 27] = [
     (128, 128, 0),   // 12: Jaune
     (128, 128, 128), // 13: Blanc cassé / Gris
     (128, 128, 255), // 14: Pastel Bleu
-    (255, 128, 0),   // 15: Orange
+    (255, 0, 0),     // 15: Orange (utilisé comme index 15 physique sur CPC)
     (255, 128, 128), // 16: Pastel Rouge
     (255, 128, 255), // 17: Pastel Rose
     (0, 255, 0),     // 18: Vert vif
@@ -29,11 +29,13 @@ pub const CPC_COLORS_RGB: [(u8, u8, u8); 27] = [
     (255, 255, 255), // 26: Blanc brillant
 ];
 
-/// Table de conversion entre les index de couleurs matériels écrits par le CPU (0 à 31)
+/// Table de conversion officielle complète entre les index de couleurs matériels du Gate Array (0 à 31)
 /// et l'index de la couleur physique réelle (0 à 26).
 pub const HARDWARE_TO_PHYSICAL: [usize; 32] = [
-    13, 17, 19, 26, 4, 11, 1, 8, 15, 24, 20, 25, 6, 22, 3, 5, 14, 16, 18, 23, 2, 9, 0, 7, 12, 21,
-    10, 13, 13, 13, 13, 13,
+    13, 17, 19, 26, 1, 10, 21, 22, // 0-7
+    15, 4, 24, 25, 6, 22, 3, 5, // 8-15
+    14, 16, 18, 20, 2, 9, 0, 7, // 16-23
+    12, 21, 10, 13, 13, 13, 13, 13, // 24-31
 ];
 
 /// Émulation du Gate Array de l'Amstrad CPC.
@@ -98,14 +100,11 @@ impl GateArray {
             }
             2 => {
                 // Bit 7=1, Bit 6=0 : Configuration mémoire (Banking ROM)
-                // CORRECTION DE L'INVERSION DES BITS :
-                // - Bit 0 : Contrôle la ROM haute (0 = activée, 1 = désactivée)
-                // - Bit 1 : Contrôle la ROM basse (0 = activée, 1 = désactivée)
                 *rom_low_enabled = (val & 0x02) == 0;
                 *rom_high_enabled = (val & 0x01) == 0;
             }
             3 => {
-                // Bit 7=1, Bit 6=1 : Configuration RAM 128 Ko (ou Mode vidéo + interrupt reset si bits spécifiques)
+                // Bit 7=1, Bit 6=1 : Configuration RAM 128 Ko
                 *ram_config = val & 0x07;
 
                 self.video_mode = val & 0x03;

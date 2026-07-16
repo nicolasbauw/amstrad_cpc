@@ -10,17 +10,37 @@ mod video;
 use machine::Machine;
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
+use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Émulateur Amstrad CPC 6128 ===");
 
+    // 1. Analyse des arguments de la ligne de commande pour le choix du mode
+    let args: Vec<String> = env::args().collect();
+    let mut diag_mode = true; // Par défaut, on démarre en mode Diagnostic
+
+    if args.contains(&"--cpc".to_string()) || args.contains(&"--basic".to_string()) {
+        diag_mode = false;
+    }
+
+    // 2. Initialisation de la Machine
     let mut machine = Machine::new();
+    machine.diagnostic_mode = diag_mode;
     machine.load_roms()?;
 
+    // 3. Initialisation de SDL2
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
+
+    // Titre dynamique de la fenêtre en fonction du mode configuré
+    let window_title = if machine.diagnostic_mode {
+        "Amstrad CPC 6128 - Noël Llopis Diagnostic"
+    } else {
+        "Amstrad CPC 6128 - BASIC 1.1 AZERTY"
+    };
+
     let window = video_subsystem
-        .window("Amstrad CPC 6128 - Noël Llopis Diagnostic", 640, 400)
+        .window(window_title, 640, 400)
         .position_centered()
         .build()?;
     let mut canvas = window.into_canvas().build()?;
@@ -32,6 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ticks_per_frame: u32 = 79_872;
     let mut running = true;
     let mut frame_count: u64 = 0;
+
+    println!("Démarrage de la boucle principale ({})...", window_title);
 
     while running {
         for event in event_pump.poll_iter() {
@@ -64,5 +86,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 
+    println!("Émulateur Amstrad CPC arrêté proprement. Merci d'avoir joué !");
     Ok(())
 }

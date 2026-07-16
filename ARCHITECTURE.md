@@ -15,13 +15,15 @@ Chaque composant matériel de l'Amstrad CPC doit être isolé dans son propre mo
 - `src/psg.rs` : Émulation du générateur de son AY-3-8910 et gestion du clavier.
 - `src/fdc.rs` : Émulation du contrôleur de disquette uPD765A (fichiers .DSK).
 - `src/bus.rs` : L'interconnexion centrale qui implémente le Trait de notre CPU.
+- `src/video.rs` : Rendu graphique de la VRAM d'Amstrad CPC.
+- `src/machine.rs` : Structure Machine encapsulant et synchronisant l'intégralité du matériel.
 
 ## Roadmap du projet
 - [x] Étape 1 : Analyse de l'interface de la struct `CPU` et du trait `Bus`.
-- [x] Étape 2 : Implémentation du système de Memory Banking de base (64 Ko). *(À étendre à 128 Ko via le registre de banking du Gate Array)*
+- [x] Étape 2 : Implémentation du système de Memory Banking de base (64 Ko).
 - [x] Étape 3 : Routage des ports d'I/O (Gate Array & CRTC).
-- [X] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings fins.
-- [X] Étape 5 : Intégration graphique (Rendu VRAM de base via SDL2).
+- [x] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings fins.
+- [x] Étape 5 : Intégration graphique (Rendu VRAM via SDL2 avec les vraies couleurs d'origine).
 - [ ] Étape 6 : Émulation du PSG (src/psg.rs) pour la gestion du clavier et de l'audio.
 - [ ] Étape 7 : Émulation du contrôleur de disquette FDC (src/fdc.rs) pour charger des fichiers d'extension `.DSK`.
-- [ ] Étape 8 : Extension du Memory Banking à 128 Ko pour supporter les logiciels spécifiques au 6128.
+- [x] Étape 8 : Extension du Memory Banking à 128 Ko pour supporter les configurations du 6128.
