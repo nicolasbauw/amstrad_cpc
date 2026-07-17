@@ -1,2 +1,1 @@
 - Voir pourquoi "detecting upper roms" (cf screenshot) détecte des ROMs bizarres
-- auditer la gestion des interruptions du Z80

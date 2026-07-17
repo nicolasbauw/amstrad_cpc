@@ -66,4 +66,4 @@ checksum = "579a42fc0b8e0c63b76519a339be31bed574929511fa53c1a3acae26eb258f29"
 [[package]]
 name = "zilog_z80"
 version = "0.19.0"
-source = "git+https://github.com/nicolasbauw/ZilogZ80.git?branch=cpc#c4d222115f01d082aa4f1f6f41bfbd6503b1bef9"
+source = "git+https://github.com/nicolasbauw/ZilogZ80.git?branch=cpc#7474b594630aaac9fb4a40e5b36af96590f51a07"
