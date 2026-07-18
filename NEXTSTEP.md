@@ -1,1 +1,4 @@
-- Voir pourquoi "detecting upper roms" (cf screenshot) détecte des ROMs bizarres
+- finir l'interfaçage du clavier avec le reste, et auditer le code (psg.rs)
+- implémenter le BORDER
+- Voir pourquoi "detecting upper roms" (cf screenshot) détecte des ROMs bizarres (peut-être car l'allocation Box n'initialise pas les données à 0 ?)
+- Après le test des ROMs il y a un message "press any key" qui passe sans action sur le clavier
