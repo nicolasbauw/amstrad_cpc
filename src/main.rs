@@ -57,8 +57,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while running {
         for event in event_pump.poll_iter() {
-            if let Event::Quit { .. } = event {
-                running = false;
+            match event {
+                Event::Quit { .. } => {
+                    running = false;
+                }
+                // Événements d'enfoncement de touches du clavier moderne PC
+                Event::KeyDown {
+                    keycode: Some(key), ..
+                } => {
+                    machine.bus.psg.set_key_state(key, true);
+                }
+                // Événements de relâchement de touches
+                Event::KeyUp {
+                    keycode: Some(key), ..
+                } => {
+                    machine.bus.psg.set_key_state(key, false);
+                }
+                _ => {}
             }
         }
 
