@@ -51,16 +51,16 @@ impl Memory {
         let offset = (address % 0x4000) as usize;
 
         let bank = match self.ram_config {
-            0 => [0, 1, 2, 3][page as usize],
-            1 => [0, 1, 2, 7][page as usize],
-            2 => [0, 1, 2, 4][page as usize],
-            3 => [0, 1, 2, 5][page as usize],
-            4 => [0, 1, 2, 6][page as usize],
-            5 => [0, 1, 2, 7][page as usize],
-            6 => [0, 1, 2, 4][page as usize],
-            7 => [0, 1, 2, 5][page as usize],
+            0 => [0, 1, 2, 3],
+            1 => [0, 1, 2, 7],
+            2 => [4, 5, 6, 7],
+            3 => [0, 3, 2, 7],
+            4 => [0, 4, 2, 3],
+            5 => [0, 5, 2, 3],
+            6 => [0, 6, 2, 3],
+            7 => [0, 7, 2, 3],
             _ => unreachable!(),
-        };
+        }[page as usize];
 
         (bank * 16384) + offset
     }
