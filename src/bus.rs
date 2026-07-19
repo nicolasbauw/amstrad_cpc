@@ -40,9 +40,12 @@ impl Bus for CpcBus {
 
     /// Lecture d'un port I/O.
     fn read_io(&self, port: u16) -> u8 {
+        // 1. Décodage du PPI (Bit 11 = 0, soit port & 0x0800 == 0)
         if (port & 0x0800) == 0 {
             return self.ppi.read_register(port, &self.psg);
         }
+
+        // 2. Décodage du CRTC (Bit 14 = 0, soit port & 0x4000 == 0)
         if (port & 0x4000) == 0 {
             if (port & 0x0100) == 0 {
                 return self.crtc.read_data();
@@ -53,20 +56,25 @@ impl Bus for CpcBus {
 
     /// Écriture sur un port I/O.
     fn write_io(&mut self, port: u16, value: u8) {
-        // Détectons les écritures au Gate Array pour le debug
+        // Décodage du Gate Array (Bit 15 = 0, Bit 14 = 1, soit port & 0xC000 == 0x4000)
         if (port & 0xC000) == 0x4000 {
-            println!(
-                " >>> GATE ARRAY WRITE: port=0x{:04X}, value=0x{:02X}",
-                port, value
-            );
+            // COMPORTEMENT ÉLECTRONIQUE PARALLÈLE :
+            // 1. Le Gate Array standard traite TOUJOURS l'écriture pour configurer ses registres (Rom, palette, etc.)
             self.gate_array.write_register(
                 value,
                 &mut self.memory.rom_low_enabled,
                 &mut self.memory.rom_high_enabled,
-                &mut self.memory.ram_config,
             );
+
+            // 2. En parallèle, si le bit 5 d'adresse est à 1 (ligne A5 active) et qu'il s'agit d'une commande
+            //    de configuration RAM étendu (bits 7-6 à 11, soit value & 0xC0 == 0xC0) :
+            //    On applique également la configuration de banking RAM !
+            if (port & 0x0020) != 0 && (value & 0xC0) == 0xC0 {
+                self.memory.ram_config = value & 0x07;
+            }
         }
 
+        // 2. Décodage du CRTC (Bit 14 = 0, soit port & 0x4000 == 0)
         if (port & 0x4000) == 0 {
             if (port & 0x0100) != 0 {
                 self.crtc.select_register(value);
@@ -75,10 +83,12 @@ impl Bus for CpcBus {
             }
         }
 
+        // 3. Décodage du PPI (Bit 11 = 0, soit port & 0x0800 == 0)
         if (port & 0x0800) == 0 {
             self.ppi.write_register(port, value, &mut self.psg);
         }
 
+        // 4. Sélection de la ROM haute (Bit 13 = 0, soit port & 0x2000 == 0)
         if (port & 0x2000) == 0 {
             self.memory.select_high_rom(value);
         }

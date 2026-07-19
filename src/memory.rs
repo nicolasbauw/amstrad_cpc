@@ -1,24 +1,29 @@
 /// Gestion de la mémoire de l'Amstrad CPC 6128.
 pub struct Memory {
-    pub ram: Box<[u8; 128 * 1024]>,            // 128 Ko de RAM
-    pub rom_low: Box<[u8; 16 * 1024]>,         // ROM basse de 16 Ko
-    pub rom_high: Box<[[u8; 16 * 1024]; 256]>, // 256 ROMs hautes de 16 Ko
-    pub rom_high_present: [bool; 256], // Indique si une ROM physique est présente sur chaque slot
-
-    pub rom_low_enabled: bool, // ROM basse activée en lecture ($0000-$3FFF)
-    pub rom_high_enabled: bool, // ROM haute activée en lecture ($C000-$FFFF)
-    pub selected_high_rom: u8, // Index de la ROM haute actuellement sélectionnée
-
-    pub ram_config: u8, // Configuration actuelle du banking RAM (0 à 7)
+    pub ram: Box<[u8]>,
+    pub rom_low: Box<[u8]>,
+    pub rom_high: Box<[u8]>, // Stocké à plat pour plus de simplicité (256 * 16 * 1024 = 4 Mo)
+    pub rom_high_present: [bool; 256],
+    pub rom_low_enabled: bool,
+    pub rom_high_enabled: bool,
+    pub selected_high_rom: u8,
+    pub ram_config: u8,
 }
 
 impl Memory {
     /// Crée une nouvelle mémoire propre de 128 Ko.
     pub fn new() -> Self {
+        // Allocation directe sur le tas (heap) pour éviter de saturer la pile (stack)
+        let ram_vec = vec![0u8; 128 * 1024];
+        let rom_low_vec = vec![0u8; 16 * 1024];
+
+        // 256 banques de 16 Ko = 4 194 304 octets (4 Mo)
+        let rom_high_vec = vec![0u8; 256 * 16 * 1024];
+
         Self {
-            ram: Box::new([0; 128 * 1024]),
-            rom_low: Box::new([0; 16 * 1024]),
-            rom_high: Box::new([[0; 16 * 1024]; 256]),
+            ram: ram_vec.into_boxed_slice(),
+            rom_low: rom_low_vec.into_boxed_slice(),
+            rom_high: rom_high_vec.into_boxed_slice(),
             rom_high_present: [false; 256],
             rom_low_enabled: true,
             rom_high_enabled: true,
@@ -33,10 +38,11 @@ impl Memory {
         self.rom_low[..size].copy_from_slice(&data[..size]);
     }
 
-    /// Charge une ROM haute (16 Ko).
+    /// Charge une ROM haute (16 Ko) à un index donné.
     pub fn load_high_rom(&mut self, index: u8, data: &[u8]) {
-        let size = data.len().min(self.rom_high[index as usize].len());
-        self.rom_high[index as usize][..size].copy_from_slice(&data[..size]);
+        let start = (index as usize) * 16 * 1024;
+        let size = data.len().min(16 * 1024);
+        self.rom_high[start..start + size].copy_from_slice(&data[..size]);
         self.rom_high_present[index as usize] = true; // On marque la ROM comme présente !
     }
 
@@ -47,22 +53,28 @@ impl Memory {
 
     /// Retourne l'adresse physique dans les 128 Ko de RAM pour une adresse CPU donnée.
     pub fn get_ram_physical_address(&self, address: u16) -> usize {
-        let page = address / 0x4000;
+        let page = (address / 0x4000) as usize;
         let offset = (address % 0x4000) as usize;
 
-        let bank = match self.ram_config {
-            0 => [0, 1, 2, 3],
-            1 => [0, 1, 2, 7],
-            2 => [4, 5, 6, 7],
-            3 => [0, 3, 2, 7],
-            4 => [0, 4, 2, 3],
-            5 => [0, 5, 2, 3],
-            6 => [0, 6, 2, 3],
-            7 => [0, 7, 2, 3],
-            _ => unreachable!(),
-        }[page as usize];
+        let bank = match self.ram_config & 0x07 {
+            0 => [0, 1, 2, 3][page],
+            1 => [0, 1, 2, 7][page],
+            2 => [4, 5, 6, 7][page],
+            3 => [0, 3, 2, 7][page],
+            4 => [0, 4, 2, 3][page],
+            5 => [0, 5, 2, 3][page],
+            6 => [0, 6, 2, 3][page],
+            7 => [0, 7, 2, 3][page],
+            _ => [0, 1, 2, 3][page],
+        };
 
         (bank * 16384) + offset
+    }
+
+    /// Lecture directe de la RAM (utilisée par le moteur vidéo pour ignorer le banking ROM)
+    pub fn read_ram_byte(&self, address: u16) -> u8 {
+        let physical_addr = self.get_ram_physical_address(address);
+        self.ram[physical_addr]
     }
 
     /// Lecture d'un octet en fonction du banking actif (RAM + ROM).
@@ -77,11 +89,11 @@ impl Memory {
             }
         } else if address >= 0xC000 {
             // Zone Haute ($C000 - $FFFF)
-            // COMPORTEMENT FIDÈLE : On ne lit la ROM haute que si une ROM y est branchée,
-            // sinon on retombe sur la RAM sous-jacente !
             let selected = self.selected_high_rom as usize;
             if self.rom_high_enabled && self.rom_high_present[selected] {
-                self.rom_high[selected][(address - 0xC000) as usize]
+                let start = selected * 16 * 1024;
+                let offset = (address - 0xC000) as usize;
+                self.rom_high[start + offset]
             } else {
                 let physical_addr = self.get_ram_physical_address(address);
                 self.ram[physical_addr]

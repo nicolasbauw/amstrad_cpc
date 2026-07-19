@@ -40,10 +40,10 @@ pub const HARDWARE_TO_PHYSICAL: [usize; 32] = [
 
 /// Émulation du Gate Array de l'Amstrad CPC.
 pub struct GateArray {
-    pub selected_pen: u8,   // Stylo sélectionné (0-15, ou 0x10 pour la bordure)
-    pub palette: [u8; 17],  // Palette des 16 encres + la bordure (valeurs matérielles 0-31)
-    pub video_mode: u8,     // Mode vidéo actuel (0, 1, 2)
-    pub hsync_counter: u32, // Compteur de lignes HSYNC pour générer les interruptions
+    pub selected_pen: u8,          // Stylo sélectionné (0-15, ou 16 pour la bordure)
+    pub palette: [u8; 17],         // Palette des 16 encres + la bordure (valeurs matérielles 0-31)
+    pub video_mode: u8,            // Mode vidéo actuel (0, 1, 2)
+    pub hsync_counter: u32,        // Compteur de lignes HSYNC pour générer les interruptions
     pub interrupt_requested: bool, // Indique si une interruption est en attente
 }
 
@@ -81,7 +81,6 @@ impl GateArray {
         val: u8,
         rom_low_enabled: &mut bool,
         rom_high_enabled: &mut bool,
-        ram_config: &mut u8,
     ) {
         match val >> 6 {
             0 => {
@@ -100,13 +99,13 @@ impl GateArray {
             }
             2 => {
                 // Bit 7=1, Bit 6=0 : Configuration mémoire (Banking ROM)
+                // - Bit 0 : Contrôle la ROM haute (0 = activée, 1 = désactivée)
+                // - Bit 1 : Contrôle la ROM basse (0 = activée, 1 = désactivée)
                 *rom_low_enabled = (val & 0x02) == 0;
                 *rom_high_enabled = (val & 0x01) == 0;
             }
             3 => {
-                // Bit 7=1, Bit 6=1 : Configuration RAM 128 Ko
-                *ram_config = val & 0x07;
-
+                // Bit 7=1, Bit 6=1 : Configuration du mode vidéo standard
                 self.video_mode = val & 0x03;
                 let interrupt_reset = (val & 0x08) != 0;
 
