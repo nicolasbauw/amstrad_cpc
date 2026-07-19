@@ -1,4 +1,6 @@
-- finir l'interfaçage du clavier avec le reste, et auditer le code (psg.rs)
-- implémenter le BORDER
-- Voir pourquoi "detecting upper roms" (cf screenshot) détecte des ROMs bizarres (peut-être car l'allocation Box n'initialise pas les données à 0 ?)
+- implémenter la console debugger (voir DEBUGGER.md)
+- pourquoi la rom de diag commence par l'itération 222
+- pourquoi la rom de diag détecte des ROMs UNKNOWN
+- finir l'interfaçage du clavier avec le reste
 - Après le test des ROMs il y a un message "press any key" qui passe sans action sur le clavier
+- se renseigner sur le fonctionnement du BORDER, et l'implémenter
