@@ -2,6 +2,7 @@ pub enum MonitorCmd {
     Help,
     ReadMem,
     WriteMem,
+    SearchMem,
     Jump,
     Step,
     StepLine,
