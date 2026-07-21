@@ -19,8 +19,8 @@ Monitor commands:
     b               displays set breakpoints
     b 0x0002        sets a breakpoint at address 0x0002
     f 0x0002        \"frees\" (deletes) breakpoint at address 0x0002
-    p               pauses execution
-    g               resumes execution after the \"p\" command, or a breakpoint,
+    p               pause execution
+    g               resume execution after the \"p\" command, or a breakpoint,
                     has been used to halt execution
     r               displays the contents of flags, registers and interrupts";
 
@@ -195,9 +195,11 @@ impl Machine {
                 println!("{HELP}");
             }
             MonitorCmd::Pause => {
+                println!("Emulation paused !");
                 self.stop();
             }
             MonitorCmd::Resume => {
+                println!("Emulation resumed !");
                 self.start();
             }
             MonitorCmd::Registers => {
