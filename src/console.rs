@@ -24,7 +24,7 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                     "p" => MonitorCmd::Pause,
                     "g" => MonitorCmd::Resume,
                     "m" => MonitorCmd::ReadMem,
-                    _ => MonitorCmd::Resume,
+                    _ => MonitorCmd::Help,
                 };
                 let arg = parts.next().unwrap_or_default().to_string();
                 let arg2 = parts.next().unwrap_or_default().to_string();
