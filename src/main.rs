@@ -2,6 +2,7 @@ mod bus;
 mod console;
 mod crtc;
 mod gate_array;
+mod hexconversion;
 mod machine;
 mod memory;
 mod monitor;

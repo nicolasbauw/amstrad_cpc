@@ -1,4 +1,5 @@
 use crate::bus::CpcBus;
+use crate::hexconversion::HexStringToUnsigned;
 use crate::memory::Memory;
 use crate::monitor::MonitorCmd;
 use std::{
@@ -223,7 +224,11 @@ impl Machine {
                     self.cpu.im(),
                     self.cpu.has_pending_int(),
                     self.cpu.has_pending_nmi()
-                )
+                );
+            }
+            MonitorCmd::ReadMem => {
+                let a = arg.to_u16()?;
+                println!("{:04X}    {:02X}", a, self.bus.read_byte(a));
             }
             _ => {}
         }
