@@ -1,5 +1,5 @@
-#[derive(Debug)]
 pub enum MonitorCmd {
+    Help,
     ReadMem(u16),
     WriteMem(u16, u8),
     Jump(u16),
