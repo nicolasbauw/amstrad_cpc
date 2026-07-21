@@ -1,0 +1,16 @@
+#[derive(Debug)]
+pub enum MonitorCmd {
+    ReadMem(u16),
+    WriteMem(u16, u8),
+    Jump(u16),
+    Step,
+    StepLine,
+    ListBreakpoints,
+    AddBreakpoint(u16),
+    RemoveBreakpoint(u16),
+    Registers,
+    Hardware,
+    Resume,
+    Pause,
+    Disassemble(u16),
+}

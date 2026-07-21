@@ -1,8 +1,10 @@
 mod bus;
+mod console;
 mod crtc;
 mod gate_array;
 mod machine;
 mod memory;
+mod monitor;
 mod ppi;
 mod psg;
 mod video;
@@ -53,8 +55,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut running = true;
     let mut frame_count: u64 = 0;
 
-    println!("Démarrage de la boucle principale ({})...", window_title);
-
     while running {
         for event in event_pump.poll_iter() {
             match event {
@@ -78,10 +78,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let mut frame_ticks: u32 = 0;
-        while frame_ticks < ticks_per_frame {
-            frame_ticks += machine.step();
+        if machine.is_running() {
+            while frame_ticks < ticks_per_frame {
+                frame_ticks += machine.step();
+            }
         }
-
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
@@ -91,16 +92,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         canvas.present();
 
         frame_count += 1;
-        if frame_count % 150 == 0 {
+        /*if frame_count % 150 == 0 {
             println!(
                 "Statistiques : {} frames affichées (Total Ticks: {}, Ligne: {})",
                 frame_count, machine.total_ticks, machine.current_line
             );
-        }
-
+        }*/
+        machine.console_handle().unwrap_or_default();
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 
-    println!("Émulateur Amstrad CPC arrêté proprement. Merci d'avoir joué !");
     Ok(())
 }

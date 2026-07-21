@@ -1,8 +1,70 @@
 use crate::bus::CpcBus;
 use crate::memory::Memory;
-use std::fs::File;
-use std::io::Read;
-use zilog_z80::cpu::CPU;
+use std::{
+    collections::HashSet, error, error::Error, fmt, fs::File, io::Read, sync::mpsc,
+    sync::mpsc::SendError,
+};
+use zilog_z80::{bus::Bus, cpu::CPU};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const HELP: &str = "
+Monitor commands:
+    d 0x0000        disassembles code at 0x0000 and the 20 next
+                    instructions
+    m 0xeeee        displays memory content at address 0xeeee
+    m 0xeeee 0xaa   sets memory address 0xeeee to the 0xaa value
+    j 0x0000        jumps to 0x0000 address
+    b               displays set breakpoints
+    b 0x0002        sets a breakpoint at address 0x0002
+    f 0x0002        \"frees\" (deletes) breakpoint at address 0x0002
+    g               resumes execution after a breakpoint has been used to
+                    halt execution
+    r               displays the contents of flags and registers";
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum MachineError {
+    ConfigFile,
+    ConfigFileFmt,
+    IOError,
+    SendMsgError,
+    SnapshotError,
+    DisplayError,
+    FontError,
+}
+
+impl fmt::Display for MachineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            MachineError::ConfigFileFmt => "Bad config file format",
+            MachineError::ConfigFile => "Can't load config file",
+            MachineError::IOError => "I/O Error",
+            MachineError::SendMsgError => "Message not sent",
+            MachineError::SnapshotError => "Snapshot I/O error",
+            MachineError::DisplayError => "SDL3 error",
+            MachineError::FontError => "Can't load font",
+        })
+    }
+}
+
+impl From<std::io::Error> for MachineError {
+    fn from(_e: std::io::Error) -> MachineError {
+        MachineError::IOError
+    }
+}
+
+impl From<SendError<(String, String, String)>> for MachineError {
+    fn from(_e: SendError<(String, String, String)>) -> MachineError {
+        MachineError::SendMsgError
+    }
+}
+
+impl From<MachineError> for std::io::Error {
+    fn from(e: MachineError) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    }
+}
+
+impl error::Error for MachineError {}
 
 pub struct Machine {
     pub cpu: CPU,
@@ -11,6 +73,12 @@ pub struct Machine {
     pub hsync_accumulator: u32,
     pub current_line: u32,
     pub diagnostic_mode: bool, // true = ROM de Diagnostic, false = ROMs d'origine du CPC 6128
+    cmd_channel: (
+        mpsc::Sender<(String, String, String)>,
+        mpsc::Receiver<(String, String, String)>,
+    ),
+    breakpoints: HashSet<u16>,
+    running: bool,
 }
 
 impl Machine {
@@ -19,14 +87,31 @@ impl Machine {
         let bus = CpcBus::new(memory);
         let cpu = CPU::new();
 
-        Self {
+        let m = Self {
             cpu,
             bus,
             total_ticks: 0,
             hsync_accumulator: 0,
             current_line: 0,
             diagnostic_mode: false, // Basculé à false pour tester le boot officiel du CPC 6128 !
-        }
+            cmd_channel: mpsc::channel(),
+            breakpoints: HashSet::new(),
+            running: true,
+        };
+        crate::console::launch(m.cmd_channel.0.clone()).unwrap();
+        m
+    }
+
+    pub fn start(&mut self) {
+        self.running = true;
+    }
+
+    pub fn stop(&mut self) {
+        self.running = false;
+    }
+
+    pub fn is_running(&mut self) -> bool {
+        self.running
     }
 
     /// Charge les ROMs appropriées en fonction du mode (Diagnostic ou Officiel)
@@ -96,5 +181,45 @@ impl Machine {
             }
         }
         elapsed_ticks
+    }
+
+    pub fn console_handle(&mut self) -> Result<(), Box<dyn Error>> {
+        let (command, arg, arg2) = self.cmd_channel.1.try_recv()?;
+
+        match command.as_str() {
+            "help" => {
+                println!("Version {VERSION}");
+                println!("{HELP}");
+            }
+            "s" => {
+                self.stop();
+            }
+            "g" => {
+                self.start();
+            }
+            "r" => {
+                print!(
+                    "PC :{:#06X}\tSP : {:#06X}\nS : {}\tZ : {}\tH : {}\tP : {}\tN : {}\tC : {}\nB : {:#04X}\tC : {:#04X}\nD : {:#04X}\tE : {:#04X}\nH : {:#04X}\tL : {:#04X}\nA : {:#04X}\t(SP) : {:#06X}\n",
+                    self.cpu.reg.pc,
+                    self.cpu.reg.sp,
+                    self.cpu.reg.flags.s as i32,
+                    self.cpu.reg.flags.z as i32,
+                    self.cpu.reg.flags.h as i32,
+                    self.cpu.reg.flags.p as i32,
+                    self.cpu.reg.flags.n as i32,
+                    self.cpu.reg.flags.c as i32,
+                    self.cpu.reg.b,
+                    self.cpu.reg.c,
+                    self.cpu.reg.d,
+                    self.cpu.reg.e,
+                    self.cpu.reg.h,
+                    self.cpu.reg.l,
+                    self.cpu.reg.a,
+                    self.bus.read_word(self.cpu.reg.sp)
+                )
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
