@@ -1,5 +1,6 @@
 use crate::bus::CpcBus;
 use crate::memory::Memory;
+use crate::monitor::MonitorCmd;
 use std::{
     collections::HashSet, error, error::Error, fmt, fs::File, io::Read, sync::mpsc,
     sync::mpsc::SendError,
@@ -17,9 +18,10 @@ Monitor commands:
     b               displays set breakpoints
     b 0x0002        sets a breakpoint at address 0x0002
     f 0x0002        \"frees\" (deletes) breakpoint at address 0x0002
-    g               resumes execution after a breakpoint has been used to
-                    halt execution
-    r               displays the contents of flags and registers";
+    p               pauses execution
+    g               resumes execution after the \"p\" command, or a breakpoint,
+                    has been used to halt execution
+    r               displays the contents of flags, registers and interrupts";
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum MachineError {
@@ -74,8 +76,8 @@ pub struct Machine {
     pub current_line: u32,
     pub diagnostic_mode: bool, // true = ROM de Diagnostic, false = ROMs d'origine du CPC 6128
     cmd_channel: (
-        mpsc::Sender<(String, String, String)>,
-        mpsc::Receiver<(String, String, String)>,
+        mpsc::Sender<(MonitorCmd, String, String)>,
+        mpsc::Receiver<(MonitorCmd, String, String)>,
     ),
     breakpoints: HashSet<u16>,
     running: bool,
@@ -186,18 +188,18 @@ impl Machine {
     pub fn console_handle(&mut self) -> Result<(), Box<dyn Error>> {
         let (command, arg, arg2) = self.cmd_channel.1.try_recv()?;
 
-        match command.as_str() {
-            "help" => {
+        match command {
+            MonitorCmd::Help => {
                 println!("Version {VERSION}");
                 println!("{HELP}");
             }
-            "s" => {
+            MonitorCmd::Pause => {
                 self.stop();
             }
-            "g" => {
+            MonitorCmd::Resume => {
                 self.start();
             }
-            "r" => {
+            MonitorCmd::Registers => {
                 print!(
                     "PC :{:#06X}\tSP : {:#06X}\nS : {}\tZ : {}\tH : {}\tP : {}\tN : {}\tC : {}\nB : {:#04X}\tC : {:#04X}\nD : {:#04X}\tE : {:#04X}\nH : {:#04X}\tL : {:#04X}\nA : {:#04X}\t(SP) : {:#06X}\n",
                     self.cpu.reg.pc,

@@ -1,10 +1,11 @@
+use crate::monitor::MonitorCmd;
 use std::{io::Write, io::stdin, io::stdout, sync::mpsc, thread, time::Duration};
 
 use crate::machine::MachineError;
 
-pub fn launch(cmd_channel: mpsc::Sender<(String, String, String)>) -> Result<(), MachineError> {
+pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result<(), MachineError> {
     thread::Builder::new().name(String::from("Console")).spawn(
-        move || -> Result<(), mpsc::SendError<(String, String, String)>> {
+        move || -> Result<(), mpsc::SendError<(MonitorCmd, String, String)>> {
             loop {
                 print!("> ");
                 if stdout().flush().is_err() {
@@ -17,7 +18,13 @@ pub fn launch(cmd_channel: mpsc::Sender<(String, String, String)>) -> Result<(),
                 };
 
                 let mut parts = input.split_whitespace();
-                let command = parts.next().unwrap_or_default().to_string();
+                let command = match parts.next().unwrap_or_default().to_string().as_str() {
+                    "h" => MonitorCmd::Help,
+                    "r" => MonitorCmd::Registers,
+                    "p" => MonitorCmd::Pause,
+                    "g" => MonitorCmd::Resume,
+                    _ => MonitorCmd::Resume,
+                };
                 let arg = parts.next().unwrap_or_default().to_string();
                 let arg2 = parts.next().unwrap_or_default().to_string();
 
