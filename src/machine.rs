@@ -201,7 +201,7 @@ impl Machine {
             }
             MonitorCmd::Registers => {
                 print!(
-                    "PC :{:#06X}\tSP : {:#06X}\nS : {}\tZ : {}\tH : {}\tP : {}\tN : {}\tC : {}\nB : {:#04X}\tC : {:#04X}\nD : {:#04X}\tE : {:#04X}\nH : {:#04X}\tL : {:#04X}\nA : {:#04X}\t(SP) : {:#06X}\n",
+                    "PC :{:#06X}\tSP : {:#06X}\nS : {}\tZ : {}\tH : {}\tP : {}\tN : {}\tC : {}\nB : {:#04X}\tC : {:#04X}\nD : {:#04X}\tE : {:#04X}\nH : {:#04X}\tL : {:#04X}\nA : {:#04X}\t(SP) : {:#06X}\nIFF1 : {}\tIFF2 : {}\tIM : {}\nPending INT : {}\tPending NMI : {}\n",
                     self.cpu.reg.pc,
                     self.cpu.reg.sp,
                     self.cpu.reg.flags.s as i32,
@@ -217,7 +217,12 @@ impl Machine {
                     self.cpu.reg.h,
                     self.cpu.reg.l,
                     self.cpu.reg.a,
-                    self.bus.read_word(self.cpu.reg.sp)
+                    self.bus.read_word(self.cpu.reg.sp),
+                    self.cpu.iff1(),
+                    self.cpu.iff2(),
+                    self.cpu.im(),
+                    self.cpu.has_pending_int(),
+                    self.cpu.has_pending_nmi()
                 )
             }
             _ => {}
