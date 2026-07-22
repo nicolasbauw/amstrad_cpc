@@ -1,5 +1,5 @@
 - implémenter la console debugger (voir DEBUGGER.md)
-- pourquoi la rom de diag commence par l'itération 222
+- pourquoi la rom de diag commence par l'itération 222 (0xDE) (stocké en RAM adresse 0x81f0)
 - pourquoi la rom de diag détecte des ROMs UNKNOWN
 - finir l'interfaçage du clavier avec le reste
 - Après le test des ROMs il y a un message "press any key" qui passe sans action sur le clavier
