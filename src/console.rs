@@ -18,17 +18,37 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                 };
 
                 let mut parts = input.split_whitespace();
-                let command = match parts.next().unwrap_or_default().to_string().as_str() {
-                    "h" => MonitorCmd::Help,
+                let cmd_part = parts.next().unwrap_or_default().to_string();
+                let arg = parts.next().unwrap_or_default().to_string();
+                let arg2 = parts.next().unwrap_or_default().to_string();
+
+                let command = match cmd_part.as_str() {
+                    "h" | "help" => MonitorCmd::Help,
                     "r" => MonitorCmd::Registers,
                     "p" => MonitorCmd::Pause,
                     "g" => MonitorCmd::Resume,
-                    "m" => MonitorCmd::ReadMem,
+                    "hw" => MonitorCmd::Hardware,
+                    "l" => MonitorCmd::StepLine,
+                    "d" => MonitorCmd::Disassemble,
+                    "j" => MonitorCmd::Jump,
+                    "f" => MonitorCmd::RemoveBreakpoint,
+                    "b" => {
+                        if arg.is_empty() {
+                            MonitorCmd::ListBreakpoints
+                        } else {
+                            MonitorCmd::AddBreakpoint
+                        }
+                    }
+                    "m" => {
+                        if arg2.is_empty() {
+                            MonitorCmd::ReadMem
+                        } else {
+                            MonitorCmd::WriteMem
+                        }
+                    }
                     "s" => MonitorCmd::SearchMem,
                     _ => MonitorCmd::Help,
                 };
-                let arg = parts.next().unwrap_or_default().to_string();
-                let arg2 = parts.next().unwrap_or_default().to_string();
 
                 cmd_channel.send((command, arg, arg2))?;
                 thread::sleep(Duration::from_millis(100));
