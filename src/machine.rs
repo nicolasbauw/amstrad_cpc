@@ -187,6 +187,23 @@ impl Machine {
         elapsed_ticks
     }
 
+    /// Renvoie une description textuelle de la banque active pour une adresse donnée
+    // TODO déplacer cette foction dans memory.rs
+    pub fn get_address_source_info(&self, addr: u16) -> String {
+        if addr < 0x4000 && self.bus.memory.rom_low_enabled {
+            "ROM Low".to_string()
+        } else if addr >= 0xC000
+            && self.bus.memory.rom_high_enabled
+            && self.bus.memory.rom_high_present[self.bus.memory.selected_high_rom as usize]
+        {
+            format!("ROM High {}", self.bus.memory.selected_high_rom)
+        } else {
+            let phys_addr = self.bus.memory.get_ram_physical_address(addr);
+            let bank = phys_addr / 16384;
+            format!("RAM bank {}", bank)
+        }
+    }
+
     pub fn console_handle(&mut self) -> Result<(), Box<dyn Error>> {
         let (command, arg, arg2) = self.cmd_channel.1.try_recv()?;
 
@@ -231,7 +248,30 @@ impl Machine {
             }
             MonitorCmd::ReadMem => {
                 let a = arg.to_u16()?;
-                println!("{:04X}    {:02X}", a, self.bus.read_byte(a));
+                let val = self.bus.read_byte(a);
+                let source_str = self.get_address_source_info(a);
+                println!("{:04X}    {:02X} ({})", a, val, source_str);
+            }
+            MonitorCmd::WriteMem => {
+                let a = arg.to_u16()?;
+                let val = arg2.to_u8()?;
+                self.bus.write_byte(a, val);
+                let source_str = self.get_address_source_info(a);
+                println!("{:04X}    {:02X} ({})", a, val, source_str);
+            }
+            MonitorCmd::SearchMem => {
+                let val = arg.to_u8()?;
+                println!("Searching for byte {:#02X} in memory...", val);
+                let mut found_count = 0;
+                for addr in 0..=0xFFFF {
+                    let byte = self.bus.read_byte(addr);
+                    if byte == val {
+                        let source_str = self.get_address_source_info(addr);
+                        println!("  {:#06X} : {:#02X} ({})", addr, val, source_str);
+                        found_count += 1;
+                    }
+                }
+                println!("Total found: {} occurrences.", found_count);
             }
             _ => {}
         }
