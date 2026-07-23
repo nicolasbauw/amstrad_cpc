@@ -168,6 +168,11 @@ impl Machine {
             self.bus.gate_array.interrupt_requested = false;
         }
 
+        if self.breakpoints.contains(&self.cpu.reg.pc) {
+            self.stop();
+            //return 0;
+        }
+
         let ticks = self.cpu.execute(&mut self.bus);
         let elapsed_ticks = if ticks == 0 { 4 } else { ticks };
         self.total_ticks += elapsed_ticks as u64;
@@ -274,6 +279,25 @@ impl Machine {
                     }
                 }
                 println!("Total found: {} occurrences.", found_count);
+            }
+            MonitorCmd::ListBreakpoints => {
+                if self.breakpoints.is_empty() {
+                    println!("No breakpoints !")
+                }
+                for b in &self.breakpoints {
+                    println!("{:#06X}", b);
+                }
+            }
+            MonitorCmd::AddBreakpoint => {
+                let a = arg.to_u16()?;
+                self.breakpoints.insert(a);
+                println!("New breakpoint at {:#06X}", a);
+            }
+            MonitorCmd::RemoveBreakpoint => {
+                let a = arg.to_u16()?;
+                if self.breakpoints.remove(&a) {
+                    println!("Breakpoint at {:#06X} removed", a);
+                }
             }
             _ => {}
         }
