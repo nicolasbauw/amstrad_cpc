@@ -29,6 +29,7 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                     "g" => MonitorCmd::Resume,
                     "hw" => MonitorCmd::Hardware,
                     "l" => MonitorCmd::StepLine,
+                    "n" => MonitorCmd::Step,
                     "d" => MonitorCmd::Disassemble,
                     "j" => MonitorCmd::Jump,
                     "f" => MonitorCmd::RemoveBreakpoint,

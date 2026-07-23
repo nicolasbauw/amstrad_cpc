@@ -4,7 +4,7 @@ pub enum MonitorCmd {
     WriteMem,
     SearchMem,
     Jump,
-    //Step,
+    Step,
     StepLine,
     ListBreakpoints,
     AddBreakpoint,
