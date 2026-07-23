@@ -16,6 +16,8 @@ Monitor commands:
     m 0xeeee        displays memory content at address 0xeeee
     m 0xeeee 0xaa   sets memory address 0xeeee to the 0xaa value
     s 0xaa          searches for a byte in memory
+    n               steps to next Z80 instruction
+    l               steps to next video line
     j 0x0000        jumps to 0x0000 address
     b               displays set breakpoints
     b 0x0002        sets a breakpoint at address 0x0002
