@@ -79,11 +79,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let mut frame_ticks: u32 = 0;
-        if machine.is_running() {
-            while frame_ticks < ticks_per_frame {
-                frame_ticks += machine.step();
+
+        while frame_ticks < ticks_per_frame {
+            if machine.is_running() {
+                frame_ticks += machine.step()
+            } else {
+                break;
             }
         }
+
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 

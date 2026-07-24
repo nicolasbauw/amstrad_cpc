@@ -170,7 +170,7 @@ impl Machine {
 
         if self.breakpoints.contains(&self.cpu.reg.pc) {
             self.stop();
-            //return 0;         // <-- this one freezes the complete program
+            return 0; // <-- this one freezes the complete program
         }
 
         let ticks = self.cpu.execute(&mut self.bus);
