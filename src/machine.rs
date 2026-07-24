@@ -85,6 +85,7 @@ pub struct Machine {
     ),
     breakpoints: HashSet<u16>,
     running: bool,
+    stopped_at_breakpoint: bool,
 }
 
 impl Machine {
@@ -103,6 +104,7 @@ impl Machine {
             cmd_channel: mpsc::channel(),
             breakpoints: HashSet::new(),
             running: true,
+            stopped_at_breakpoint: false,
         };
         crate::console::launch(m.cmd_channel.0.clone()).unwrap();
         m
@@ -168,11 +170,17 @@ impl Machine {
             self.bus.gate_array.interrupt_requested = false;
         }
 
-        if self.breakpoints.contains(&self.cpu.reg.pc) {
+        if (self.breakpoints.contains(&self.cpu.reg.pc) && self.stopped_at_breakpoint == false) {
             self.stop();
-            return 0; // <-- this one freezes the complete program
+            self.stopped_at_breakpoint = true;
+            print!(
+                "\nBreakpoint reached at {:#06X} (Total Ticks: {})\n",
+                current_pc, self.total_ticks
+            );
+            return 0;
         }
 
+        self.stopped_at_breakpoint = false;
         let ticks = self.cpu.execute(&mut self.bus);
         let elapsed_ticks = if ticks == 0 { 4 } else { ticks };
         self.total_ticks += elapsed_ticks as u64;
