@@ -25,6 +25,7 @@ Monitor commands:
     p               pause execution
     g               resume execution after the \"p\" command, or a breakpoint,
                     has been used to halt execution
+    hw              displays Gate Array and CRTC status
     r               displays the contents of flags, registers and interrupts";
 
 #[derive(Debug, PartialEq, Eq, Clone)]
