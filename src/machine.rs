@@ -171,7 +171,7 @@ impl Machine {
             self.bus.gate_array.interrupt_requested = false;
         }
 
-        if (self.breakpoints.contains(&self.cpu.reg.pc) && self.stopped_at_breakpoint == false) {
+        if self.breakpoints.contains(&self.cpu.reg.pc) && !self.stopped_at_breakpoint {
             self.stop();
             self.stopped_at_breakpoint = true;
             print!(
