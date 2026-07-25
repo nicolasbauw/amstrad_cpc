@@ -520,6 +520,14 @@ impl Machine {
                     println!("Breakpoint at {:#06X} removed", a);
                 }
             }
+            MonitorCmd::Disassemble => {
+                let mut a = arg.to_u16()?;
+                for _ in 0..=20 {
+                    let d = zilog_z80::dasm::dasm(&self.bus, a);
+                    println!("{:04X}    {}", a, d.0);
+                    a += (d.1) as u16;
+                }
+            }
             _ => {}
         }
         Ok(())
