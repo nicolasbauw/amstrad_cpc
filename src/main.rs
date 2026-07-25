@@ -67,6 +67,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     keycode: Some(key), ..
                 } => {
                     machine.bus.psg.set_key_state(key, true);
+                    if machine.waiting_for_key {
+                        machine.print_hardware_status(true);
+                        machine.waiting_for_key = false;
+                    }
                 }
                 // Événements de relâchement de touches
                 Event::KeyUp {

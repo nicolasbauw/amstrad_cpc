@@ -26,6 +26,7 @@ Monitor commands:
     g               resume execution after the \"p\" command, or a breakpoint,
                     has been used to halt execution
     hw              displays Gate Array and CRTC status
+    hw kb           keyboard test
     r               displays the contents of flags, registers and interrupts";
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -87,6 +88,7 @@ pub struct Machine {
     breakpoints: HashSet<u16>,
     running: bool,
     stopped_at_breakpoint: bool,
+    pub waiting_for_key: bool,
 }
 
 impl Machine {
@@ -106,6 +108,7 @@ impl Machine {
             breakpoints: HashSet::new(),
             running: true,
             stopped_at_breakpoint: false,
+            waiting_for_key: false,
         };
         crate::console::launch(m.cmd_channel.0.clone()).unwrap();
         m
@@ -250,6 +253,194 @@ impl Machine {
         );
     }
 
+    pub fn print_hardware_status(&mut self, show_kb: bool) {
+        println!("=== CPC Hardware Status ===");
+
+        // --- GATE ARRAY & MEMORY CONFIG ---
+        println!("\n[Gate Array & Memory]");
+        println!("  Video Mode         : {}", self.bus.gate_array.video_mode);
+        println!(
+            "  Selected Pen       : {}",
+            self.bus.gate_array.selected_pen
+        );
+        println!(
+            "  HSYNC Counter      : {}/52",
+            self.bus.gate_array.hsync_counter
+        );
+        println!(
+            "  Interrupt Requested: {}",
+            self.bus.gate_array.interrupt_requested
+        );
+        println!("  Low ROM Enabled    : {}", self.bus.memory.rom_low_enabled);
+        println!(
+            "  High ROM Enabled   : {}",
+            self.bus.memory.rom_high_enabled
+        );
+        println!(
+            "  Selected High ROM  : {}",
+            self.bus.memory.selected_high_rom
+        );
+        println!(
+            "  RAM Configuration  : Bank Config {}",
+            self.bus.memory.ram_config
+        );
+
+        // Affichage de la palette du Gate Array
+        print!("  Palette (HW index) : ");
+        for (i, val) in self.bus.gate_array.palette.iter().enumerate() {
+            if i == 16 {
+                print!("Border:{} ", val);
+            } else {
+                print!("Inks[{}]={} ", i, val);
+            }
+        }
+        println!();
+
+        // --- CRTC 6845 ---
+        println!("\n[CRTC 6845]");
+        println!(
+            "  Selected Register  : R{}",
+            self.bus.crtc.selected_register
+        );
+        print!("  Registers          : ");
+        for (i, val) in self.bus.crtc.registers.iter().enumerate() {
+            print!("R{}={:<3} ", i, val);
+            if i == 8 {
+                print!("\n                       ");
+            }
+        }
+        println!();
+
+        // --- PPI 8255 ---
+        println!("\n[PPI 8255]");
+        println!("  Port A (PSG Data)  : {:#04X}", self.bus.ppi.port_a);
+        println!(
+            "  Port B (System)    : {:#04X} (VSYNC: {})",
+            self.bus.ppi.port_b_input,
+            (self.bus.ppi.port_b_input & 0x01) != 0
+        );
+        println!(
+            "  Port C (Control)   : {:#04X} (PSG Control: {:#04X}, KB Line: {})",
+            self.bus.ppi.port_c,
+            self.bus.ppi.port_c & 0xC0,
+            self.bus.ppi.port_c & 0x0F
+        );
+        println!(
+            "  Control Register   : {:#04X}",
+            self.bus.ppi.control_register
+        );
+
+        // --- PSG AY-3-8912 ---
+        println!("\n[PSG AY-3-8912]");
+        println!("  Selected Register  : R{}", self.bus.psg.selected_register);
+        print!("  Registers          : ");
+        for (i, val) in self.bus.psg.registers.iter().enumerate() {
+            print!("R{}={:<3} ", i, val);
+            if i == 7 {
+                print!("\n                       ");
+            }
+        }
+        println!();
+
+        // --- KEYBOARD MATRIX ---
+        if show_kb {
+            println!("\n[Keyboard Matrix (Negative Logic: 0 = Pressed, 1 = Released)]");
+            println!(
+                "  Selected Keyboard Line: {}",
+                self.bus.psg.selected_keyboard_line
+            );
+            for line in 0..10 {
+                let val = self.bus.psg.keyboard_matrix[line];
+                print!("  Line {}: {:08b} (0x{:02X})", line, val, val);
+
+                // Si au moins un bit est à 0 (touche pressée)
+                if val != 0xFF {
+                    print!("  -> Pressed: ");
+                    let mut pressed_keys = Vec::new();
+                    for bit in 0..8 {
+                        if (val & (1 << bit)) == 0 {
+                            let key_name = match (line, bit) {
+                                (0, 7) => "Kp .",
+                                (0, 6) => "Kp Enter",
+                                (0, 5) => "F3",
+                                (0, 4) => "F6",
+                                (0, 3) => "F9",
+                                (0, 2) => "F5",
+                                (0, 1) => "F8",
+                                (0, 0) => "F7",
+
+                                (1, 6) => "Kp 0",
+                                (1, 5) => "F2",
+                                (1, 4) => "F1",
+                                (1, 2) => "F4",
+                                (1, 1) => "Shift",
+                                (1, 0) => "Ctrl",
+
+                                (2, 5) => "Cursor Left",
+                                (2, 3) => "Enter",
+                                (2, 2) => "Cursor Down",
+                                (2, 1) => "Cursor Right",
+                                (2, 0) => "Cursor Up",
+
+                                (3, 7) => "3",
+                                (3, 6) => "2",
+                                (3, 5) => "1",
+                                (3, 3) => "0",
+                                (3, 2) => "9",
+                                (3, 1) => "8",
+                                (3, 0) => "7",
+
+                                (4, 7) => "P",
+                                (4, 3) => "O",
+                                (4, 2) => "I",
+                                (4, 1) => "U",
+                                (4, 0) => "Y",
+
+                                (5, 7) => "L",
+                                (5, 6) => "K",
+                                (5, 5) => "J",
+                                (5, 4) => "H",
+                                (5, 3) => "M",
+                                (5, 2) => "N",
+                                (5, 1) => "B",
+                                (5, 0) => "V",
+
+                                (6, 7) => "T",
+                                (6, 6) => "R",
+                                (6, 5) => "E",
+                                (6, 4) => "W",
+                                (6, 3) => "Q",
+                                (6, 2) => "A",
+                                (6, 1) => "S",
+                                (6, 0) => "D",
+
+                                (7, 7) => "G",
+                                (7, 6) => "F",
+                                (7, 5) => "Z",
+                                (7, 4) => "X",
+                                (7, 3) => "C",
+                                (7, 2) => "Space",
+                                (7, 1) => "F11",
+                                (7, 0) => "Tab",
+
+                                (8, 7) => "4",
+                                (8, 6) => "5",
+                                (8, 5) => "6",
+                                (8, 2) => "Escape",
+                                _ => "Unknown",
+                            };
+                            pressed_keys.push(key_name);
+                        }
+                    }
+                    print!("{}", pressed_keys.join(", "));
+                }
+                println!();
+            }
+        } else {
+            println!("\n[Keyboard Matrix] (Hidden - use 'hw kb' or 'hw keyboard' to show)");
+        }
+    }
+
     pub fn console_handle(&mut self) -> Result<(), Box<dyn Error>> {
         let (command, arg, arg2) = self.cmd_channel.1.try_recv()?;
 
@@ -265,6 +456,15 @@ impl Machine {
             MonitorCmd::Resume => {
                 println!("Emulation resumed !");
                 self.start();
+            }
+            MonitorCmd::Hardware => {
+                let show_kb = arg == "kb" || arg == "keyboard";
+                if show_kb {
+                    self.waiting_for_key = true;
+                    println!("Waiting for a key press on the CPC window to show matrix status...");
+                } else {
+                    self.print_hardware_status(false);
+                }
             }
             MonitorCmd::Registers => {
                 self.print_registers();
