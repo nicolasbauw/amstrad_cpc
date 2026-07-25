@@ -310,6 +310,7 @@ impl Machine {
                 println!("New breakpoint at {:#06X}", a);
             }
             MonitorCmd::Step => {
+                println!("{}", (zilog_z80::dasm::dasm(&self.bus, self.cpu.reg.pc)).0);
                 self.step();
                 self.print_registers();
             }
