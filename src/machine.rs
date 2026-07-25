@@ -528,6 +528,10 @@ impl Machine {
                     a += (d.1) as u16;
                 }
             }
+            MonitorCmd::Jump => {
+                let a = arg.to_u16()?;
+                self.cpu.reg.pc = a;
+            }
             _ => {}
         }
         Ok(())
