@@ -50,6 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .resizable()
         .build()?;
     let mut debug_canvas = debug_window.into_canvas().build()?;
+    let debug_window_id = debug_canvas.window().id();
 
     // Titre dynamique de la fenêtre en fonction du mode configuré
     let window_title = if machine.diagnostic_mode {
@@ -63,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .position_centered()
         .build()?;
     let mut canvas = window.into_canvas().build()?;
+    let main_window_id = canvas.window().id();
     let texture_creator = canvas.texture_creator();
     let mut texture = texture_creator.create_texture_streaming(PixelFormatEnum::RGB24, 320, 200)?;
     let mut event_pump = sdl_context.event_pump()?;
@@ -77,6 +79,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match event {
                 Event::Quit { .. } => {
                     running = false;
+                }
+                Event::Window {
+                    win_event: sdl2::event::WindowEvent::Close,
+                    window_id,
+                    ..
+                } => {
+                    if window_id == debug_window_id {
+                        debug_visible = false;
+                        debug_canvas.window_mut().hide();
+                    } else if window_id == main_window_id {
+                        running = false;
+                    }
                 }
                 // Événements d'enfoncement de touches du clavier moderne PC
                 Event::KeyDown {
