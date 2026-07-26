@@ -24,6 +24,7 @@ Monitor commands:
     f 0x0002        \"frees\" (deletes) breakpoint at address 0x0002
     w               displays set watchpoints
     w 0xeeee        adds a write watchpoint at address 0xeeee
+    fw 0xeeee       removes watchpoint at address 0xeeee
     p               pause execution
     g               resume execution after the \"p\" command, or a breakpoint,
                     has been used to halt execution
@@ -581,6 +582,12 @@ impl Machine {
                 }
                 for w in &self.bus.watchpoints {
                     println!("{:#06X}", w);
+                }
+            }
+            MonitorCmd::RemoveWatchpoint => {
+                let a = arg.to_u16()?;
+                if self.bus.watchpoints.remove(&a) {
+                    println!("Watchpoint at {:#06X} removed", a);
                 }
             }
             MonitorCmd::Step => {

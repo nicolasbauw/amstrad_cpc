@@ -16,4 +16,5 @@ pub enum MonitorCmd {
     Disassemble,
     AddWatchpoint,
     ListWatchpoints,
+    RemoveWatchpoint,
 }
