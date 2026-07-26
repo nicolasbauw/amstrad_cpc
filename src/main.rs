@@ -94,6 +94,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 // Événements d'enfoncement de touches du clavier moderne PC
                 Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F10),
+                    keymod,
+                    ..
+                } => {
+                    if keymod.contains(sdl2::keyboard::Mod::LSHIFTMOD)
+                        || keymod.contains(sdl2::keyboard::Mod::RSHIFTMOD)
+                    {
+                        // Shift + F10 : Step Line
+                        let start_line = machine.current_line;
+                        while machine.current_line == start_line {
+                            let ticks = machine.step();
+                            if ticks == 0 {
+                                break;
+                            }
+                        }
+                        println!(
+                            "Stepped to next video line (Line {}).",
+                            machine.current_line
+                        );
+                        machine.print_registers();
+                    } else {
+                        // F10 : Step CPU
+                        println!(
+                            "{}",
+                            (zilog_z80::dasm::dasm(&machine.bus, machine.cpu.reg.pc)).0
+                        );
+                        machine.step();
+                        machine.print_registers();
+                    }
+                }
+                Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F12),
                     ..
                 } => {

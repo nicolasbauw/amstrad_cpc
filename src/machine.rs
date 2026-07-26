@@ -560,6 +560,17 @@ impl Machine {
                 self.step();
                 self.print_registers();
             }
+            MonitorCmd::StepLine => {
+                let start_line = self.current_line;
+                while self.current_line == start_line {
+                    let ticks = self.step();
+                    if ticks == 0 {
+                        break;
+                    }
+                }
+                println!("Stepped to next video line (Line {}).", self.current_line);
+                self.print_registers();
+            }
             MonitorCmd::RemoveBreakpoint => {
                 let a = arg.to_u16()?;
                 if self.breakpoints.remove(&a) {
@@ -578,7 +589,6 @@ impl Machine {
                 let a = arg.to_u16()?;
                 self.cpu.reg.pc = a;
             }
-            _ => {}
         }
         Ok(())
     }
