@@ -22,6 +22,8 @@ Monitor commands:
     b               displays set breakpoints
     b 0x0002        sets a breakpoint at address 0x0002
     f 0x0002        \"frees\" (deletes) breakpoint at address 0x0002
+    w               displays set watchpoints
+    w 0xeeee        adds a write watchpoint at address 0xeeee
     p               pause execution
     g               resume execution after the \"p\" command, or a breakpoint,
                     has been used to halt execution
@@ -186,6 +188,19 @@ impl Machine {
 
         self.stopped_at_breakpoint = false;
         let ticks = self.cpu.execute(&mut self.bus);
+
+        if let Some(addr) = self.bus.watchpoint_hit {
+            self.bus.watchpoint_hit = None;
+            self.stop();
+            println!(
+                "\nWatchpoint hit: write to {:#06X} at PC {:#06X}",
+                addr, current_pc
+            );
+            println!("{}", (zilog_z80::dasm::dasm(&self.bus, current_pc)).0);
+            self.print_registers();
+            return 0;
+        }
+
         let elapsed_ticks = if ticks == 0 { 4 } else { ticks };
         self.total_ticks += elapsed_ticks as u64;
 
@@ -554,6 +569,19 @@ impl Machine {
                 let a = arg.to_u16()?;
                 self.breakpoints.insert(a);
                 println!("New breakpoint at {:#06X}", a);
+            }
+            MonitorCmd::AddWatchpoint => {
+                let a = arg.to_u16()?;
+                self.bus.watchpoints.insert(a);
+                println!("New watchpoint at {:#06X}", a);
+            }
+            MonitorCmd::ListWatchpoints => {
+                if self.bus.watchpoints.is_empty() {
+                    println!("No watchpoints !")
+                }
+                for w in &self.bus.watchpoints {
+                    println!("{:#06X}", w);
+                }
             }
             MonitorCmd::Step => {
                 println!("{}", (zilog_z80::dasm::dasm(&self.bus, self.cpu.reg.pc)).0);

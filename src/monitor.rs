@@ -14,4 +14,6 @@ pub enum MonitorCmd {
     Resume,
     Pause,
     Disassemble,
+    AddWatchpoint,
+    ListWatchpoints,
 }

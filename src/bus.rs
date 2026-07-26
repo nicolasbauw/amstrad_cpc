@@ -5,6 +5,8 @@ use crate::ppi::Ppi;
 use crate::psg::Psg;
 use zilog_z80::bus::Bus;
 
+use std::collections::HashSet;
+
 /// Le Bus système du CPC qui interconnecte tous les composants matériels.
 pub struct CpcBus {
     pub memory: Memory,
@@ -12,6 +14,8 @@ pub struct CpcBus {
     pub crtc: Crtc,
     pub psg: Psg,
     pub ppi: Ppi,
+    pub watchpoints: HashSet<u16>,
+    pub watchpoint_hit: Option<u16>,
 }
 
 impl CpcBus {
@@ -23,6 +27,8 @@ impl CpcBus {
             crtc: Crtc::new(),
             psg: Psg::new(),
             ppi: Ppi::new(),
+            watchpoints: HashSet::new(),
+            watchpoint_hit: None,
         }
     }
 }
@@ -35,6 +41,9 @@ impl Bus for CpcBus {
 
     /// Écriture mémoire routée vers la structure Memory
     fn write_byte(&mut self, address: u16, value: u8) {
+        if self.watchpoints.contains(&address) {
+            self.watchpoint_hit = Some(address);
+        }
         self.memory.write_byte(address, value)
     }
 

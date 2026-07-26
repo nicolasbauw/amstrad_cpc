@@ -33,6 +33,13 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                     "d" => MonitorCmd::Disassemble,
                     "j" => MonitorCmd::Jump,
                     "f" => MonitorCmd::RemoveBreakpoint,
+                    "w" => {
+                        if arg.is_empty() {
+                            MonitorCmd::ListWatchpoints
+                        } else {
+                            MonitorCmd::AddWatchpoint
+                        }
+                    }
                     "b" => {
                         if arg.is_empty() {
                             MonitorCmd::ListBreakpoints
