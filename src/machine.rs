@@ -223,12 +223,16 @@ impl Machine {
         }
     }
 
-    pub fn print_registers(&mut self) {
+    pub fn get_registers_string(&mut self) -> String {
         let pc = self.cpu.reg.pc;
         let sp = self.cpu.reg.sp;
         let word_at_sp = self.bus.read_word(sp);
-        print!(
-            "PC :{:#06X}\tSP : {:#06X}\nS : {}\tZ : {}\tH : {}\tP : {}\tN : {}\tC : {}\nB : {:#04X}\tC : {:#04X}\nD : {:#04X}\tE : {:#04X}\nH : {:#04X}\tL : {:#04X}\nA : {:#04X}\t(SP) : {:#06X}\nIFF1 : {}\tIFF2 : {}\tIM : {}\nPending INT : {}\tPending NMI : {}\n",
+        format!(
+            "=== REGISTERS & STATUS ===\n\
+             PC :{:#06X}   SP : {:#06X}\n\
+             S : {}  Z : {}  H : {}  P : {}  N : {}  C : {}\n\
+             B : {:#04X}  C : {:#04X}  D : {:#04X}  E : {:#04X}  H : {:#04X}  L : {:#04X}  A : {:#04X}\n\
+             (SP) : {:#06X}  IFF1 : {}  IFF2 : {}  IM : {}  Pending INT : {}  Pending NMI : {}\n",
             pc,
             sp,
             self.cpu.reg.flags.s as i32,
@@ -250,112 +254,145 @@ impl Machine {
             self.cpu.im(),
             self.cpu.has_pending_int(),
             self.cpu.has_pending_nmi()
-        );
+        )
     }
 
-    pub fn print_hardware_status(&mut self, show_kb: bool) {
-        println!("=== CPC Hardware Status ===");
+    pub fn print_registers(&mut self) {
+        print!("{}", self.get_registers_string());
+    }
+
+    pub fn get_hardware_string(&mut self, show_kb: bool) -> String {
+        use std::fmt::Write;
+        let mut s = String::new();
+
+        let _ = writeln!(s, "=== CPC HARDWARE STATUS ===");
 
         // --- GATE ARRAY & MEMORY CONFIG ---
-        println!("\n[Gate Array & Memory]");
-        println!("  Video Mode         : {}", self.bus.gate_array.video_mode);
-        println!(
+        let _ = writeln!(s, "\n[Gate Array & Memory]");
+        let _ = writeln!(
+            s,
+            "  Video Mode         : {}",
+            self.bus.gate_array.video_mode
+        );
+        let _ = writeln!(
+            s,
             "  Selected Pen       : {}",
             self.bus.gate_array.selected_pen
         );
-        println!(
+        let _ = writeln!(
+            s,
             "  HSYNC Counter      : {}/52",
             self.bus.gate_array.hsync_counter
         );
-        println!(
+        let _ = writeln!(
+            s,
             "  Interrupt Requested: {}",
             self.bus.gate_array.interrupt_requested
         );
-        println!("  Low ROM Enabled    : {}", self.bus.memory.rom_low_enabled);
-        println!(
+        let _ = writeln!(
+            s,
+            "  Low ROM Enabled    : {}",
+            self.bus.memory.rom_low_enabled
+        );
+        let _ = writeln!(
+            s,
             "  High ROM Enabled   : {}",
             self.bus.memory.rom_high_enabled
         );
-        println!(
+        let _ = writeln!(
+            s,
             "  Selected High ROM  : {}",
             self.bus.memory.selected_high_rom
         );
-        println!(
+        let _ = writeln!(
+            s,
             "  RAM Configuration  : Bank Config {}",
             self.bus.memory.ram_config
         );
 
         // Affichage de la palette du Gate Array
-        print!("  Palette (HW index) : ");
+        let _ = write!(s, "  Palette (HW index) : ");
         for (i, val) in self.bus.gate_array.palette.iter().enumerate() {
             if i == 16 {
-                print!("Border:{} ", val);
+                let _ = write!(s, "Border:{} ", val);
             } else {
-                print!("Inks[{}]={} ", i, val);
+                let _ = write!(s, "Inks[{}]={} ", i, val);
             }
         }
-        println!();
+        let _ = writeln!(s);
 
         // --- CRTC 6845 ---
-        println!("\n[CRTC 6845]");
-        println!(
+        let _ = writeln!(s, "\n[CRTC 6845]");
+        let _ = writeln!(
+            s,
             "  Selected Register  : R{}",
             self.bus.crtc.selected_register
         );
-        print!("  Registers          : ");
+        let _ = write!(s, "  Registers          : ");
         for (i, val) in self.bus.crtc.registers.iter().enumerate() {
-            print!("R{}={:<3} ", i, val);
+            let _ = write!(s, "R{}={:<3} ", i, val);
             if i == 8 {
-                print!("\n                       ");
+                let _ = write!(s, "\n                       ");
             }
         }
-        println!();
+        let _ = writeln!(s);
 
         // --- PPI 8255 ---
-        println!("\n[PPI 8255]");
-        println!("  Port A (PSG Data)  : {:#04X}", self.bus.ppi.port_a);
-        println!(
+        let _ = writeln!(s, "\n[PPI 8255]");
+        let _ = writeln!(s, "  Port A (PSG Data)  : {:#04X}", self.bus.ppi.port_a);
+        let _ = writeln!(
+            s,
             "  Port B (System)    : {:#04X} (VSYNC: {})",
             self.bus.ppi.port_b_input,
             (self.bus.ppi.port_b_input & 0x01) != 0
         );
-        println!(
+        let _ = writeln!(
+            s,
             "  Port C (Control)   : {:#04X} (PSG Control: {:#04X}, KB Line: {})",
             self.bus.ppi.port_c,
             self.bus.ppi.port_c & 0xC0,
             self.bus.ppi.port_c & 0x0F
         );
-        println!(
+        let _ = writeln!(
+            s,
             "  Control Register   : {:#04X}",
             self.bus.ppi.control_register
         );
 
         // --- PSG AY-3-8912 ---
-        println!("\n[PSG AY-3-8912]");
-        println!("  Selected Register  : R{}", self.bus.psg.selected_register);
-        print!("  Registers          : ");
+        let _ = writeln!(s, "\n[PSG AY-3-8912]");
+        let _ = writeln!(
+            s,
+            "  Selected Register  : R{}",
+            self.bus.psg.selected_register
+        );
+        let _ = write!(s, "  Registers          : ");
         for (i, val) in self.bus.psg.registers.iter().enumerate() {
-            print!("R{}={:<3} ", i, val);
+            let _ = write!(s, "R{}={:<3} ", i, val);
             if i == 7 {
-                print!("\n                       ");
+                let _ = write!(s, "\n                       ");
             }
         }
-        println!();
+        let _ = writeln!(s);
 
         // --- KEYBOARD MATRIX ---
         if show_kb {
-            println!("\n[Keyboard Matrix (Negative Logic: 0 = Pressed, 1 = Released)]");
-            println!(
+            let _ = writeln!(
+                s,
+                "\n[Keyboard Matrix (Negative Logic: 0 = Pressed, 1 = Released)]"
+            );
+            let _ = writeln!(
+                s,
                 "  Selected Keyboard Line: {}",
                 self.bus.psg.selected_keyboard_line
             );
             for line in 0..10 {
                 let val = self.bus.psg.keyboard_matrix[line];
-                print!("  Line {}: {:08b} (0x{:02X})", line, val, val);
+                let _ = write!(s, "  Line {}: {:08b} (0x{:02X})", line, val, val);
 
                 // Si au moins un bit est à 0 (touche pressée)
                 if val != 0xFF {
-                    print!("  -> Pressed: ");
+                    let _ = write!(s, "  -> Pressed: ");
                     let mut pressed_keys = Vec::new();
                     for bit in 0..8 {
                         if (val & (1 << bit)) == 0 {
@@ -432,13 +469,22 @@ impl Machine {
                             pressed_keys.push(key_name);
                         }
                     }
-                    print!("{}", pressed_keys.join(", "));
+                    let _ = write!(s, "{}", pressed_keys.join(", "));
                 }
-                println!();
+                let _ = writeln!(s);
             }
         } else {
-            println!("\n[Keyboard Matrix] (Hidden - use 'hw kb' or 'hw keyboard' to show)");
+            let _ = writeln!(
+                s,
+                "\n[Keyboard Matrix] (Hidden - use 'hw kb' or 'hw keyboard' to show)"
+            );
         }
+
+        s
+    }
+
+    pub fn print_hardware_status(&mut self, show_kb: bool) {
+        print!("{}", self.get_hardware_string(show_kb));
     }
 
     pub fn console_handle(&mut self) -> Result<(), Box<dyn Error>> {

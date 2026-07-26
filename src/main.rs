@@ -35,6 +35,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
 
+    // 4. Initialisation de SDL_ttf pour le debugger
+    let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
+    let font_path = "/usr/share/fonts/noto/NotoSansMono-Regular.ttf";
+    let font = ttf_context
+        .load_font(font_path, 13)
+        .map_err(|e| e.to_string())?;
+
+    let mut debug_visible = false;
+    let debug_window = video_subsystem
+        .window("Amstrad CPC 6128 - Debugger", 800, 750)
+        .position_centered()
+        .hidden()
+        .resizable()
+        .build()?;
+    let mut debug_canvas = debug_window.into_canvas().build()?;
+
     // Titre dynamique de la fenêtre en fonction du mode configuré
     let window_title = if machine.diagnostic_mode {
         "Amstrad CPC 6128 - Noël Llopis Diagnostic"
@@ -63,6 +79,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     running = false;
                 }
                 // Événements d'enfoncement de touches du clavier moderne PC
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F12),
+                    ..
+                } => {
+                    debug_visible = !debug_visible;
+                    if debug_visible {
+                        debug_canvas.window_mut().show();
+                    } else {
+                        debug_canvas.window_mut().hide();
+                    }
+                }
                 Event::KeyDown {
                     keycode: Some(key), ..
                 } => {
@@ -99,6 +126,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = canvas.clear();
         let _ = canvas.copy(&texture, None, None);
         canvas.present();
+
+        if debug_visible {
+            // Rendu en temps réel du debugger sur la deuxième fenêtre
+            debug_canvas.set_draw_color(sdl2::pixels::Color::RGB(15, 15, 25)); // Bleu nuit
+            debug_canvas.clear();
+
+            let mut debug_text = String::new();
+            debug_text.push_str(&machine.get_registers_string());
+            debug_text.push_str("\n");
+            debug_text.push_str(&machine.get_hardware_string(true)); // Afficher la matrice clavier en tps réel !
+
+            let texture_creator_debug = debug_canvas.texture_creator();
+            let mut y = 10;
+            let line_height = 16;
+
+            for line in debug_text.lines() {
+                let formatted_line = line.replace('\t', "    ");
+                if !formatted_line.trim().is_empty() {
+                    let surface = font
+                        .render(&formatted_line)
+                        .blended(sdl2::pixels::Color::RGB(220, 220, 225))
+                        .map_err(|e| e.to_string())?;
+                    let texture = texture_creator_debug
+                        .create_texture_from_surface(&surface)
+                        .map_err(|e| e.to_string())?;
+
+                    let query = texture.query();
+                    let target_rect = sdl2::rect::Rect::new(15, y, query.width, query.height);
+                    let _ = debug_canvas.copy(&texture, None, Some(target_rect));
+                }
+                y += line_height;
+            }
+            debug_canvas.present();
+        }
 
         frame_count += 1;
         /*if frame_count % 150 == 0 {
