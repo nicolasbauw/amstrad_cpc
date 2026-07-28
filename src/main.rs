@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Titre dynamique de la fenêtre en fonction du mode configuré
     let window_title = if machine.diagnostic_mode {
-        "Amstrad CPC 6128 - Noël Llopis Diagnostic"
+        "Amstrad CPC 6128 - Diag ROM"
     } else {
         "Amstrad CPC 6128 - BASIC 1.1 AZERTY"
     };
@@ -136,10 +136,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Event::KeyDown {
                     keycode: Some(key),
-                    scancode,
+                    //scancode,
                     ..
                 } => {
-                    println!("SDL Key Pressed: {:?} (Scancode: {:?})", key, scancode); // DEBUG
+                    //println!("SDL Key Pressed: {:?} (Scancode: {:?})", key, scancode); // DEBUG
                     machine.bus.psg.set_key_state(key, true);
                     if machine.waiting_for_key {
                         machine.print_hardware_status(true);
