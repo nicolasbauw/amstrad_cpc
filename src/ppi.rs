@@ -68,7 +68,22 @@ impl Ppi {
             }
             3 => {
                 // Registre de contrôle ($F7xx)
-                self.control_register = value;
+                if (value & 0x80) == 0 {
+                    // Mode "Bit Set/Reset" pour le Port C
+                    let bit_to_modify = (value >> 1) & 0x07;
+                    let bit_value = value & 0x01;
+                    if bit_value != 0 {
+                        self.port_c |= 1 << bit_to_modify;
+                    } else {
+                        self.port_c &= !(1 << bit_to_modify);
+                    }
+                    // Mettre à jour la ligne de clavier et synchroniser le PSG
+                    psg.selected_keyboard_line = self.port_c & 0x0F;
+                    self.sync_psg(psg);
+                } else {
+                    // Mode de configuration standard de direction des ports
+                    self.control_register = value;
+                }
             }
             _ => {}
         }
