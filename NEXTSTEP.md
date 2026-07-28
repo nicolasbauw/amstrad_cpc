@@ -1,3 +1,4 @@
+- Voir pourquoi la Diag ROM reboot en boucle et ne reste pas en attente dans le menu (lié à la lecture clavier ? ou aux fonctions IO ?)
 - finir (débugger ?) l'interfaçage du clavier avec le reste
 - Après le test des ROMs il y a un message "press any key" qui passe sans action sur le clavier --> probablement lié au point ci-dessus
 - pourquoi la rom de diag détecte des ROMs UNKNOWN --> à retester suite MAJ zilog_z80
