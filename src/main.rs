@@ -16,7 +16,7 @@ use sdl2::pixels::PixelFormatEnum;
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Émulateur Amstrad CPC 6128 ===");
+    println!("=== Amstrad CPC 6128 ===");
 
     // 1. Analyse des arguments de la ligne de commande pour le choix du mode
     let args: Vec<String> = env::args().collect();
