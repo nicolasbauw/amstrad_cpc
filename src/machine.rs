@@ -248,6 +248,7 @@ impl Machine {
              PC :{:#06X}   SP : {:#06X}\n\
              S : {}  Z : {}  H : {}  P : {}  N : {}  C : {}\n\
              B : {:#04X}  C : {:#04X}  D : {:#04X}  E : {:#04X}  H : {:#04X}  L : {:#04X}  A : {:#04X}\n\
+             IXH : {:#04X}  IXL : {:#04X}  IYH : {:#04X}  IYL : {:#04X}\n\
              (SP) : {:#06X}  IFF1 : {}  IFF2 : {}  IM : {}  Pending INT : {}  Pending NMI : {}\n",
             pc,
             sp,
@@ -264,6 +265,10 @@ impl Machine {
             self.cpu.reg.h,
             self.cpu.reg.l,
             self.cpu.reg.a,
+            self.cpu.reg.ixh,
+            self.cpu.reg.ixl,
+            self.cpu.reg.iyh,
+            self.cpu.reg.iyl,
             word_at_sp,
             self.cpu.iff1(),
             self.cpu.iff2(),
