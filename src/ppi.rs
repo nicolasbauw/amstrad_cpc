@@ -27,8 +27,8 @@ impl Ppi {
         match (port >> 8) & 0x03 {
             0 => {
                 // Port A ($F4xx) : Lire les données du PSG si configuré en entrée
-                // Si le port C applique "Lire registre" (bits 7 et 6 à 10, soit 0x80)
-                if (self.port_c & 0xC0) == 0x80 {
+                // Si le port C applique "Lire registre" (BDIR=0, BC1=1, soit 0x40)
+                if (self.port_c & 0xC0) == 0x40 {
                     psg.read_current_register()
                 } else {
                     self.port_a
@@ -84,11 +84,11 @@ impl Ppi {
         let psg_control = self.port_c & 0xC0;
         match psg_control {
             0xC0 => {
-                // 11 : Sélectionner le registre actif du PSG
+                // 11 (0xC0) : Sélectionner le registre actif du PSG
                 psg.selected_register = self.port_a;
             }
-            0x40 => {
-                // 01 : Écrire dans le registre sélectionné du PSG
+            0x80 => {
+                // 10 (0x80) : Écrire dans le registre sélectionné du PSG
                 psg.write_current_register(self.port_a);
             }
             _ => {}
