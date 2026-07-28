@@ -72,10 +72,10 @@ impl Memory {
     }
 
     /// Lecture directe de la RAM (utilisée par le moteur vidéo pour ignorer le banking ROM)
-    pub fn read_ram_byte(&self, address: u16) -> u8 {
+    /* pub fn read_ram_byte(&self, address: u16) -> u8 {
         let physical_addr = self.get_ram_physical_address(address);
         self.ram[physical_addr]
-    }
+    } */
 
     /// Lecture d'un octet en fonction du banking actif (RAM + ROM).
     pub fn read_byte(&self, address: u16) -> u8 {

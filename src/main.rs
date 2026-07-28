@@ -72,7 +72,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut frame_buffer = [0u8; 320 * 200 * 3];
     let ticks_per_frame: u32 = 79_872;
     let mut running = true;
-    let mut frame_count: u64 = 0;
 
     while running {
         for event in event_pump.poll_iter() {
@@ -136,8 +135,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Event::KeyDown {
-                    keycode: Some(key), ..
+                    keycode: Some(key),
+                    scancode,
+                    ..
                 } => {
+                    println!("SDL Key Pressed: {:?} (Scancode: {:?})", key, scancode); // DEBUG
                     machine.bus.psg.set_key_state(key, true);
                     if machine.waiting_for_key {
                         machine.print_hardware_status(true);
@@ -206,13 +208,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             debug_canvas.present();
         }
 
-        frame_count += 1;
-        /*if frame_count % 150 == 0 {
-            println!(
-                "Statistiques : {} frames affichées (Total Ticks: {}, Ligne: {})",
-                frame_count, machine.total_ticks, machine.current_line
-            );
-        }*/
         machine.console_handle().unwrap_or_default();
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
