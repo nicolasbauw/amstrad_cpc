@@ -1,4 +1,3 @@
-- compléter le clavier, corriger la vue hw
 - pourquoi la rom de diag détecte des ROMs UNKNOWN ? et ne détecte pas les ROMs lower et upper ?
-- voir pour qu'il indique autre chose que "unknown cpc" comme modèle
+- voir pour qu'il indique autre chose que "unknown cpc" comme modèle (il faut que les ROMs système soient présentes je pense)
 - se renseigner sur le fonctionnement du BORDER, et l'implémenter
