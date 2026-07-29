@@ -37,7 +37,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Initialisation de SDL_ttf pour le debugger
     let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
-    let font_path = "/usr/share/fonts/noto/NotoSansMono-Regular.ttf";
+    let home_dir = std::env::var("HOME")?;
+    let font_path = if cfg!(target_os = "macos") {
+        home_dir+"/Library/Fonts/NotoSansMono-Regular.ttf"
+    } else {
+        "/usr/share/fonts/noto/NotoSansMono-Regular.ttf".to_string()
+    };
+    
     let font = ttf_context
         .load_font(font_path, 13)
         .map_err(|e| e.to_string())?;
