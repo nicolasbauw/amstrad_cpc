@@ -203,7 +203,8 @@ impl Machine {
 
             // VSYNC actif entre les lignes 280 et 284
             let vsync = self.current_line >= 280 && self.current_line < 284;
-            self.bus.ppi.set_vsync(vsync);
+            // On force le bit 1 à 1 pour lire Joystick A par défaut
+            self.bus.ppi.set_system_port_b(vsync, true);
 
             if self.bus.gate_array.step_hsync() {
                 self.cpu.int_request(0xFF);

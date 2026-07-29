@@ -1,11 +1,12 @@
 use sdl2::keyboard::{Keycode, Scancode};
 
-/// Émulation de la puce sonore AY-3-8910 (PSG) et de la matrice du clavier de l'Amstrad CPC.
+// Émulation de la puce sonore AY-3-8910 (PSG) et de la matrice du clavier de l'Amstrad CPC.
 pub struct Psg {
     pub selected_register: u8,
     pub registers: [u8; 16],
     pub keyboard_matrix: [u8; 10],
     pub selected_keyboard_line: u8,
+    pub controller_state: [u8; 8], // 0-7: bits de la manette (Up, Down, Left, Right, Fire1, Fire2, Fire3, Fire4)
 }
 
 impl Psg {
@@ -15,6 +16,37 @@ impl Psg {
             registers: [0; 16],
             keyboard_matrix: [0xFF; 10],
             selected_keyboard_line: 0,
+            controller_state: [0; 8],
+        }
+    }
+
+    /// Met à jour l'état d'un bouton de la manette.
+    /// Mappe les boutons manette vers la matrice du clavier du CPC :
+    /// - Ligne 9, Bits 0-4 sont utilisés pour les entrées manette (Joystick A) sur le CPC.
+    ///   Note : le CPC attend 0 = pressé, 1 = relâché (logique inversée).
+    pub fn set_controller_button(&mut self, button_index: usize, pressed: bool) {
+        if button_index < 8 {
+            self.controller_state[button_index] = if pressed { 1 } else { 0 };
+
+            // Mappage manette vers matrice clavier CPC (Joystick A)
+            // Ligne 9: Bit 0=Up, Bit 1=Down, Bit 2=Left, Bit 3=Right, Bit 4=Fire 1
+            // Le bit est à 0 si le bouton est pressé, 1 sinon.
+            let bit = match button_index {
+                0 => Some(0), // Up
+                1 => Some(1), // Down
+                2 => Some(2), // Left
+                3 => Some(3), // Right
+                4 => Some(4), // Fire 1
+                _ => None,
+            };
+
+            if let Some(b) = bit {
+                if pressed {
+                    self.keyboard_matrix[9] &= !(1 << b);
+                } else {
+                    self.keyboard_matrix[9] |= 1 << b;
+                }
+            }
         }
     }
 

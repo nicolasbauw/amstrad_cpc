@@ -110,12 +110,28 @@ impl Ppi {
         }
     }
 
-    /// Met à jour l'état du signal VSYNC sur le Port B (Bit 0).
-    pub fn set_vsync(&mut self, vsync_active: bool) {
-        if vsync_active {
-            self.port_b_input |= 0x01; // Bit 0 à 1
+    /// Met à jour l'état du signal VSYNC, Joystick et configuration système sur le Port B (Bit 0).
+    /// Sur le CPC 6128, le Port B contient les états système suivants (bits lus par le CPU) :
+    /// - Bit 0 : VSYNC
+    /// - Bit 1 : Sélection manette (0=Joystick B, 1=Joystick A)
+    /// - Bit 2-4 : Configuration des périphériques
+    /// - Bit 5 : Port parallèle (prêt)
+    /// - Bit 6 : Cassette (données)
+    /// - Bit 7 : ?
+    pub fn set_system_port_b(&mut self, vsync: bool, joystick_sel: bool) {
+        // Bit 0: VSYNC (1 si actif, 0 sinon)
+        if vsync {
+            self.port_b_input |= 0x01;
         } else {
-            self.port_b_input &= !0x01; // Bit 0 à 0
+            self.port_b_input &= !0x01;
+        }
+
+        // Bit 1: Sélection Joystick (0 = Joy B, 1 = Joy A).
+        // En forçant à 1, on indique au système de lire le Joystick A.
+        if joystick_sel {
+            self.port_b_input |= 0x02;
+        } else {
+            self.port_b_input &= !0x02;
         }
     }
 }

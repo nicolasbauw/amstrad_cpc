@@ -34,6 +34,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Initialisation de SDL2
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
+    let controller_subsystem = sdl_context.game_controller()?;
+
+    // Tentative d'ouverture de la première manette disponible
+    let num_joysticks = controller_subsystem.num_joysticks().unwrap_or(0);
+    let mut _active_controller = None;
+    for i in 0..num_joysticks {
+        if controller_subsystem.is_game_controller(i) {
+            match controller_subsystem.open(i) {
+                Ok(c) => {
+                    println!("Controller opened: {}", c.name());
+                    _active_controller = Some(c);
+                    break;
+                }
+                Err(e) => println!("Failed to open controller {}: {}", i, e),
+            }
+        }
+    }
 
     // 4. Initialisation de SDL_ttf pour le debugger
     let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
@@ -156,6 +173,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } => {
                     if !machine.bus.psg.set_key_state_scancode(sc, false) {
                         machine.bus.psg.set_key_state(kc, false);
+                    }
+                }
+                Event::ControllerButtonDown { button, .. } => {
+                    let btn_idx = match button {
+                        sdl2::controller::Button::DPadUp => 0,
+                        sdl2::controller::Button::DPadDown => 1,
+                        sdl2::controller::Button::DPadLeft => 2,
+                        sdl2::controller::Button::DPadRight => 3,
+                        sdl2::controller::Button::A => 4, // Fire 1
+                        _ => 99,
+                    };
+                    if btn_idx != 99 {
+                        machine.bus.psg.set_controller_button(btn_idx, true);
+                    }
+                }
+                Event::ControllerButtonUp { button, .. } => {
+                    let btn_idx = match button {
+                        sdl2::controller::Button::DPadUp => 0,
+                        sdl2::controller::Button::DPadDown => 1,
+                        sdl2::controller::Button::DPadLeft => 2,
+                        sdl2::controller::Button::DPadRight => 3,
+                        sdl2::controller::Button::A | sdl2::controller::Button::X => 4, // Fire 1
+                        sdl2::controller::Button::B | sdl2::controller::Button::Y => 5, // Fire 2
+                        _ => 99,
+                    };
+                    if btn_idx != 99 {
+                        machine.bus.psg.set_controller_button(btn_idx, false);
+                    }
+                }
+                Event::ControllerAxisMotion { axis, value, .. } => {
+                    let threshold = 10000;
+                    match axis {
+                        sdl2::controller::Axis::LeftX => {
+                            if value > threshold {
+                                machine.bus.psg.set_controller_button(3, true); // Right
+                                machine.bus.psg.set_controller_button(2, false);
+                            } else if value < -threshold {
+                                machine.bus.psg.set_controller_button(2, true); // Left
+                                machine.bus.psg.set_controller_button(3, false);
+                            } else {
+                                machine.bus.psg.set_controller_button(2, false);
+                                machine.bus.psg.set_controller_button(3, false);
+                            }
+                        }
+                        sdl2::controller::Axis::LeftY => {
+                            if value > threshold {
+                                machine.bus.psg.set_controller_button(1, true); // Down
+                                machine.bus.psg.set_controller_button(0, false);
+                            } else if value < -threshold {
+                                machine.bus.psg.set_controller_button(0, true); // Up
+                                machine.bus.psg.set_controller_button(1, false);
+                            } else {
+                                machine.bus.psg.set_controller_button(0, false);
+                                machine.bus.psg.set_controller_button(1, false);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
