@@ -420,6 +420,7 @@ impl Machine {
 
                                 // Ligne 1
                                 (1, 0) => "Left",
+                                (1, 1) => "Copy",
                                 (1, 2) => "Kp 7",
                                 (1, 3) => "Kp 8",
                                 (1, 4) => "Kp 5",
@@ -491,6 +492,9 @@ impl Machine {
                                 (8, 5) => "Q (A)",
                                 (8, 6) => "CapsLock",
                                 (8, 7) => "W (Z)",
+
+                                // Ligne 9
+                                (9, 7) => "Del",
 
                                 _ => "Unknown",
                             };

@@ -37,6 +37,7 @@ impl Psg {
 
             // Ligne 1
             Keycode::Left => Some((1, 0)),
+            Keycode::LAlt | Keycode::RAlt => Some((1, 1)), // "Copy" via Option key on Mac
             Keycode::Kp7 => Some((1, 2)),
             Keycode::Kp8 => Some((1, 3)),
             Keycode::Kp5 => Some((1, 4)),
@@ -45,19 +46,26 @@ impl Psg {
             Keycode::Kp0 => Some((1, 7)),
 
             // Ligne 2
-            Keycode::Backspace => Some((2, 0)), // "Clr"
-            Keycode::LeftBracket => Some((2, 1)),
+            Keycode::Backspace => Some((9, 7)), // "Del" on CPC (replaces previous character)
+            Keycode::Delete => Some((2, 0)),    // "Clr" on CPC (clears screen)
+            Keycode::LeftBracket | Keycode::Minus => Some((2, 1)),
             Keycode::Return => Some((2, 2)),
-            Keycode::RightBracket => Some((2, 3)),
+            Keycode::RightBracket | Keycode::Equals | Keycode::Plus | Keycode::KpEquals => {
+                Some((2, 3))
+            }
             Keycode::Kp4 => Some((2, 4)),
             Keycode::LShift | Keycode::RShift => Some((2, 5)),
-            Keycode::Backslash => Some((2, 6)),
+            Keycode::Backslash | Keycode::Colon | Keycode::Slash => Some((2, 6)),
             Keycode::LCtrl | Keycode::RCtrl => Some((2, 7)),
 
             // Ligne 3
+            Keycode::KpMultiply => Some((3, 0)),
+            Keycode::KpDivide => Some((3, 1)),
+            Keycode::KpPlus => Some((3, 2)),
             Keycode::P => Some((3, 3)),
-            Keycode::M => Some((3, 4)), // touche physique ";" -> caractère M en AZERTY
-            Keycode::Period => Some((3, 7)),
+            Keycode::Percent | Keycode::Quote | Keycode::Backquote => Some((3, 4)), // Touche "ù" -> caractère "ù" du CPC
+            Keycode::KpMinus => Some((3, 5)),
+            Keycode::Period | Keycode::RightParen => Some((3, 7)), // Touche ")" près de 0 sur Mac -> "ù" ou ">" du CPC
 
             // Ligne 4
             Keycode::Num0 => Some((4, 0)),
@@ -67,6 +75,7 @@ impl Psg {
             Keycode::L => Some((4, 4)),
             Keycode::K => Some((4, 5)),
             Keycode::Comma => Some((4, 6)), // touche physique "M" -> caractère , en AZERTY
+            Keycode::M => Some((4, 7)), // Touche "M" du Mac -> caractère "M" du CPC (physiquement ";")
             Keycode::Semicolon => Some((4, 7)), // touche physique "," -> caractère ; en AZERTY
 
             // Ligne 5
