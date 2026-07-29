@@ -6,7 +6,7 @@
   "@/#" sur le clavier Mac est inopérant
   Le "<" sur le clavier Mac fait un "," sur le CPC
   "SHIFT <" (donc >) sur le clavier Mac fait un "?" sur le CPC
-  
+  "SHIFT $" (donc *) sur le clavier Mac fait un "à" sur le CPC
 
 
 - se renseigner sur le fonctionnement du BORDER, et l'implémenter
