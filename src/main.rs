@@ -39,11 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
     let home_dir = std::env::var("HOME")?;
     let font_path = if cfg!(target_os = "macos") {
-        home_dir+"/Library/Fonts/NotoSansMono-Regular.ttf"
+        home_dir + "/Library/Fonts/NotoSansMono-Regular.ttf"
     } else {
         "/usr/share/fonts/noto/NotoSansMono-Regular.ttf".to_string()
     };
-    
+
     let font = ttf_context
         .load_font(font_path, 13)
         .map_err(|e| e.to_string())?;
@@ -141,22 +141,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Event::KeyDown {
-                    keycode: Some(key),
-                    //scancode,
+                    keycode: Some(kc),
+                    scancode: Some(sc),
                     ..
                 } => {
-                    //println!("SDL Key Pressed: {:?} (Scancode: {:?})", key, scancode); // DEBUG
-                    machine.bus.psg.set_key_state(key, true);
-                    if machine.waiting_for_key {
-                        machine.print_hardware_status(true);
-                        machine.waiting_for_key = false;
+                    if !machine.bus.psg.set_key_state_scancode(sc, true) {
+                        machine.bus.psg.set_key_state(kc, true);
                     }
                 }
-                // Événements de relâchement de touches
                 Event::KeyUp {
-                    keycode: Some(key), ..
+                    keycode: Some(kc),
+                    scancode: Some(sc),
+                    ..
                 } => {
-                    machine.bus.psg.set_key_state(key, false);
+                    if !machine.bus.psg.set_key_state_scancode(sc, false) {
+                        machine.bus.psg.set_key_state(kc, false);
+                    }
                 }
                 _ => {}
             }
