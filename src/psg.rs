@@ -29,7 +29,7 @@ impl Psg {
             self.controller_state[button_index] = if pressed { 1 } else { 0 };
 
             // Mappage manette vers matrice clavier CPC (Joystick A)
-            // Ligne 9: Bit 0=Up, Bit 1=Down, Bit 2=Left, Bit 3=Right, Bit 4=Fire 1
+            // Ligne 9: Bit 0=Up, Bit 1=Down, Bit 2=Left, Bit 3=Right, Bit 4=Fire 1, Bit 5=Fire 2, Bit 6=Fire 3
             // Le bit est à 0 si le bouton est pressé, 1 sinon.
             let bit = match button_index {
                 0 => Some(0), // Up
@@ -37,6 +37,8 @@ impl Psg {
                 2 => Some(2), // Left
                 3 => Some(3), // Right
                 4 => Some(4), // Fire 1
+                5 => Some(5), // Fire 2
+                6 => Some(6), // Fire 3
                 _ => None,
             };
 

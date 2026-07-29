@@ -182,6 +182,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         sdl2::controller::Button::DPadLeft => 2,
                         sdl2::controller::Button::DPadRight => 3,
                         sdl2::controller::Button::A => 4, // Fire 1
+                        sdl2::controller::Button::B => 5, // Fire 2
+                        sdl2::controller::Button::X | sdl2::controller::Button::Y => 6, // Fire 3
                         _ => 99,
                     };
                     if btn_idx != 99 {
@@ -194,8 +196,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         sdl2::controller::Button::DPadDown => 1,
                         sdl2::controller::Button::DPadLeft => 2,
                         sdl2::controller::Button::DPadRight => 3,
-                        sdl2::controller::Button::A | sdl2::controller::Button::X => 4, // Fire 1
-                        sdl2::controller::Button::B | sdl2::controller::Button::Y => 5, // Fire 2
+                        sdl2::controller::Button::A => 4, // Fire 1
+                        sdl2::controller::Button::B => 5, // Fire 2
+                        sdl2::controller::Button::X | sdl2::controller::Button::Y => 6, // Fire 3
                         _ => 99,
                     };
                     if btn_idx != 99 {

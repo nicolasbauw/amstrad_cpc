@@ -500,6 +500,13 @@ impl Machine {
                                 (8, 7) => "W (Z)",
 
                                 // Ligne 9
+                                (9, 0) => "Joy A Up",
+                                (9, 1) => "Joy A Down",
+                                (9, 2) => "Joy A Left",
+                                (9, 3) => "Joy A Right",
+                                (9, 4) => "Joy A Fire 1",
+                                (9, 5) => "Joy A Fire 2",
+                                (9, 6) => "Joy A Fire 3",
                                 (9, 7) => "Del",
 
                                 _ => "Unknown",
