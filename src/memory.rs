@@ -72,10 +72,10 @@ impl Memory {
     }
 
     /// Lecture directe de la RAM (utilisée par le moteur vidéo pour ignorer le banking ROM)
-    /* pub fn read_ram_byte(&self, address: u16) -> u8 {
+    pub fn read_ram_byte(&self, address: u16) -> u8 {
         let physical_addr = self.get_ram_physical_address(address);
         self.ram[physical_addr]
-    } */
+    }
 
     /// Lecture d'un octet en fonction du banking actif (RAM + ROM).
     pub fn read_byte(&self, address: u16) -> u8 {
@@ -90,11 +90,18 @@ impl Memory {
         } else if address >= 0xC000 {
             // Zone Haute ($C000 - $FFFF)
             let selected = self.selected_high_rom as usize;
-            if self.rom_high_enabled && self.rom_high_present[selected] {
-                let start = selected * 16 * 1024;
-                let offset = (address - 0xC000) as usize;
-                self.rom_high[start + offset]
+            if self.rom_high_enabled {
+                if self.rom_high_present[selected] {
+                    let start = selected * 16 * 1024;
+                    let offset = (address - 0xC000) as usize;
+                    self.rom_high[start + offset]
+                } else {
+                    // Slot ROM vide : bus de données flottant -> lecture 0xFF
+                    // (comportement matériel réel, cf. table ROMInfoTable "#FFF0 = EMPTY")
+                    0xFF
+                }
             } else {
+                // ROM haute désactivée : RAM classique (banking normal)
                 let physical_addr = self.get_ram_physical_address(address);
                 self.ram[physical_addr]
             }

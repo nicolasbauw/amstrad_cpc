@@ -18,7 +18,7 @@ fn render_mode1(machine: &Machine, frame_buffer: &mut [u8]) {
 
             for x_bytes in 0..80 {
                 let addr = (base_addr + x_bytes) as u16;
-                let byte = machine.bus.memory.read_byte(addr);
+                let byte = machine.bus.memory.read_ram_byte(addr);
 
                 // En Mode 1, un octet contient 4 pixels horizontaux :
                 // Pixel 0 (gauche) : bits (7, 3)

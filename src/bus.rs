@@ -67,18 +67,15 @@ impl Bus for CpcBus {
     fn write_io(&mut self, port: u16, value: u8) {
         // Décodage du Gate Array (Bit 15 = 0, Bit 14 = 1, soit port & 0xC000 == 0x4000)
         if (port & 0xC000) == 0x4000 {
-            // COMPORTEMENT ÉLECTRONIQUE PARALLÈLE :
-            // 1. Le Gate Array standard traite TOUJOURS l'écriture pour configurer ses registres (Rom, palette, etc.)
             self.gate_array.write_register(
                 value,
                 &mut self.memory.rom_low_enabled,
                 &mut self.memory.rom_high_enabled,
             );
 
-            // 2. En parallèle, si le bit 5 d'adresse est à 1 (ligne A5 active) et qu'il s'agit d'une commande
-            //    de configuration RAM étendu (bits 7-6 à 11, soit value & 0xC0 == 0xC0) :
-            //    On applique également la configuration de banking RAM !
-            if (port & 0x0020) != 0 && (value & 0xC0) == 0xC0 {
+            // Le MMU 128 Ko réagit uniquement à la VALEUR écrite (bits 7-6 = 11),
+            // indépendamment du port exact utilisé pour l'accès au Gate Array.
+            if (value & 0xC0) == 0xC0 {
                 self.memory.ram_config = value & 0x07;
             }
         }

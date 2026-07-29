@@ -86,33 +86,38 @@ impl GateArray {
             0 => {
                 // Bit 7=0, Bit 6=0 : Sélection du stylo (Pen Selection)
                 if (val & 0x10) != 0 {
-                    self.selected_pen = 16; // Bordure (mappée à l'index 16)
+                    self.selected_pen = 16; // Bordure
                 } else {
-                    self.selected_pen = val & 0x0F; // Stylos 0 à 15
+                    self.selected_pen = val & 0x0F;
                 }
             }
             1 => {
-                // Bit 7=0, Bit 6=1 : Sélection de la couleur (Color Selection)
+                // Bit 7=0, Bit 6=1 : Sélection de la couleur
                 if (self.selected_pen as usize) < self.palette.len() {
                     self.palette[self.selected_pen as usize] = val & 0x1F;
                 }
             }
             2 => {
-                // Bit 7=1, Bit 6=0 : Configuration mémoire (Banking ROM)
-                // - Bit 0 : Contrôle la ROM haute (0 = activée, 1 = désactivée)
-                // - Bit 1 : Contrôle la ROM basse (0 = activée, 1 = désactivée)
-                *rom_low_enabled = (val & 0x02) == 0;
-                *rom_high_enabled = (val & 0x01) == 0;
-            }
-            3 => {
-                // Bit 7=1, Bit 6=1 : Configuration du mode vidéo standard
+                // Bit 7=1, Bit 6=0 : Mode vidéo + Configuration ROM + délai d'interruption
+                // (les 3 réglages partagent le MÊME octet sur le vrai Gate Array)
+                // - Bits 1-0 : Mode vidéo (0, 1, 2)
+                // - Bit 2     : ROM basse (0 = activée, 1 = désactivée)
+                // - Bit 3     : ROM haute (0 = activée, 1 = désactivée)
+                // - Bit 4     : Délai d'interruption (1 = reset du compteur HSYNC)
                 self.video_mode = val & 0x03;
-                let interrupt_reset = (val & 0x08) != 0;
+                *rom_low_enabled = (val & 0x04) == 0;
+                *rom_high_enabled = (val & 0x08) == 0;
 
-                if interrupt_reset {
+                if (val & 0x10) != 0 {
                     self.hsync_counter = 0;
                     self.interrupt_requested = false;
                 }
+            }
+            3 => {
+                // Bit 7=1, Bit 6=1 : Ce n'est PAS une fonction du Gate Array.
+                // Sur les modèles 128 Ko, cette plage est interceptée par le MMU
+                // séparé qui gère le banking RAM étendu (voir bus.rs).
+                // Le Gate Array lui-même n'a rien à faire ici.
             }
             _ => unreachable!(),
         }
