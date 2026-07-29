@@ -1,5 +1,3 @@
-- voir pour lancer la rom de diag avec les ROMs système installées
-- voir pour qu'il indique autre chose que "unknown cpc" comme modèle (il faut que les ROMs système soient présentes je pense)
 - rendre le clavier plus fonctionnel (pour rappel, j'utilise le layout mac):
   le "m" fait un "ù" --> la touche "ù" devrait faire le "ù", et actuellement le "m" ne fonctionne pas
   il faut que la touche backspace soit fonctionnelle
