@@ -56,7 +56,8 @@ impl Bus for CpcBus {
 
         // 2. Décodage du CRTC (Bit 14 = 0, soit port & 0x4000 == 0)
         if (port & 0x4000) == 0 {
-            if (port & 0x0100) == 0 {
+            // Lecture du registre de données CRTC (BDxx/BExx/BFxx -> Bit 8 ou 9 à 1)
+            if (port & 0x0100) != 0 || (port & 0x0200) != 0 {
                 return self.crtc.read_data();
             }
         }
@@ -82,7 +83,9 @@ impl Bus for CpcBus {
 
         // 2. Décodage du CRTC (Bit 14 = 0, soit port & 0x4000 == 0)
         if (port & 0x4000) == 0 {
-            if (port & 0x0100) != 0 {
+            // Sur CPC : Bit 9 ou 8 à 1 pour le CRTC.
+            // BCxx (Select) : Bit 8=0, BDxx (Write) : Bit 8=1
+            if (port & 0x0100) == 0 {
                 self.crtc.select_register(value);
             } else {
                 self.crtc.write_data(value);

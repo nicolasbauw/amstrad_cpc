@@ -83,16 +83,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let window = video_subsystem
-        .window(window_title, 640, 400)
+        .window(window_title, 800, 600)
         .position_centered()
         .build()?;
     let mut canvas = window.into_canvas().build()?;
     let main_window_id = canvas.window().id();
     let texture_creator = canvas.texture_creator();
-    let mut texture = texture_creator.create_texture_streaming(PixelFormatEnum::RGB24, 320, 200)?;
+    let mut texture = texture_creator.create_texture_streaming(PixelFormatEnum::RGB24, 800, 600)?;
     let mut event_pump = sdl_context.event_pump()?;
 
-    let mut frame_buffer = [0u8; 320 * 200 * 3];
+    let mut frame_buffer = vec![0u8; 800 * 600 * 3];
     let ticks_per_frame: u32 = 79_872;
     let mut running = true;
 
@@ -252,7 +252,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
-        let _ = texture.update(None, &frame_buffer, 320 * 3);
+        let _ = texture.update(None, &frame_buffer, 800 * 3);
         let _ = canvas.clear();
         let _ = canvas.copy(&texture, None, None);
         canvas.present();
