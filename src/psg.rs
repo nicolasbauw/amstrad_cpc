@@ -48,24 +48,23 @@ impl Psg {
             // Ligne 2
             Keycode::Backspace => Some((9, 7)), // "Del" on CPC (replaces previous character)
             Keycode::Delete => Some((2, 0)),    // "Clr" on CPC (clears screen)
-            Keycode::LeftBracket | Keycode::Minus => Some((2, 1)),
             Keycode::Return => Some((2, 2)),
-            Keycode::RightBracket | Keycode::Equals | Keycode::Plus | Keycode::KpEquals => {
-                Some((2, 3))
-            }
             Keycode::Kp4 => Some((2, 4)),
             Keycode::LShift | Keycode::RShift => Some((2, 5)),
-            Keycode::Backslash | Keycode::Colon | Keycode::Slash => Some((2, 6)),
             Keycode::LCtrl | Keycode::RCtrl => Some((2, 7)),
 
-            // Ligne 3
-            Keycode::KpMultiply => Some((3, 0)),
-            Keycode::KpDivide => Some((3, 1)),
-            Keycode::KpPlus => Some((3, 2)),
+            // Matrice CPC FR des caractères spéciaux (après audit rigoureux de la ROM AZERTY)
+            Keycode::RightParen => Some((3, 1)), // ")"
+            Keycode::Minus | Keycode::KpMinus => Some((3, 0)), // "-"
+            Keycode::Equals | Keycode::Plus | Keycode::KpPlus | Keycode::KpEquals => Some((3, 6)), // "=" et "+"
+            Keycode::Colon | Keycode::Slash | Keycode::KpDivide => Some((3, 7)), // ":" et "/"
+            Keycode::Percent | Keycode::Quote | Keycode::Backquote | Keycode::Hash => Some((3, 4)), // "ù"
+            Keycode::LeftBracket | Keycode::Caret => Some((3, 2)), // "^" et "["
+            Keycode::Dollar | Keycode::RightBracket => Some((2, 6)), // "$"
+            Keycode::KpMultiply => Some((2, 1)),                   // "*" (Kp "*")
+
+            // Ligne 3 (non-caractères directs)
             Keycode::P => Some((3, 3)),
-            Keycode::Percent | Keycode::Quote | Keycode::Backquote => Some((3, 4)), // Touche "ù" -> caractère "ù" du CPC
-            Keycode::KpMinus => Some((3, 5)),
-            Keycode::Period | Keycode::RightParen => Some((3, 7)), // Touche ")" près de 0 sur Mac -> "ù" ou ">" du CPC
 
             // Ligne 4
             Keycode::Num0 => Some((4, 0)),
@@ -74,9 +73,9 @@ impl Psg {
             Keycode::I => Some((4, 3)),
             Keycode::L => Some((4, 4)),
             Keycode::K => Some((4, 5)),
-            Keycode::Comma => Some((4, 6)), // touche physique "M" -> caractère , en AZERTY
-            Keycode::M => Some((4, 7)), // Touche "M" du Mac -> caractère "M" du CPC (physiquement ";")
-            Keycode::Semicolon => Some((4, 7)), // touche physique "," -> caractère ; en AZERTY
+            Keycode::Comma | Keycode::Less => Some((4, 6)), // touche physique "M" -> caractère , en AZERTY (et <)
+            Keycode::Semicolon | Keycode::Period | Keycode::Greater => Some((4, 7)), // touche physique "," -> caractère ; en AZERTY (et .)
+            Keycode::M => Some((3, 5)), // Touche "M" du Mac -> caractère "M" du CPC (ligne 3, bit 5)
 
             // Ligne 5
             Keycode::Num8 => Some((5, 0)),
