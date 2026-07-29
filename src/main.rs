@@ -20,10 +20,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Analyse des arguments de la ligne de commande pour le choix du mode
     let args: Vec<String> = env::args().collect();
-    let mut diag_mode = true; // Par défaut, on démarre en mode Diagnostic
+    let mut diag_mode = false; // Par défaut, on démarre en mode normal
 
-    if args.contains(&"--cpc".to_string()) || args.contains(&"--basic".to_string()) {
-        diag_mode = false;
+    if args.contains(&"--diag".to_string()) || args.contains(&"-d".to_string()) {
+        diag_mode = true;
     }
 
     // 2. Initialisation de la Machine
