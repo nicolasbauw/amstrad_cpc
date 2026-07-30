@@ -30,19 +30,15 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
 
     for char_y in 0..r6 {
         for pixel_y in 0..=r9 {
-            let line_y = offset_y + (char_y * (r9 + 1) + pixel_y) as usize;
-            if line_y >= 600 {
+            let line_y_base = offset_y + (char_y * (r9 + 1) + pixel_y) as usize * 2;
+            if line_y_base >= 600 {
                 break;
             }
 
-            // MA pour ce caractère
             let line_ma = (start_addr + (char_y * r1)) & 0x3FFF;
 
             for x_char in 0..r1 {
                 let ma = (line_ma + x_char) & 0x3FFF;
-                // Formule standard CPC :
-                // bit 13,12 -> banque RAM, bits 11-1 = MA, bit 0 = A0
-                // L'injection de la ligne de balayage (pixel_y) se fait sur les bits 13-11 de l'adresse RAM.
                 let addr_base =
                     ((ma & 0x3000) << 2) | ((pixel_y & 0x07) << 11) | ((ma & 0x03FF) << 1);
 
@@ -50,35 +46,41 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
                     let addr = addr_base + byte_off as u16;
                     let byte = machine.bus.memory.read_ram_byte(addr);
 
-                    match mode {
-                        0 => render_byte_mode0(
-                            machine,
-                            frame_buffer,
-                            byte,
-                            x_char,
-                            byte_off,
-                            line_y,
-                            offset_x,
-                        ),
-                        1 => render_byte_mode1(
-                            machine,
-                            frame_buffer,
-                            byte,
-                            x_char,
-                            byte_off,
-                            line_y,
-                            offset_x,
-                        ),
-                        2 => render_byte_mode2(
-                            machine,
-                            frame_buffer,
-                            byte,
-                            x_char,
-                            byte_off,
-                            line_y,
-                            offset_x,
-                        ),
-                        _ => {}
+                    for dy in 0..2 {
+                        let line_y = line_y_base + dy;
+                        if line_y >= 600 {
+                            continue;
+                        }
+                        match mode {
+                            0 => render_byte_mode0(
+                                machine,
+                                frame_buffer,
+                                byte,
+                                x_char,
+                                byte_off,
+                                line_y,
+                                offset_x,
+                            ),
+                            1 => render_byte_mode1(
+                                machine,
+                                frame_buffer,
+                                byte,
+                                x_char,
+                                byte_off,
+                                line_y,
+                                offset_x,
+                            ),
+                            2 => render_byte_mode2(
+                                machine,
+                                frame_buffer,
+                                byte,
+                                x_char,
+                                byte_off,
+                                line_y,
+                                offset_x,
+                            ),
+                            _ => {}
+                        }
                     }
                 }
             }
