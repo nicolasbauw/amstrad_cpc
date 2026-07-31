@@ -187,9 +187,6 @@ pub struct Fdc {
 
     // Status registers (renvoyés dans les phases de résultat)
     pub st0: u8,
-    pub st1: u8,
-    pub st2: u8,
-    pub st3: u8,
 }
 
 impl Fdc {
@@ -210,9 +207,6 @@ impl Fdc {
             execution_buffer: Vec::new(),
             execution_index: 0,
             st0: 0,
-            st1: 0,
-            st2: 0,
-            st3: 0,
         }
     }
 
@@ -239,6 +233,20 @@ impl Fdc {
         self.disk_loaded = false;
         self.current_filename = "None".to_string();
         println!("Floppy DSK Ejected");
+    }
+
+    /// Initialise le FDC avec les valeurs par défaut du CPC
+    pub fn init_defaults(&mut self) {
+        self.current_track = 0;
+        self.current_sector = 0xC1;
+        self.current_side = 0;
+        self.motor_on = false;
+        self.disk_loaded = false;
+        self.current_filename = "None".to_string();
+        self.dsk = None;
+        self.execution_buffer.clear();
+        self.execution_index = 0;
+        self.st0 = 0;
     }
 
     /// Lecture du registre de statut (MSR) sur le port &FB7E
