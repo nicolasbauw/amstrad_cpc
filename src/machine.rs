@@ -10,6 +10,10 @@ use zilog_z80::{bus::Bus, cpu::CPU};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const HELP: &str = "
+Emulator commands:
+    disk d.dsk      Loads the d.dsk disk image
+    disk eject      Ejects the loaded disk
+
 Monitor commands:
     d 0x0000        disassembles code at 0x0000 and the 20 next
                     instructions
