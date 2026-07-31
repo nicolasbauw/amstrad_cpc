@@ -1,6 +1,7 @@
 mod bus;
 mod console;
 mod crtc;
+mod fdc;
 mod gate_array;
 mod hexconversion;
 mod machine;
