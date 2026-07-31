@@ -1,2 +1,0 @@
-- se renseigner sur le fonctionnement du BORDER, et l'implémenter
-- implémenter les autres modes graphiques

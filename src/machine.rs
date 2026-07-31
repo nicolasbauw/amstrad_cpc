@@ -653,6 +653,16 @@ impl Machine {
                 let a = arg.to_u16()?;
                 self.cpu.reg.pc = a;
             }
+            MonitorCmd::Disk => {
+                if arg == "eject" {
+                    self.bus.fdc.borrow_mut().eject_disk();
+                } else {
+                    match self.bus.fdc.borrow_mut().load_disk(&arg) {
+                        Ok(_) => println!("Disk '{}' loaded", arg),
+                        Err(e) => println!("Error loading disk: {}", e),
+                    }
+                }
+            }
         }
         Ok(())
     }

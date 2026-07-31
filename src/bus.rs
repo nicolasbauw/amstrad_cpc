@@ -1,10 +1,12 @@
 use crate::crtc::Crtc;
+use crate::fdc::Fdc;
 use crate::gate_array::GateArray;
 use crate::memory::Memory;
 use crate::ppi::Ppi;
 use crate::psg::Psg;
 use zilog_z80::bus::Bus;
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 
 /// Le Bus système du CPC qui interconnecte tous les composants matériels.
@@ -14,6 +16,7 @@ pub struct CpcBus {
     pub crtc: Crtc,
     pub psg: Psg,
     pub ppi: Ppi,
+    pub fdc: RefCell<Fdc>,
     pub watchpoints: HashSet<u16>,
     pub watchpoint_hit: Option<u16>,
 }
@@ -27,6 +30,7 @@ impl CpcBus {
             crtc: Crtc::new(),
             psg: Psg::new(),
             ppi: Ppi::new(),
+            fdc: RefCell::new(Fdc::new()),
             watchpoints: HashSet::new(),
             watchpoint_hit: None,
         }
@@ -61,6 +65,19 @@ impl Bus for CpcBus {
                 return self.crtc.read_data();
             }
         }
+
+        // 3. Décodage du FDC (Bit 10 = 0, soit port & 0x0400 == 0)
+        if (port & 0x0400) == 0 {
+            // Ports FDC : &FB7E (MSR) et &FB7F (DATA) -> Bit 7 ou 8 à 1
+            if (port & 0x0080) != 0 {
+                if (port & 0x0001) != 0 {
+                    return self.fdc.borrow_mut().read_data();
+                } else {
+                    return self.fdc.borrow().read_msr();
+                }
+            }
+        }
+
         0xFF
     }
 
@@ -100,6 +117,19 @@ impl Bus for CpcBus {
         // 4. Sélection de la ROM haute (Bit 13 = 0, soit port & 0x2000 == 0)
         if (port & 0x2000) == 0 {
             self.memory.select_high_rom(value);
+        }
+
+        // 5. Décodage du FDC et contrôle du moteur de disquette (Bit 10 = 0, soit port & 0x0400 == 0)
+        if (port & 0x0400) == 0 {
+            if (port & 0x0080) != 0 {
+                // Écriture DATA FDC (&FB7F ou similaire)
+                if (port & 0x0001) != 0 {
+                    self.fdc.borrow_mut().write_data(value);
+                }
+            } else {
+                // Écriture Contrôle Moteur (&FA7E)
+                self.fdc.borrow_mut().motor_on = (value & 0x01) != 0;
+            }
         }
     }
 }

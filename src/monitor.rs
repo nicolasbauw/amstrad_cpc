@@ -17,4 +17,5 @@ pub enum MonitorCmd {
     AddWatchpoint,
     ListWatchpoints,
     RemoveWatchpoint,
+    Disk,
 }
