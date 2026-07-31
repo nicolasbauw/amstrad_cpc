@@ -138,8 +138,9 @@ impl Psg {
             // Pavé numérique : ces touches n'ont pas de modificateur physique sur le Mac,
             // donc on simule nous-mêmes le SHIFT du CPC pour atteindre le caractère voulu.
             Keycode::KpDivide => Some(&[(2, 5), (3, 7)]), // "/" (shift de ":")
-            Keycode::KpPlus | Keycode::KpEquals => Some(&[(2, 5), (3, 6)]), // "+" (shift de "=")
-            Keycode::KpMinus => Some(&[(3, 0)]),          // "-" (shift de "-")
+            Keycode::KpEquals => Some(&[(3, 6)]),
+            Keycode::KpPlus => Some(&[(2, 5), (3, 6)]),
+            Keycode::KpMinus => Some(&[(3, 0)]),
 
             // Ligne 3 (non-caractères directs)
             Keycode::P => Some(&[(3, 3)]),
