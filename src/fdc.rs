@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FdcPhase {
@@ -9,6 +9,7 @@ pub enum FdcPhase {
     Result,
 }
 
+#[derive(Clone)]
 pub struct Sector {
     pub id: u8,
     pub size: usize,
@@ -29,137 +30,145 @@ pub struct DskImage {
 impl DskImage {
     pub fn parse(data: &[u8]) -> Result<Self, String> {
         if data.len() < 0x100 {
-            return Err("DSK size is too short".to_string());
+            return Err("Fichier DSK trop court".to_string());
         }
 
         let signature = std::str::from_utf8(&data[0..8]).unwrap_or("");
+
         if signature.starts_with("MV - CPC") {
-            // Standard DSK
-            let num_tracks = data[0x30];
-            let num_sides = data[0x31];
-            let track_size = u16::from_le_bytes([data[0x32], data[0x33]]) as usize;
-
-            let mut tracks = Vec::new();
-            let mut offset = 0x100;
-
-            for _t in 0..num_tracks {
-                for _s in 0..num_sides {
-                    if offset + 0x100 > data.len() {
-                        break;
-                    }
-                    let track_header = &data[offset..offset + 0x100];
-                    let track_num = track_header[0x10];
-                    let side_num = track_header[0x11];
-                    let sec_size_code = track_header[0x14];
-                    let num_sectors = track_header[0x15];
-
-                    let mut sectors = Vec::new();
-                    let mut sector_data_offset = offset + 0x100;
-
-                    for sec_idx in 0..num_sectors {
-                        let info_offset = 0x18 + (sec_idx as usize * 8);
-                        let sec_id = track_header[info_offset + 2];
-                        let sec_size_code_inf = track_header[info_offset + 3];
-                        let sec_size = 128 << sec_size_code_inf;
-
-                        if sector_data_offset + sec_size > data.len() {
-                            break;
-                        }
-                        let sec_data =
-                            data[sector_data_offset..sector_data_offset + sec_size].to_vec();
-
-                        sectors.push(Sector {
-                            id: sec_id,
-                            size: sec_size,
-                            data: sec_data,
-                        });
-                        sector_data_offset += sec_size;
-                    }
-
-                    tracks.push(Track {
-                        number: track_num,
-                        side: side_num,
-                        sector_size: sec_size_code,
-                        sectors,
-                    });
-
-                    offset += track_size;
-                }
-            }
-            Ok(DskImage { tracks })
+            Self::parse_standard(data)
         } else if signature.starts_with("EXTENDED") {
-            // Extended DSK
-            let num_tracks = data[0x30];
-            let num_sides = data[0x31];
-
-            let mut tracks = Vec::new();
-            let mut offset = 0x100;
-
-            for t in 0..num_tracks {
-                for s in 0..num_sides {
-                    let track_size_code =
-                        data[0x34 + (t as usize * num_sides as usize) + s as usize];
-                    let track_size = (track_size_code as usize) * 256;
-                    if track_size == 0 {
-                        continue;
-                    }
-
-                    if offset + 0x100 > data.len() {
-                        break;
-                    }
-                    let track_header = &data[offset..offset + 0x100];
-                    let track_num = track_header[0x10];
-                    let side_num = track_header[0x11];
-                    let sec_size_code = track_header[0x14];
-                    let num_sectors = track_header[0x15];
-
-                    let mut sectors = Vec::new();
-                    let mut sector_data_offset = offset + 0x100;
-
-                    for sec_idx in 0..num_sectors {
-                        let info_offset = 0x18 + (sec_idx as usize * 8);
-                        let sec_id = track_header[info_offset + 2];
-                        let sec_size_code_inf = track_header[info_offset + 3];
-                        let sec_size = 128 << sec_size_code_inf;
-
-                        let actual_size = u16::from_le_bytes([
-                            track_header[info_offset + 6],
-                            track_header[info_offset + 7],
-                        ]) as usize;
-                        let size_to_read = if actual_size > 0 {
-                            actual_size
-                        } else {
-                            sec_size
-                        };
-
-                        if sector_data_offset + size_to_read > data.len() {
-                            break;
-                        }
-                        let sec_data =
-                            data[sector_data_offset..sector_data_offset + size_to_read].to_vec();
-
-                        sectors.push(Sector {
-                            id: sec_id,
-                            size: size_to_read,
-                            data: sec_data,
-                        });
-                        sector_data_offset += size_to_read;
-                    }
-
-                    tracks.push(Track {
-                        number: track_num,
-                        side: side_num,
-                        sector_size: sec_size_code,
-                        sectors,
-                    });
-
-                    offset += track_size;
-                }
-            }
-            Ok(DskImage { tracks })
+            Self::parse_extended(data)
         } else {
-            Err("Unsupported DSK format".to_string())
+            Err("Format DSK non reconnu (signature invalide)".to_string())
         }
+    }
+
+    /// Lecture sécurisée d'un octet : ne panique jamais sur un fichier corrompu.
+    fn get_u8(data: &[u8], offset: usize) -> Result<u8, String> {
+        data.get(offset)
+            .copied()
+            .ok_or_else(|| format!("DSK corrompu : lecture hors limites à l'offset {:#X}", offset))
+    }
+
+    fn parse_standard(data: &[u8]) -> Result<Self, String> {
+        let num_tracks = Self::get_u8(data, 0x30)?;
+        let num_sides = Self::get_u8(data, 0x31)?.max(1);
+        let track_size =
+            u16::from_le_bytes([Self::get_u8(data, 0x32)?, Self::get_u8(data, 0x33)?]) as usize;
+
+        if track_size == 0 {
+            return Err("Taille de piste nulle dans l'en-tête DSK".to_string());
+        }
+
+        let mut tracks = Vec::new();
+        let mut offset = 0x100usize;
+
+        for _t in 0..num_tracks {
+            for _s in 0..num_sides {
+                if offset + 0x100 > data.len() {
+                    break;
+                }
+                let track_header = &data[offset..offset + 0x100];
+                let track = Self::parse_track_header(track_header, offset + 0x100, data, false)?;
+                tracks.push(track);
+                offset += track_size;
+            }
+        }
+
+        Ok(DskImage { tracks })
+    }
+
+    fn parse_extended(data: &[u8]) -> Result<Self, String> {
+        let num_tracks = Self::get_u8(data, 0x30)?;
+        let num_sides = Self::get_u8(data, 0x31)?.max(1);
+
+        let mut tracks = Vec::new();
+        let mut offset = 0x100usize;
+
+        for t in 0..num_tracks {
+            for s in 0..num_sides {
+                let size_table_offset = 0x34 + (t as usize * num_sides as usize) + s as usize;
+                let track_size_code = Self::get_u8(data, size_table_offset)?;
+                let track_size = (track_size_code as usize) * 256;
+                if track_size == 0 {
+                    // Piste non formatée : le format Extended DSK ne stocke aucune
+                    // donnée pour elle dans le fichier (offset non avancé).
+                    continue;
+                }
+
+                if offset + 0x100 > data.len() {
+                    break;
+                }
+                let track_header = &data[offset..offset + 0x100];
+                let track = Self::parse_track_header(track_header, offset + 0x100, data, true)?;
+                tracks.push(track);
+                offset += track_size;
+            }
+        }
+
+        Ok(DskImage { tracks })
+    }
+
+    /// Analyse un en-tête de piste (256 octets), commun aux deux formats DSK.
+    /// `extended` détermine si les octets "taille réelle" (utilisés uniquement en
+    /// Extended DSK, pour les secteurs de taille non standard) doivent être pris
+    /// en compte.
+    fn parse_track_header(
+        track_header: &[u8],
+        sector_data_start: usize,
+        data: &[u8],
+        extended: bool,
+    ) -> Result<Track, String> {
+        let track_num = track_header[0x10];
+        let side_num = track_header[0x11];
+        let sec_size_code = track_header[0x14];
+        // Borne de sécurité : un CPC n'a jamais plus d'une trentaine de secteurs
+        // par piste. Ça évite qu'un fichier corrompu/malveillant fasse déborder
+        // la table de secteurs (256 octets) de l'en-tête.
+        let num_sectors = track_header[0x15].min(29);
+
+        let mut sectors = Vec::new();
+        let mut sector_data_offset = sector_data_start;
+
+        for sec_idx in 0..num_sectors {
+            let info_offset = 0x18 + (sec_idx as usize * 8);
+            if info_offset + 8 > track_header.len() {
+                break;
+            }
+
+            let sec_id = track_header[info_offset + 2];
+            let sec_size_code_inf = track_header[info_offset + 3].min(6); // 128<<6 = 8Ko, plafond réaliste
+            let declared_size = 128usize << sec_size_code_inf;
+
+            let actual_size = if extended {
+                let lo = track_header[info_offset + 6];
+                let hi = track_header[info_offset + 7];
+                let sz = u16::from_le_bytes([lo, hi]) as usize;
+                if sz > 0 { sz } else { declared_size }
+            } else {
+                declared_size
+            };
+
+            if sector_data_offset + actual_size > data.len() {
+                break;
+            }
+            let sec_data = data[sector_data_offset..sector_data_offset + actual_size].to_vec();
+
+            sectors.push(Sector {
+                id: sec_id,
+                size: actual_size,
+                data: sec_data,
+            });
+            sector_data_offset += actual_size;
+        }
+
+        Ok(Track {
+            number: track_num,
+            side: side_num,
+            sector_size: sec_size_code,
+            sectors,
+        })
     }
 }
 
@@ -187,6 +196,17 @@ pub struct Fdc {
 
     // Status registers (renvoyés dans les phases de résultat)
     pub st0: u8,
+
+    /// Vrai après un Seek/Recalibrate tant que "Sense Interrupt Status" n'a pas
+    /// encore été exécuté par le logiciel (comportement du vrai µPD765A : appeler
+    /// cette commande sans interruption en attente renvoie "invalid command").
+    pub seek_interrupt_pending: bool,
+
+    // --- État de la commande Format Track (0x0D) ---
+    pub formatting: bool,
+    pub format_n: u8,
+    pub format_sc: u8,
+    pub format_fill: u8,
 }
 
 impl Fdc {
@@ -207,7 +227,28 @@ impl Fdc {
             execution_buffer: Vec::new(),
             execution_index: 0,
             st0: 0,
+            seek_interrupt_pending: false,
+            formatting: false,
+            format_n: 0,
+            format_sc: 0,
+            format_fill: 0xE5,
         }
+    }
+
+    /// Réinitialise l'état transitoire (phase, tampons de commande/résultat/exécution).
+    /// Appelé lors du chargement/éjection d'une disquette pour éviter qu'une commande
+    /// FDC en cours ne se retrouve dans un état incohérent après un changement de média.
+    fn reset_transient_state(&mut self) {
+        self.phase = FdcPhase::Command;
+        self.command_buffer.clear();
+        self.command_len = 0;
+        self.result_buffer.clear();
+        self.result_index = 0;
+        self.execution_buffer.clear();
+        self.execution_index = 0;
+        self.seek_interrupt_pending = false;
+        self.formatting = false;
+        self.st0 = 0;
     }
 
     /// Charge un fichier disquette .dsk
@@ -222,6 +263,8 @@ impl Fdc {
         self.current_filename = filename.to_string();
         self.current_track = 0;
         self.current_sector = 0xC1;
+        self.current_side = 0;
+        self.reset_transient_state();
 
         println!("Floppy DSK Loaded: {}", filename);
         Ok(())
@@ -232,6 +275,7 @@ impl Fdc {
         self.dsk = None;
         self.disk_loaded = false;
         self.current_filename = "None".to_string();
+        self.reset_transient_state();
         println!("Floppy DSK Ejected");
     }
 
@@ -244,9 +288,73 @@ impl Fdc {
         self.disk_loaded = false;
         self.current_filename = "None".to_string();
         self.dsk = None;
-        self.execution_buffer.clear();
-        self.execution_index = 0;
-        self.st0 = 0;
+        self.reset_transient_state();
+    }
+
+    /// Réécrit l'image disquette en mémoire vers un fichier .dsk (format standard,
+    /// non-Extended). Permet de persister les écritures / formatages effectués
+    /// pendant la session d'émulation.
+    pub fn save_disk(&self, filename: &str) -> Result<(), String> {
+        let dsk = self.dsk.as_ref().ok_or_else(|| "Aucune disquette chargée".to_string())?;
+
+        let num_tracks = dsk.tracks.iter().map(|t| t.number).max().map(|m| m + 1).unwrap_or(0);
+        let num_sides = dsk.tracks.iter().map(|t| t.side).max().map(|m| m + 1).unwrap_or(1);
+
+        let max_track_payload = dsk
+            .tracks
+            .iter()
+            .map(|t| t.sectors.iter().map(|s| s.size).sum::<usize>())
+            .max()
+            .unwrap_or(0);
+        let track_size = 0x100 + max_track_payload;
+
+        let mut out = Vec::new();
+
+        // En-tête disque (0x100 octets)
+        let mut header = vec![0u8; 0x100];
+        header[0..8].copy_from_slice(b"MV - CPC");
+        header[0x30] = num_tracks;
+        header[0x31] = num_sides;
+        header[0x32..0x34].copy_from_slice(&(track_size as u16).to_le_bytes());
+        out.extend_from_slice(&header);
+
+        for t_num in 0..num_tracks {
+            for s_num in 0..num_sides {
+                let mut track_block = vec![0u8; track_size];
+                track_block[0..12].copy_from_slice(b"Track-Info\r\n");
+
+                if let Some(track) = dsk.tracks.iter().find(|t| t.number == t_num && t.side == s_num) {
+                    track_block[0x10] = track.number;
+                    track_block[0x11] = track.side;
+                    track_block[0x14] = track.sector_size;
+                    track_block[0x15] = track.sectors.len() as u8;
+
+                    let mut data_offset = 0x100usize;
+                    for (i, sec) in track.sectors.iter().enumerate() {
+                        let info_offset = 0x18 + i * 8;
+                        if info_offset + 4 <= 0x100 {
+                            track_block[info_offset] = track.number;
+                            track_block[info_offset + 1] = track.side;
+                            track_block[info_offset + 2] = sec.id;
+                            let n = ((sec.size.max(128)) / 128).trailing_zeros() as u8;
+                            track_block[info_offset + 3] = n;
+                        }
+                        let end = (data_offset + sec.size).min(track_block.len());
+                        if data_offset < end {
+                            let copy_len = end - data_offset;
+                            track_block[data_offset..end].copy_from_slice(&sec.data[..copy_len]);
+                        }
+                        data_offset += sec.size;
+                    }
+                }
+
+                out.extend_from_slice(&track_block);
+            }
+        }
+
+        let mut f = File::create(filename).map_err(|e| e.to_string())?;
+        f.write_all(&out).map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     /// Lecture du registre de statut (MSR) sur le port &FB7E
@@ -272,10 +380,11 @@ impl Fdc {
             msr |= 0x10;
         }
 
-        // Bit 0: Drive 0 seek active (si la disquette est chargée)
-        if self.disk_loaded {
-            msr |= 0x01;
-        }
+        // Bits 3-0 (DxB, "lecteur X occupé en seek") : nos seeks sont instantanés
+        // dans cette émulation, donc ces bits ne sont jamais observables à 1 par le
+        // logiciel — on ne les positionne pas (contrairement à l'ancienne version qui
+        // y stockait à tort l'état "disque chargé", sans rapport avec leur vraie
+        // signification matérielle).
 
         msr
     }
@@ -284,12 +393,26 @@ impl Fdc {
     pub fn write_data(&mut self, val: u8) {
         if self.phase != FdcPhase::Command {
             if self.phase == FdcPhase::ExecutionWrite {
-                // Phase d'écriture de données secteur
-                self.execution_buffer.push(val);
-                self.execution_index += 1;
-                // Si on a écrit tout le secteur, on termine la commande
-                if self.execution_index >= 512 {
-                    self.finish_write_command();
+                if self.formatting {
+                    // Phase d'exécution de Format Track : on accumule des groupes de
+                    // 4 octets (C, H, R, N) décrivant chaque secteur à créer.
+                    self.execution_buffer.push(val);
+                    self.execution_index += 1;
+                    let expected = self.format_sc as usize * 4;
+                    if expected > 0 && self.execution_index >= expected {
+                        self.finish_format_command();
+                    }
+                } else {
+                    // Phase d'écriture de données secteur. La taille attendue est
+                    // dérivée du champ N (command_buffer[5]) de la commande Write
+                    // Data en cours, et non plus figée à 512 octets.
+                    self.execution_buffer.push(val);
+                    self.execution_index += 1;
+                    let n = *self.command_buffer.get(5).unwrap_or(&2);
+                    let expected_size = 128usize << n.min(6);
+                    if self.execution_index >= expected_size {
+                        self.finish_write_command();
+                    }
                 }
             }
             return;
@@ -307,6 +430,7 @@ impl Fdc {
                 0x0A => 2, // Read ID
                 0x06 => 9, // Read Data
                 0x05 => 9, // Write Data
+                0x0D => 6, // Format Track
                 _ => 1,    // Par défaut, commandes inconnues à 1 octet
             };
         } else {
@@ -384,6 +508,7 @@ impl Fdc {
                 // Retourne la tête à la piste 0
                 self.current_track = 0;
                 self.st0 = 0x20; // Seek End
+                self.seek_interrupt_pending = true;
                 self.phase = FdcPhase::Command;
                 self.command_buffer.clear();
             }
@@ -393,79 +518,119 @@ impl Fdc {
                     self.current_track = self.command_buffer[2];
                 }
                 self.st0 = 0x20; // Seek End
+                self.seek_interrupt_pending = true;
                 self.phase = FdcPhase::Command;
                 self.command_buffer.clear();
             }
             0x08 => {
                 // Sense Interrupt Status
-                // Result: ST0, PCN (Present Cylinder Number)
-                self.result_buffer.push(self.st0);
-                self.result_buffer.push(self.current_track);
+                // Sur le vrai µPD765A, appeler cette commande sans interruption de
+                // seek/recalibrate en attente est une erreur (ST0 = invalid command).
+                if self.seek_interrupt_pending {
+                    self.result_buffer.push(self.st0);
+                    self.result_buffer.push(self.current_track);
+                    self.seek_interrupt_pending = false;
+                    self.st0 = 0x00;
+                } else {
+                    self.result_buffer.push(0x80); // Invalid command
+                }
                 self.phase = FdcPhase::Result;
-                // Reset st0
-                self.st0 = 0x00;
             }
             0x0A => {
                 // Read ID
                 // Result: ST0, ST1, ST2, C, H, R, N
-                self.result_buffer.push(0x00); // ST0 Success
-                self.result_buffer.push(0x00); // ST1
-                self.result_buffer.push(0x00); // ST2
-                self.result_buffer.push(self.current_track); // C
-                self.result_buffer.push(self.current_side); // H
-                self.result_buffer.push(self.current_sector); // R
-                self.result_buffer.push(2); // N (512 bytes)
+                // On va chercher le premier secteur réellement présent sur la piste
+                // courante de l'image chargée, plutôt que de renvoyer des valeurs
+                // figées même en l'absence de disque.
+                let found = self.dsk.as_ref().and_then(|dsk| {
+                    dsk.tracks
+                        .iter()
+                        .find(|t| t.number == self.current_track && t.side == self.current_side)
+                        .and_then(|t| t.sectors.first())
+                        .map(|s| (s.id, s.size))
+                });
+
+                if let Some((sec_id, sec_size)) = found {
+                    let n = size_to_n(sec_size);
+                    self.result_buffer.push(0x00); // ST0 Success
+                    self.result_buffer.push(0x00); // ST1
+                    self.result_buffer.push(0x00); // ST2
+                    self.result_buffer.push(self.current_track); // C
+                    self.result_buffer.push(self.current_side); // H
+                    self.result_buffer.push(sec_id); // R
+                    self.result_buffer.push(n); // N
+                } else {
+                    // Pas de disque, ou piste inexistante sur l'image chargée
+                    self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
+                    self.result_buffer.push(0x01); // ST1: Missing Address Mark
+                    self.result_buffer.push(0x00); // ST2
+                    self.result_buffer.push(self.current_track);
+                    self.result_buffer.push(self.current_side);
+                    self.result_buffer.push(0x00);
+                    self.result_buffer.push(0x00);
+                }
                 self.phase = FdcPhase::Result;
             }
             0x06 => {
                 // Read Data
-                // Command format: [Cmd, Drive, C, H, R, N, EOT, GPL, DTL]
-                if self.command_buffer.len() >= 6 {
+                // Command format: [Cmd, Drive/HD, C, H, R, N, EOT, GPL, DTL]
+                if self.command_buffer.len() >= 9 {
                     let track = self.command_buffer[2];
                     let side = self.command_buffer[3] & 0x01;
-                    let sector_id = self.command_buffer[4];
+                    let start_sector = self.command_buffer[4];
+                    let n = self.command_buffer[5];
+                    let eot = self.command_buffer[6];
 
                     self.current_track = track;
                     self.current_side = side;
-                    self.current_sector = sector_id;
+                    self.current_sector = start_sector;
 
-                    // Recherche du secteur dans l'image disquette
-                    let mut found_data = None;
+                    // Transfert de tous les secteurs consécutifs entre R et EOT
+                    // (inclus) présents sur la piste, comme le ferait le vrai FDC
+                    // pour une commande couvrant plusieurs secteurs.
+                    let mut combined = Vec::new();
+                    let mut last_id = start_sector;
+                    let mut found_any = false;
+
                     if let Some(ref dsk) = self.dsk {
-                        for t in &dsk.tracks {
-                            if t.number == track && t.side == side {
-                                for s in &t.sectors {
-                                    if s.id == sector_id {
-                                        found_data = Some(s.data.clone());
-                                        break;
-                                    }
-                                }
+                        if let Some(t) =
+                            dsk.tracks.iter().find(|t| t.number == track && t.side == side)
+                        {
+                            let mut matched: Vec<&Sector> = t
+                                .sectors
+                                .iter()
+                                .filter(|s| s.id >= start_sector && s.id <= eot)
+                                .collect();
+                            matched.sort_by_key(|s| s.id);
+                            for s in matched {
+                                combined.extend_from_slice(&s.data);
+                                last_id = s.id;
+                                found_any = true;
                             }
                         }
                     }
 
-                    if let Some(data) = found_data {
-                        self.execution_buffer = data;
+                    if found_any {
+                        self.execution_buffer = combined;
                         self.execution_index = 0;
                         self.phase = FdcPhase::ExecutionRead;
 
-                        // Préparer la phase de résultat pour la fin de la lecture
                         self.result_buffer.push(0x00); // ST0
                         self.result_buffer.push(0x00); // ST1
                         self.result_buffer.push(0x00); // ST2
                         self.result_buffer.push(track);
                         self.result_buffer.push(side);
-                        self.result_buffer.push(sector_id + 1); // Secteur suivant
-                        self.result_buffer.push(2); // Taille
+                        self.result_buffer.push(last_id.wrapping_add(1)); // Secteur suivant
+                        self.result_buffer.push(n); // N tel que demandé par la commande
                     } else {
                         // Secteur non trouvé (No Data error)
-                        self.result_buffer.push(0x40); // ST0: Abormal termination
+                        self.result_buffer.push(0x40); // ST0: Abnormal termination
                         self.result_buffer.push(0x04); // ST1: No Data
                         self.result_buffer.push(0x00); // ST2
                         self.result_buffer.push(track);
                         self.result_buffer.push(side);
-                        self.result_buffer.push(sector_id);
-                        self.result_buffer.push(2);
+                        self.result_buffer.push(start_sector);
+                        self.result_buffer.push(n);
                         self.phase = FdcPhase::Result;
                     }
                 } else {
@@ -475,13 +640,35 @@ impl Fdc {
             }
             0x05 => {
                 // Write Data
-                if self.command_buffer.len() >= 6 {
+                // NB : contrairement à Read Data, cette implémentation ne gère
+                // qu'un seul secteur par commande (cas très largement majoritaire
+                // en usage réel — AMSDOS/CP-M écrivent secteur par secteur).
+                if self.command_buffer.len() >= 9 {
                     self.current_track = self.command_buffer[2];
                     self.current_side = self.command_buffer[3] & 0x01;
                     self.current_sector = self.command_buffer[4];
 
                     self.execution_buffer.clear();
                     self.execution_index = 0;
+                    self.phase = FdcPhase::ExecutionWrite;
+                } else {
+                    self.phase = FdcPhase::Command;
+                    self.command_buffer.clear();
+                }
+            }
+            0x0D => {
+                // Format Track
+                // Command format: [Cmd, HD/US, N, SC, GPL3, D]
+                // Les descripteurs (C,H,R,N) de chaque secteur à créer arrivent
+                // ensuite en phase d'exécution (SC groupes de 4 octets).
+                if self.command_buffer.len() >= 6 {
+                    self.current_side = self.command_buffer[1] & 0x01;
+                    self.format_n = self.command_buffer[2];
+                    self.format_sc = self.command_buffer[3];
+                    self.format_fill = self.command_buffer[5];
+                    self.execution_buffer.clear();
+                    self.execution_index = 0;
+                    self.formatting = true;
                     self.phase = FdcPhase::ExecutionWrite;
                 } else {
                     self.phase = FdcPhase::Command;
@@ -510,6 +697,7 @@ impl Fdc {
                     for s in &mut t.sectors {
                         if s.id == sector_id {
                             s.data = self.execution_buffer.clone();
+                            s.size = s.data.len();
                             updated = true;
                             break;
                         }
@@ -521,24 +709,96 @@ impl Fdc {
         self.result_buffer.clear();
         self.result_index = 0;
 
+        let n = *self.command_buffer.get(5).unwrap_or(&2);
+
         if updated {
             self.result_buffer.push(0x00); // ST0 Success
             self.result_buffer.push(0x00); // ST1
             self.result_buffer.push(0x00); // ST2
             self.result_buffer.push(track);
             self.result_buffer.push(side);
-            self.result_buffer.push(sector_id + 1); // Prochain secteur
-            self.result_buffer.push(2); // Taille 512
+            self.result_buffer.push(sector_id.wrapping_add(1)); // Prochain secteur
+            self.result_buffer.push(n);
         } else {
-            // Erreur d'écriture
+            // Erreur d'écriture (secteur inexistant sur l'image : on ne crée pas de
+            // nouveau secteur via Write Data, seul Format Track le fait, comme sur
+            // le vrai matériel)
             self.result_buffer.push(0x40); // Abnormal
             self.result_buffer.push(0x04); // No Data
             self.result_buffer.push(0x00);
             self.result_buffer.push(track);
             self.result_buffer.push(side);
             self.result_buffer.push(sector_id);
-            self.result_buffer.push(2);
+            self.result_buffer.push(n);
         }
         self.phase = FdcPhase::Result;
     }
+
+    /// Clôture de la commande Format Track : construit les secteurs de la piste à
+    /// partir des descripteurs (C,H,R,N) reçus en phase d'exécution, remplis avec
+    /// l'octet de bourrage demandé.
+    fn finish_format_command(&mut self) {
+        let track_num = self.current_track;
+        let side_num = self.current_side;
+        let n = self.format_n.min(6);
+        let sector_size = 128usize << n;
+        let fill = self.format_fill;
+
+        let mut sectors = Vec::new();
+        for chunk in self.execution_buffer.chunks(4) {
+            if chunk.len() < 4 {
+                break;
+            }
+            let r = chunk[2]; // identifiant de secteur (R) du descripteur
+            sectors.push(Sector {
+                id: r,
+                size: sector_size,
+                data: vec![fill; sector_size],
+            });
+        }
+
+        let dsk = self.dsk.get_or_insert_with(|| DskImage { tracks: Vec::new() });
+
+        if let Some(t) = dsk
+            .tracks
+            .iter_mut()
+            .find(|t| t.number == track_num && t.side == side_num)
+        {
+            t.sectors = sectors;
+            t.sector_size = n;
+        } else {
+            dsk.tracks.push(Track {
+                number: track_num,
+                side: side_num,
+                sector_size: n,
+                sectors,
+            });
+        }
+        self.disk_loaded = true;
+
+        self.result_buffer.clear();
+        self.result_index = 0;
+        self.result_buffer.push(0x00); // ST0
+        self.result_buffer.push(0x00); // ST1
+        self.result_buffer.push(0x00); // ST2
+        self.result_buffer.push(track_num);
+        self.result_buffer.push(side_num);
+        self.result_buffer.push(0x00); // R (non significatif après un formatage)
+        self.result_buffer.push(n);
+        self.phase = FdcPhase::Result;
+        self.formatting = false;
+    }
+}
+
+/// Convertit une taille de secteur en octets vers le code N (128 << N) attendu
+/// par le protocole FDC. Retombe sur N=2 (512 octets, le standard AMSDOS) si la
+/// taille ne correspond à aucune puissance de deux valide.
+fn size_to_n(size: usize) -> u8 {
+    let mut n = 0u8;
+    let mut s = 128usize;
+    while s < size && n < 6 {
+        s <<= 1;
+        n += 1;
+    }
+    n
 }

@@ -68,8 +68,14 @@ impl Bus for CpcBus {
 
         // 3. Décodage du FDC (Bit 10 = 0, soit port & 0x0400 == 0)
         if (port & 0x0400) == 0 {
-            // Ports FDC : &FB7E (MSR) et &FB7F (DATA) -> Bit 7 ou 8 à 1
-            if (port & 0x0080) != 0 {
+            // Le vrai matériel distingue le contrôle moteur (&FA7E) du chip FDC
+            // (&FB7E/&FB7F) via le BIT 8 de l'adresse, PAS le bit 7 :
+            //   &FA7E = 1111 1010 0111 1110  -> bit8 = 0 (moteur)
+            //   &FB7E = 1111 1011 0111 1110  -> bit8 = 1, bit0 = 0 (MSR)
+            //   &FB7F = 1111 1011 0111 1111  -> bit8 = 1, bit0 = 1 (DATA)
+            // Le bit 7 vaut 0 dans les TROIS cas : le tester ne permettait donc
+            // jamais d'atteindre le chip FDC (bug corrigé ici).
+            if (port & 0x0100) != 0 {
                 if (port & 0x0001) != 0 {
                     return self.fdc.borrow_mut().read_data();
                 } else {
@@ -121,8 +127,12 @@ impl Bus for CpcBus {
 
         // 5. Décodage du FDC et contrôle du moteur de disquette (Bit 10 = 0, soit port & 0x0400 == 0)
         if (port & 0x0400) == 0 {
-            if (port & 0x0080) != 0 {
-                // Écriture DATA FDC (&FB7F ou similaire)
+            // Voir le commentaire détaillé dans read_io : c'est le BIT 8 qui sépare
+            // le contrôle moteur (&FA7E, bit8=0) du chip FDC (&FB7E/&FB7F, bit8=1).
+            if (port & 0x0100) != 0 {
+                // Écriture DATA FDC (&FB7F, bit0=1). Une écriture sur &FB7E (MSR,
+                // bit0=0) est ignorée : ce registre est en lecture seule sur le vrai
+                // matériel.
                 if (port & 0x0001) != 0 {
                     self.fdc.borrow_mut().write_data(value);
                 }
