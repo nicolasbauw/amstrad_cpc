@@ -46,9 +46,12 @@ impl DskImage {
 
     /// Lecture sécurisée d'un octet : ne panique jamais sur un fichier corrompu.
     fn get_u8(data: &[u8], offset: usize) -> Result<u8, String> {
-        data.get(offset)
-            .copied()
-            .ok_or_else(|| format!("DSK corrompu : lecture hors limites à l'offset {:#X}", offset))
+        data.get(offset).copied().ok_or_else(|| {
+            format!(
+                "DSK corrompu : lecture hors limites à l'offset {:#X}",
+                offset
+            )
+        })
     }
 
     fn parse_standard(data: &[u8]) -> Result<Self, String> {
@@ -172,6 +175,45 @@ impl DskImage {
     }
 }
 
+/// État propre à un lecteur de disquette physique : position de la tête,
+/// disque chargé, image `.dsk` en mémoire. Le CPC 6128 peut piloter jusqu'à
+/// deux lecteurs (A et B), partageant le même contrôleur FDC (voir `Fdc`
+/// ci-dessous), exactement comme sur le matériel réel où un seul chip
+/// µPD765A gère plusieurs lecteurs via le champ "Drive Select".
+pub struct Drive {
+    pub current_track: u8,
+    pub current_sector: u8,
+    pub current_side: u8,
+    pub disk_loaded: bool,
+    pub current_filename: String,
+    pub dsk: Option<DskImage>,
+}
+
+impl Drive {
+    pub fn new() -> Self {
+        Self {
+            current_track: 0,
+            current_sector: 0xC1, // Premier secteur standard d'une disquette CPC (système AMSDOS)
+            current_side: 0,
+            disk_loaded: false,
+            current_filename: "None".to_string(),
+            dsk: None,
+        }
+    }
+
+    fn reset_position(&mut self) {
+        self.current_track = 0;
+        self.current_sector = 0xC1;
+        self.current_side = 0;
+    }
+}
+
+impl Default for Drive {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Fdc {
     pub phase: FdcPhase,
     pub command_buffer: Vec<u8>,
@@ -179,16 +221,18 @@ pub struct Fdc {
     pub result_buffer: Vec<u8>,
     pub result_index: usize,
 
-    // État logique
-    pub current_track: u8,
-    pub current_sector: u8,
-    pub current_side: u8,
-    pub motor_on: bool,
-    pub disk_loaded: bool,
-    pub current_filename: String,
+    // --- Lecteurs physiques ---
+    pub drive_a: Drive,
+    pub drive_b: Drive,
+    /// Le lecteur B n'est disponible que si activé dans la configuration
+    /// utilisateur (config.toml, section [drives], clé drive_b).
+    pub drive_b_enabled: bool,
+    /// Lecteur ciblé par la dernière commande décodée (0 = A, 1 = B), déduit
+    /// du bit US0 (bit 0) du champ "Drive/HD" présent dans la plupart des
+    /// commandes du FDC.
+    pub selected_drive: u8,
 
-    // Données de disquette
-    pub dsk: Option<DskImage>,
+    pub motor_on: bool,
 
     // Execution phase (transfert de données secteur)
     pub execution_buffer: Vec<u8>,
@@ -217,13 +261,11 @@ impl Fdc {
             command_len: 0,
             result_buffer: Vec::new(),
             result_index: 0,
-            current_track: 0,
-            current_sector: 0xC1, // Premier secteur standard d'une disquette CPC (système AMSDOS)
-            current_side: 0,
+            drive_a: Drive::new(),
+            drive_b: Drive::new(),
+            drive_b_enabled: false,
+            selected_drive: 0,
             motor_on: false,
-            disk_loaded: false,
-            current_filename: "None".to_string(),
-            dsk: None,
             execution_buffer: Vec::new(),
             execution_index: 0,
             st0: 0,
@@ -233,6 +275,37 @@ impl Fdc {
             format_sc: 0,
             format_fill: 0xE5,
         }
+    }
+
+    /// Accès immuable au lecteur actuellement sélectionné.
+    pub fn drive(&self) -> &Drive {
+        if self.selected_drive == 1 {
+            &self.drive_b
+        } else {
+            &self.drive_a
+        }
+    }
+
+    /// Accès mutable au lecteur actuellement sélectionné.
+    pub fn drive_mut(&mut self) -> &mut Drive {
+        if self.selected_drive == 1 {
+            &mut self.drive_b
+        } else {
+            &mut self.drive_a
+        }
+    }
+
+    /// Indique si le lecteur actuellement sélectionné est physiquement
+    /// disponible : le lecteur A est toujours présent, le lecteur B
+    /// uniquement s'il a été activé via config.toml.
+    fn selected_drive_available(&self) -> bool {
+        self.selected_drive == 0 || self.drive_b_enabled
+    }
+
+    /// Active ou désactive la disponibilité du lecteur B (piloté par
+    /// config.toml, section [drives], clé drive_b).
+    pub fn set_drive_b_enabled(&mut self, enabled: bool) {
+        self.drive_b_enabled = enabled;
     }
 
     /// Réinitialise l'état transitoire (phase, tampons de commande/résultat/exécution).
@@ -251,54 +324,95 @@ impl Fdc {
         self.st0 = 0;
     }
 
-    /// Charge un fichier disquette .dsk
-    pub fn load_disk(&mut self, filename: &str) -> Result<(), String> {
+    fn load_disk_into(drive: &mut Drive, filename: &str) -> Result<(), String> {
         let mut f = File::open(filename).map_err(|e| e.to_string())?;
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
 
         let dsk = DskImage::parse(&buffer)?;
-        self.dsk = Some(dsk);
-        self.disk_loaded = true;
-        self.current_filename = filename.to_string();
-        self.current_track = 0;
-        self.current_sector = 0xC1;
-        self.current_side = 0;
-        self.reset_transient_state();
-
-        println!("Floppy DSK Loaded: {}", filename);
+        drive.dsk = Some(dsk);
+        drive.disk_loaded = true;
+        drive.current_filename = filename.to_string();
+        drive.reset_position();
         Ok(())
     }
 
-    /// Éjecte la disquette
+    /// Charge un fichier disquette .dsk sur le lecteur A.
+    pub fn load_disk(&mut self, filename: &str) -> Result<(), String> {
+        Self::load_disk_into(&mut self.drive_a, filename)?;
+        self.reset_transient_state();
+        println!("Floppy DSK Loaded on drive A: {}", filename);
+        Ok(())
+    }
+
+    /// Charge un fichier disquette .dsk sur le lecteur B.
+    /// Échoue si le lecteur B n'a pas été activé dans config.toml.
+    pub fn load_disk_b(&mut self, filename: &str) -> Result<(), String> {
+        if !self.drive_b_enabled {
+            return Err(
+                "Le lecteur B n'est pas activé dans la configuration (config.toml : [drives] drive_b = true)"
+                    .to_string(),
+            );
+        }
+        Self::load_disk_into(&mut self.drive_b, filename)?;
+        self.reset_transient_state();
+        println!("Floppy DSK Loaded on drive B: {}", filename);
+        Ok(())
+    }
+
+    /// Éjecte la disquette du lecteur A.
     pub fn eject_disk(&mut self) {
-        self.dsk = None;
-        self.disk_loaded = false;
-        self.current_filename = "None".to_string();
+        self.drive_a.dsk = None;
+        self.drive_a.disk_loaded = false;
+        self.drive_a.current_filename = "None".to_string();
         self.reset_transient_state();
-        println!("Floppy DSK Ejected");
+        println!("Floppy DSK Ejected from drive A");
     }
 
-    /// Initialise le FDC avec les valeurs par défaut du CPC
+    /// Éjecte la disquette du lecteur B.
+    pub fn eject_disk_b(&mut self) {
+        if !self.drive_b_enabled {
+            println!("Le lecteur B n'est pas activé dans la configuration (config.toml)");
+            return;
+        }
+        self.drive_b.dsk = None;
+        self.drive_b.disk_loaded = false;
+        self.drive_b.current_filename = "None".to_string();
+        self.reset_transient_state();
+        println!("Floppy DSK Ejected from drive B");
+    }
+
+    /// Initialise le FDC avec les valeurs par défaut du CPC. `drive_b_enabled`
+    /// n'est volontairement PAS réinitialisé ici : c'est un paramètre de
+    /// configuration, pas un état transitoire de session.
     pub fn init_defaults(&mut self) {
-        self.current_track = 0;
-        self.current_sector = 0xC1;
-        self.current_side = 0;
+        self.drive_a = Drive::new();
+        self.drive_b = Drive::new();
+        self.selected_drive = 0;
         self.motor_on = false;
-        self.disk_loaded = false;
-        self.current_filename = "None".to_string();
-        self.dsk = None;
         self.reset_transient_state();
     }
 
-    /// Réécrit l'image disquette en mémoire vers un fichier .dsk (format standard,
-    /// non-Extended). Permet de persister les écritures / formatages effectués
-    /// pendant la session d'émulation.
-    pub fn save_disk(&self, filename: &str) -> Result<(), String> {
-        let dsk = self.dsk.as_ref().ok_or_else(|| "Aucune disquette chargée".to_string())?;
+    fn save_disk_from(drive: &Drive, filename: &str) -> Result<(), String> {
+        let dsk = drive
+            .dsk
+            .as_ref()
+            .ok_or_else(|| "Aucune disquette chargée".to_string())?;
 
-        let num_tracks = dsk.tracks.iter().map(|t| t.number).max().map(|m| m + 1).unwrap_or(0);
-        let num_sides = dsk.tracks.iter().map(|t| t.side).max().map(|m| m + 1).unwrap_or(1);
+        let num_tracks = dsk
+            .tracks
+            .iter()
+            .map(|t| t.number)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0);
+        let num_sides = dsk
+            .tracks
+            .iter()
+            .map(|t| t.side)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(1);
 
         let max_track_payload = dsk
             .tracks
@@ -323,7 +437,11 @@ impl Fdc {
                 let mut track_block = vec![0u8; track_size];
                 track_block[0..12].copy_from_slice(b"Track-Info\r\n");
 
-                if let Some(track) = dsk.tracks.iter().find(|t| t.number == t_num && t.side == s_num) {
+                if let Some(track) = dsk
+                    .tracks
+                    .iter()
+                    .find(|t| t.number == t_num && t.side == s_num)
+                {
                     track_block[0x10] = track.number;
                     track_block[0x11] = track.side;
                     track_block[0x14] = track.sector_size;
@@ -355,6 +473,17 @@ impl Fdc {
         let mut f = File::create(filename).map_err(|e| e.to_string())?;
         f.write_all(&out).map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Réécrit l'image disquette du lecteur A en mémoire vers un fichier .dsk
+    /// (format standard, non-Extended).
+    pub fn save_disk(&self, filename: &str) -> Result<(), String> {
+        Self::save_disk_from(&self.drive_a, filename)
+    }
+
+    /// Réécrit l'image disquette du lecteur B en mémoire vers un fichier .dsk.
+    pub fn save_disk_b(&self, filename: &str) -> Result<(), String> {
+        Self::save_disk_from(&self.drive_b, filename)
     }
 
     /// Lecture du registre de statut (MSR) sur le port &FB7E
@@ -485,6 +614,16 @@ impl Fdc {
         self.result_buffer.clear();
         self.result_index = 0;
 
+        // Bit 0 (US0) du second octet ("Drive/HD"), présent dans la quasi-totalité
+        // des commandes, sélectionne le lecteur ciblé (0 = A, 1 = B). Specify (0x03)
+        // et Sense Interrupt Status (0x08) n'ont pas ce champ et ne modifient donc
+        // pas le lecteur sélectionné.
+        if cmd != 0x03 && cmd != 0x08 {
+            if let Some(&b1) = self.command_buffer.get(1) {
+                self.selected_drive = b1 & 0x01;
+            }
+        }
+
         match cmd {
             0x03 => {
                 // Specify
@@ -497,7 +636,9 @@ impl Fdc {
                 // Result phase: ST3 (Status Register 3)
                 // ST3: Bit 5=DoubleSided, Bit 4=Track0, Bit 2=Ready
                 let mut st3 = 0x24; // Ready + DoubleSided
-                if self.current_track == 0 {
+                if !self.selected_drive_available() {
+                    st3 = 0x08; // Not Ready : lecteur absent (B désactivé)
+                } else if self.drive().current_track == 0 {
                     st3 |= 0x10; // Track 0
                 }
                 self.result_buffer.push(st3);
@@ -506,18 +647,27 @@ impl Fdc {
             0x07 => {
                 // Recalibrate
                 // Retourne la tête à la piste 0
-                self.current_track = 0;
-                self.st0 = 0x20; // Seek End
+                if self.selected_drive_available() {
+                    self.drive_mut().current_track = 0;
+                    self.st0 = 0x20; // Seek End
+                } else {
+                    self.st0 = 0x48 | (self.selected_drive & 0x03); // Abnormal termination + Not Ready
+                }
                 self.seek_interrupt_pending = true;
                 self.phase = FdcPhase::Command;
                 self.command_buffer.clear();
             }
             0x0F => {
                 // Seek
-                if self.command_buffer.len() >= 3 {
-                    self.current_track = self.command_buffer[2];
+                if self.selected_drive_available() {
+                    if self.command_buffer.len() >= 3 {
+                        let nc = self.command_buffer[2];
+                        self.drive_mut().current_track = nc;
+                    }
+                    self.st0 = 0x20; // Seek End
+                } else {
+                    self.st0 = 0x48 | (self.selected_drive & 0x03); // Abnormal termination + Not Ready
                 }
-                self.st0 = 0x20; // Seek End
                 self.seek_interrupt_pending = true;
                 self.phase = FdcPhase::Command;
                 self.command_buffer.clear();
@@ -528,7 +678,7 @@ impl Fdc {
                 // seek/recalibrate en attente est une erreur (ST0 = invalid command).
                 if self.seek_interrupt_pending {
                     self.result_buffer.push(self.st0);
-                    self.result_buffer.push(self.current_track);
+                    self.result_buffer.push(self.drive().current_track);
                     self.seek_interrupt_pending = false;
                     self.st0 = 0x00;
                 } else {
@@ -538,36 +688,55 @@ impl Fdc {
             }
             0x0A => {
                 // Read ID
-                // Result: ST0, ST1, ST2, C, H, R, N
-                // On va chercher le premier secteur réellement présent sur la piste
-                // courante de l'image chargée, plutôt que de renvoyer des valeurs
-                // figées même en l'absence de disque.
-                let found = self.dsk.as_ref().and_then(|dsk| {
-                    dsk.tracks
-                        .iter()
-                        .find(|t| t.number == self.current_track && t.side == self.current_side)
-                        .and_then(|t| t.sectors.first())
-                        .map(|s| (s.id, s.size))
-                });
-
-                if let Some((sec_id, sec_size)) = found {
-                    let n = size_to_n(sec_size);
-                    self.result_buffer.push(0x00); // ST0 Success
-                    self.result_buffer.push(0x00); // ST1
-                    self.result_buffer.push(0x00); // ST2
-                    self.result_buffer.push(self.current_track); // C
-                    self.result_buffer.push(self.current_side); // H
-                    self.result_buffer.push(sec_id); // R
-                    self.result_buffer.push(n); // N
-                } else {
-                    // Pas de disque, ou piste inexistante sur l'image chargée
+                if !self.selected_drive_available() {
                     self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
                     self.result_buffer.push(0x01); // ST1: Missing Address Mark
                     self.result_buffer.push(0x00); // ST2
-                    self.result_buffer.push(self.current_track);
-                    self.result_buffer.push(self.current_side);
+                    self.result_buffer.push(self.drive().current_track);
+                    self.result_buffer.push(self.drive().current_side);
                     self.result_buffer.push(0x00);
                     self.result_buffer.push(0x00);
+                } else {
+                    // Le bit 2 (HD) du champ Drive/HD indique la face demandée
+                    // (le bit 0, US0, a été consommé plus haut pour le lecteur).
+                    if let Some(&b1) = self.command_buffer.get(1) {
+                        self.drive_mut().current_side = (b1 >> 2) & 0x01;
+                    }
+                    let track = self.drive().current_track;
+                    let side = self.drive().current_side;
+
+                    // On va chercher le premier secteur réellement présent sur la
+                    // piste courante de l'image chargée sur le lecteur sélectionné.
+                    let found = {
+                        let drv = self.drive();
+                        drv.dsk.as_ref().and_then(|dsk| {
+                            dsk.tracks
+                                .iter()
+                                .find(|t| t.number == track && t.side == side)
+                                .and_then(|t| t.sectors.first())
+                                .map(|s| (s.id, s.size))
+                        })
+                    };
+
+                    if let Some((sec_id, sec_size)) = found {
+                        let n = size_to_n(sec_size);
+                        self.result_buffer.push(0x00); // ST0 Success
+                        self.result_buffer.push(0x00); // ST1
+                        self.result_buffer.push(0x00); // ST2
+                        self.result_buffer.push(track); // C
+                        self.result_buffer.push(side); // H
+                        self.result_buffer.push(sec_id); // R
+                        self.result_buffer.push(n); // N
+                    } else {
+                        // Pas de disque, ou piste inexistante sur l'image chargée
+                        self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
+                        self.result_buffer.push(0x01); // ST1: Missing Address Mark
+                        self.result_buffer.push(0x00); // ST2
+                        self.result_buffer.push(track);
+                        self.result_buffer.push(side);
+                        self.result_buffer.push(0x00);
+                        self.result_buffer.push(0x00);
+                    }
                 }
                 self.phase = FdcPhase::Result;
             }
@@ -581,57 +750,74 @@ impl Fdc {
                     let n = self.command_buffer[5];
                     let eot = self.command_buffer[6];
 
-                    self.current_track = track;
-                    self.current_side = side;
-                    self.current_sector = start_sector;
-
-                    // Transfert de tous les secteurs consécutifs entre R et EOT
-                    // (inclus) présents sur la piste, comme le ferait le vrai FDC
-                    // pour une commande couvrant plusieurs secteurs.
-                    let mut combined = Vec::new();
-                    let mut last_id = start_sector;
-                    let mut found_any = false;
-
-                    if let Some(ref dsk) = self.dsk {
-                        if let Some(t) =
-                            dsk.tracks.iter().find(|t| t.number == track && t.side == side)
-                        {
-                            let mut matched: Vec<&Sector> = t
-                                .sectors
-                                .iter()
-                                .filter(|s| s.id >= start_sector && s.id <= eot)
-                                .collect();
-                            matched.sort_by_key(|s| s.id);
-                            for s in matched {
-                                combined.extend_from_slice(&s.data);
-                                last_id = s.id;
-                                found_any = true;
-                            }
-                        }
-                    }
-
-                    if found_any {
-                        self.execution_buffer = combined;
-                        self.execution_index = 0;
-                        self.phase = FdcPhase::ExecutionRead;
-
-                        self.result_buffer.push(0x00); // ST0
-                        self.result_buffer.push(0x00); // ST1
-                        self.result_buffer.push(0x00); // ST2
-                        self.result_buffer.push(track);
-                        self.result_buffer.push(side);
-                        self.result_buffer.push(last_id.wrapping_add(1)); // Secteur suivant
-                        self.result_buffer.push(n); // N tel que demandé par la commande
-                    } else {
-                        // Secteur non trouvé (No Data error)
-                        self.result_buffer.push(0x40); // ST0: Abnormal termination
-                        self.result_buffer.push(0x04); // ST1: No Data
+                    if !self.selected_drive_available() {
+                        self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
+                        self.result_buffer.push(0x01); // ST1
                         self.result_buffer.push(0x00); // ST2
                         self.result_buffer.push(track);
                         self.result_buffer.push(side);
                         self.result_buffer.push(start_sector);
                         self.result_buffer.push(n);
                         self.phase = FdcPhase::Result;
+                    } else {
+                        self.drive_mut().current_track = track;
+                        self.drive_mut().current_side = side;
+                        self.drive_mut().current_sector = start_sector;
+
+                        // Transfert de tous les secteurs consécutifs entre R et EOT
+                        // (inclus) présents sur la piste, comme le ferait le vrai FDC
+                        // pour une commande couvrant plusieurs secteurs.
+                        let (found_any, combined, last_id) = {
+                            let drv = self.drive();
+                            let mut combined = Vec::new();
+                            let mut last_id = start_sector;
+                            let mut found_any = false;
+
+                            if let Some(ref dsk) = drv.dsk {
+                                if let Some(t) = dsk
+                                    .tracks
+                                    .iter()
+                                    .find(|t| t.number == track && t.side == side)
+                                {
+                                    let mut matched: Vec<&Sector> = t
+                                        .sectors
+                                        .iter()
+                                        .filter(|s| s.id >= start_sector && s.id <= eot)
+                                        .collect();
+                                    matched.sort_by_key(|s| s.id);
+                                    for s in matched {
+                                        combined.extend_from_slice(&s.data);
+                                        last_id = s.id;
+                                        found_any = true;
+                                    }
+                                }
+                            }
+                            (found_any, combined, last_id)
+                        };
+
+                        if found_any {
+                            self.execution_buffer = combined;
+                            self.execution_index = 0;
+                            self.phase = FdcPhase::ExecutionRead;
+
+                            self.result_buffer.push(0x00); // ST0
+                            self.result_buffer.push(0x00); // ST1
+                            self.result_buffer.push(0x00); // ST2
+                            self.result_buffer.push(track);
+                            self.result_buffer.push(side);
+                            self.result_buffer.push(last_id.wrapping_add(1)); // Secteur suivant
+                            self.result_buffer.push(n); // N tel que demandé par la commande
+                        } else {
+                            // Secteur non trouvé (No Data error)
+                            self.result_buffer.push(0x40); // ST0: Abnormal termination
+                            self.result_buffer.push(0x04); // ST1: No Data
+                            self.result_buffer.push(0x00); // ST2
+                            self.result_buffer.push(track);
+                            self.result_buffer.push(side);
+                            self.result_buffer.push(start_sector);
+                            self.result_buffer.push(n);
+                            self.phase = FdcPhase::Result;
+                        }
                     }
                 } else {
                     self.phase = FdcPhase::Command;
@@ -644,13 +830,27 @@ impl Fdc {
                 // qu'un seul secteur par commande (cas très largement majoritaire
                 // en usage réel — AMSDOS/CP-M écrivent secteur par secteur).
                 if self.command_buffer.len() >= 9 {
-                    self.current_track = self.command_buffer[2];
-                    self.current_side = self.command_buffer[3] & 0x01;
-                    self.current_sector = self.command_buffer[4];
+                    if !self.selected_drive_available() {
+                        let track = self.command_buffer[2];
+                        let side = self.command_buffer[3] & 0x01;
+                        let n = self.command_buffer[5];
+                        self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
+                        self.result_buffer.push(0x01); // ST1
+                        self.result_buffer.push(0x00); // ST2
+                        self.result_buffer.push(track);
+                        self.result_buffer.push(side);
+                        self.result_buffer.push(self.command_buffer[4]);
+                        self.result_buffer.push(n);
+                        self.phase = FdcPhase::Result;
+                    } else {
+                        self.drive_mut().current_track = self.command_buffer[2];
+                        self.drive_mut().current_side = self.command_buffer[3] & 0x01;
+                        self.drive_mut().current_sector = self.command_buffer[4];
 
-                    self.execution_buffer.clear();
-                    self.execution_index = 0;
-                    self.phase = FdcPhase::ExecutionWrite;
+                        self.execution_buffer.clear();
+                        self.execution_index = 0;
+                        self.phase = FdcPhase::ExecutionWrite;
+                    }
                 } else {
                     self.phase = FdcPhase::Command;
                     self.command_buffer.clear();
@@ -662,14 +862,21 @@ impl Fdc {
                 // Les descripteurs (C,H,R,N) de chaque secteur à créer arrivent
                 // ensuite en phase d'exécution (SC groupes de 4 octets).
                 if self.command_buffer.len() >= 6 {
-                    self.current_side = self.command_buffer[1] & 0x01;
-                    self.format_n = self.command_buffer[2];
-                    self.format_sc = self.command_buffer[3];
-                    self.format_fill = self.command_buffer[5];
-                    self.execution_buffer.clear();
-                    self.execution_index = 0;
-                    self.formatting = true;
-                    self.phase = FdcPhase::ExecutionWrite;
+                    if !self.selected_drive_available() {
+                        self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
+                        self.phase = FdcPhase::Result;
+                    } else {
+                        // Bit 2 (HD) du champ Drive/HD indique la face à formater
+                        // (le bit 0, US0, a été consommé plus haut pour le lecteur).
+                        self.drive_mut().current_side = (self.command_buffer[1] >> 2) & 0x01;
+                        self.format_n = self.command_buffer[2];
+                        self.format_sc = self.command_buffer[3];
+                        self.format_fill = self.command_buffer[5];
+                        self.execution_buffer.clear();
+                        self.execution_index = 0;
+                        self.formatting = true;
+                        self.phase = FdcPhase::ExecutionWrite;
+                    }
                 } else {
                     self.phase = FdcPhase::Command;
                     self.command_buffer.clear();
@@ -685,21 +892,26 @@ impl Fdc {
 
     /// Clôture de l'écriture d'un secteur
     fn finish_write_command(&mut self) {
-        let track = self.current_track;
-        let side = self.current_side;
-        let sector_id = self.current_sector;
+        let track = self.drive().current_track;
+        let side = self.drive().current_side;
+        let sector_id = self.drive().current_sector;
+        let data = self.execution_buffer.clone();
+        let n = *self.command_buffer.get(5).unwrap_or(&2);
 
-        // Mise à jour de l'image disquette en mémoire
+        // Mise à jour de l'image disquette du lecteur ciblé, en mémoire
         let mut updated = false;
-        if let Some(ref mut dsk) = self.dsk {
-            for t in &mut dsk.tracks {
-                if t.number == track && t.side == side {
-                    for s in &mut t.sectors {
-                        if s.id == sector_id {
-                            s.data = self.execution_buffer.clone();
-                            s.size = s.data.len();
-                            updated = true;
-                            break;
+        {
+            let drv = self.drive_mut();
+            if let Some(ref mut dsk) = drv.dsk {
+                for t in &mut dsk.tracks {
+                    if t.number == track && t.side == side {
+                        for s in &mut t.sectors {
+                            if s.id == sector_id {
+                                s.size = data.len();
+                                s.data = data.clone();
+                                updated = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -708,8 +920,6 @@ impl Fdc {
 
         self.result_buffer.clear();
         self.result_index = 0;
-
-        let n = *self.command_buffer.get(5).unwrap_or(&2);
 
         if updated {
             self.result_buffer.push(0x00); // ST0 Success
@@ -736,16 +946,17 @@ impl Fdc {
 
     /// Clôture de la commande Format Track : construit les secteurs de la piste à
     /// partir des descripteurs (C,H,R,N) reçus en phase d'exécution, remplis avec
-    /// l'octet de bourrage demandé.
+    /// l'octet de bourrage demandé, sur le lecteur actuellement sélectionné.
     fn finish_format_command(&mut self) {
-        let track_num = self.current_track;
-        let side_num = self.current_side;
+        let track_num = self.drive().current_track;
+        let side_num = self.drive().current_side;
         let n = self.format_n.min(6);
         let sector_size = 128usize << n;
         let fill = self.format_fill;
+        let exec_buffer = self.execution_buffer.clone();
 
         let mut sectors = Vec::new();
-        for chunk in self.execution_buffer.chunks(4) {
+        for chunk in exec_buffer.chunks(4) {
             if chunk.len() < 4 {
                 break;
             }
@@ -757,24 +968,29 @@ impl Fdc {
             });
         }
 
-        let dsk = self.dsk.get_or_insert_with(|| DskImage { tracks: Vec::new() });
-
-        if let Some(t) = dsk
-            .tracks
-            .iter_mut()
-            .find(|t| t.number == track_num && t.side == side_num)
         {
-            t.sectors = sectors;
-            t.sector_size = n;
-        } else {
-            dsk.tracks.push(Track {
-                number: track_num,
-                side: side_num,
-                sector_size: n,
-                sectors,
-            });
+            let drv = self.drive_mut();
+            let dsk = drv
+                .dsk
+                .get_or_insert_with(|| DskImage { tracks: Vec::new() });
+
+            if let Some(t) = dsk
+                .tracks
+                .iter_mut()
+                .find(|t| t.number == track_num && t.side == side_num)
+            {
+                t.sectors = sectors;
+                t.sector_size = n;
+            } else {
+                dsk.tracks.push(Track {
+                    number: track_num,
+                    side: side_num,
+                    sector_size: n,
+                    sectors,
+                });
+            }
+            drv.disk_loaded = true;
         }
-        self.disk_loaded = true;
 
         self.result_buffer.clear();
         self.result_index = 0;
@@ -787,6 +1003,12 @@ impl Fdc {
         self.result_buffer.push(n);
         self.phase = FdcPhase::Result;
         self.formatting = false;
+    }
+}
+
+impl Default for Fdc {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

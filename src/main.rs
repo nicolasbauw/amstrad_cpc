@@ -1,4 +1,5 @@
 mod bus;
+mod config;
 mod console;
 mod crtc;
 mod fdc;

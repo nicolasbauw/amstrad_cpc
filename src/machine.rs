@@ -1,4 +1,5 @@
 use crate::bus::CpcBus;
+use crate::config;
 use crate::hexconversion::HexStringToUnsigned;
 use crate::memory::Memory;
 use crate::monitor::MonitorCmd;
@@ -11,8 +12,10 @@ use zilog_z80::{bus::Bus, cpu::CPU};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const HELP: &str = "
 Emulator commands:
-    disk d.dsk      Loads the d.dsk disk image
-    disk eject      Ejects the loaded disk
+    disk d.dsk      Loads the d.dsk disk image on drive A
+    disk d.dsk b    Loads the d.dsk disk image on drive B (if enabled in config.toml)
+    disk eject      Ejects the disk image from drive A
+    disk eject b    Ejects the disk image from drive B
 
 Monitor commands:
     d 0x0000        disassembles code at 0x0000 and the 20 next
@@ -104,7 +107,7 @@ impl Machine {
         let bus = CpcBus::new(memory);
         let cpu = CPU::new();
 
-        let m = Self {
+        let mut m = Self {
             cpu,
             bus,
             total_ticks: 0,
@@ -117,6 +120,25 @@ impl Machine {
             stopped_at_breakpoint: false,
             waiting_for_key: false,
         };
+
+        // Charge la configuration utilisateur (config.toml) pour savoir si le
+        // lecteur B doit être activé. En cas d'échec (fichier absent ou mal
+        // formé), le lecteur B reste simplement désactivé par défaut.
+        match config::load_config_file() {
+            Ok(cfg) => {
+                m.bus
+                    .fdc
+                    .borrow_mut()
+                    .set_drive_b_enabled(cfg.drives.drive_b);
+                if cfg.drives.drive_b {
+                    println!("Drive B enabled (config.toml)");
+                }
+            }
+            Err(_) => {
+                println!("Config file not found or invalid: drive B disabled by default.");
+            }
+        }
+
         crate::console::launch(m.cmd_channel.0.clone()).unwrap();
         m
     }
@@ -391,6 +413,35 @@ impl Machine {
         }
         let _ = writeln!(s);
 
+        // --- FDC / LECTEURS DE DISQUETTES ---
+        {
+            let fdc = self.bus.fdc.borrow();
+            let _ = writeln!(s, "\n[FDC]");
+            let _ = writeln!(s, "  Motor On           : {}", fdc.motor_on);
+            let _ = writeln!(
+                s,
+                "  Drive A            : {}",
+                if fdc.drive_a.disk_loaded {
+                    fdc.drive_a.current_filename.as_str()
+                } else {
+                    "None"
+                }
+            );
+            if fdc.drive_b_enabled {
+                let _ = writeln!(
+                    s,
+                    "  Drive B            : {}",
+                    if fdc.drive_b.disk_loaded {
+                        fdc.drive_b.current_filename.as_str()
+                    } else {
+                        "None"
+                    }
+                );
+            } else {
+                let _ = writeln!(s, "  Drive B            : disabled (config.toml)");
+            }
+        }
+
         // --- KEYBOARD MATRIX ---
         if show_kb {
             let _ = writeln!(
@@ -658,11 +709,28 @@ impl Machine {
                 self.cpu.reg.pc = a;
             }
             MonitorCmd::Disk => {
+                // Sans argument supplémentaire, on s'adresse au lecteur A.
+                // "disk <fichier> b" ou "disk eject b" ciblent le lecteur B.
+                let target_drive_b = arg2.eq_ignore_ascii_case("b");
+
                 if arg == "eject" {
-                    self.bus.fdc.borrow_mut().eject_disk();
+                    if target_drive_b {
+                        self.bus.fdc.borrow_mut().eject_disk_b();
+                    } else {
+                        self.bus.fdc.borrow_mut().eject_disk();
+                    }
                 } else {
-                    match self.bus.fdc.borrow_mut().load_disk(&arg) {
-                        Ok(_) => println!("Disk '{}' loaded", arg),
+                    let result = if target_drive_b {
+                        self.bus.fdc.borrow_mut().load_disk_b(&arg)
+                    } else {
+                        self.bus.fdc.borrow_mut().load_disk(&arg)
+                    };
+                    match result {
+                        Ok(_) => println!(
+                            "Disk '{}' loaded on drive {}",
+                            arg,
+                            if target_drive_b { "B" } else { "A" }
+                        ),
                         Err(e) => println!("Error loading disk: {}", e),
                     }
                 }
