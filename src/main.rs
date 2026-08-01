@@ -276,17 +276,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for line in debug_text.lines() {
                 let formatted_line = line.replace('\t', "    ");
                 if !formatted_line.trim().is_empty() {
-                    let surface = font
-                        .render(&formatted_line)
-                        .blended(sdl2::pixels::Color::RGB(220, 220, 225))
-                        .map_err(|e| e.to_string())?;
-                    let texture = texture_creator_debug
-                        .create_texture_from_surface(&surface)
-                        .map_err(|e| e.to_string())?;
+                    // La ligne "Disk access" se termine par un marqueur '●' (rouge,
+                    // accès disque en cours) rendu séparément du reste du texte.
+                    let (text_part, dot) = match formatted_line.strip_suffix('\u{25CF}') {
+                        Some(prefix) => (prefix, true),
+                        None => (formatted_line.as_str(), false),
+                    };
 
-                    let query = texture.query();
-                    let target_rect = sdl2::rect::Rect::new(15, y, query.width, query.height);
-                    let _ = debug_canvas.copy(&texture, None, Some(target_rect));
+                    let mut x = 15;
+                    if !text_part.is_empty() {
+                        let surface = font
+                            .render(text_part)
+                            .blended(sdl2::pixels::Color::RGB(220, 220, 225))
+                            .map_err(|e| e.to_string())?;
+                        let texture = texture_creator_debug
+                            .create_texture_from_surface(&surface)
+                            .map_err(|e| e.to_string())?;
+
+                        let query = texture.query();
+                        let target_rect = sdl2::rect::Rect::new(x, y, query.width, query.height);
+                        let _ = debug_canvas.copy(&texture, None, Some(target_rect));
+                        x += query.width as i32;
+                    }
+
+                    if dot {
+                        let surface = font
+                            .render("\u{25CF}")
+                            .blended(sdl2::pixels::Color::RGB(220, 40, 40))
+                            .map_err(|e| e.to_string())?;
+                        let texture = texture_creator_debug
+                            .create_texture_from_surface(&surface)
+                            .map_err(|e| e.to_string())?;
+
+                        let query = texture.query();
+                        let target_rect = sdl2::rect::Rect::new(x, y, query.width, query.height);
+                        let _ = debug_canvas.copy(&texture, None, Some(target_rect));
+                    }
                 }
                 y += line_height;
             }

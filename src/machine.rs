@@ -427,8 +427,17 @@ impl Machine {
         // --- FDC / LECTEURS DE DISQUETTES ---
         {
             let fdc = self.bus.fdc.borrow();
+            let disk_access = matches!(
+                fdc.phase,
+                crate::fdc::FdcPhase::ExecutionRead | crate::fdc::FdcPhase::ExecutionWrite
+            );
             let _ = writeln!(s, "\n[FDC]");
             let _ = writeln!(s, "  Motor On           : {}", fdc.motor_on);
+            let _ = writeln!(
+                s,
+                "  Disk access        : {}",
+                if disk_access { "\u{25CF}" } else { " " }
+            );
             let _ = writeln!(
                 s,
                 "  Drive A            : {}",
