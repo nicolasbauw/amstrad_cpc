@@ -1,7 +1,3 @@
-- afficher les paires de registres BC/DE/HL/AF, ainsi que les registres alt
-- renommer "debugger en "machine status"
-- rendre débrayable l'affichage de la matrice clavier
-- afficher l'accès en lecture sur les drives
 - pourquoi la ROM de diag indique un CRTC 03 au lieu de 02 ?
 - pourquoi la ROM de diag ne détecte pas le FDC ?
 - voir pourquoi le border ne change pas sous basic (cf diag de claude au sujet du timing et des interruptions)
