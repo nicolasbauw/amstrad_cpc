@@ -16,6 +16,7 @@ Emulator commands:
     disk d.dsk b    Loads the d.dsk disk image on drive B (if enabled in config.toml)
     disk eject      Ejects the disk image from drive A
     disk eject b    Ejects the disk image from drive B
+    pc              Performs a power cycle
 
 Monitor commands:
     d 0x0000        disassembles code at 0x0000 and the 20 next
@@ -162,6 +163,68 @@ impl Machine {
 
     pub fn is_running(&mut self) -> bool {
         self.running
+    }
+
+    /// Éteint virtuellement la machine : arrête l'exécution sans fermer la
+    /// fenêtre SDL ni quitter l'émulateur.
+    pub fn power_off(&mut self) {
+        self.stop();
+        println!("Power off.");
+    }
+
+    /// Rallume la machine : réinitialise le CPU, la RAM et les périphériques
+    /// comme lors d'un vrai démarrage à froid, recharge les ROMs, puis
+    /// reprend l'exécution. Les disquettes actuellement insérées ainsi que
+    /// les breakpoints/watchpoints sont conservés (comme sur le matériel
+    /// réel, une disquette reste dans le lecteur pendant un power cycle).
+    pub fn power_on(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let (disk_a, disk_b, drive_b_enabled) = {
+            let fdc = self.bus.fdc.borrow();
+            (
+                fdc.drive_a
+                    .disk_loaded
+                    .then(|| fdc.drive_a.current_filename.clone()),
+                fdc.drive_b
+                    .disk_loaded
+                    .then(|| fdc.drive_b.current_filename.clone()),
+                fdc.drive_b_enabled,
+            )
+        };
+
+        self.bus = CpcBus::new(Memory::new());
+        self.cpu = CPU::new();
+        self.total_ticks = 0;
+        self.hsync_accumulator = 0;
+        self.current_line = 0;
+        self.stopped_at_breakpoint = false;
+        self.waiting_for_key = false;
+
+        {
+            let mut fdc = self.bus.fdc.borrow_mut();
+            fdc.set_drive_b_enabled(drive_b_enabled);
+            if let Some(filename) = disk_a {
+                let _ = fdc.load_disk(&filename);
+            }
+            if let Some(filename) = disk_b {
+                let _ = fdc.load_disk_b(&filename);
+            }
+        }
+
+        self.load_roms()?;
+        self.start();
+        println!("Power on.");
+        Ok(())
+    }
+
+    /// Coupe puis rétablit l'alimentation de la machine (redémarrage à
+    /// froid), équivalent de la commande console "pc".
+    pub fn power_cycle(&mut self) {
+        self.power_off();
+        if let Err(e) = self.power_on() {
+            println!("Power cycle failed: {e}");
+        } else {
+            println!("Power cycle complete.");
+        }
     }
 
     /// Charge les ROMs appropriées en fonction du mode (Diagnostic ou Officiel)
@@ -749,6 +812,9 @@ impl Machine {
                         Err(e) => println!("Error loading disk: {}", e),
                     }
                 }
+            }
+            MonitorCmd::PowerCycle => {
+                self.power_cycle();
             }
         }
         Ok(())
