@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut debug_visible = false;
     let debug_window = video_subsystem
-        .window("Amstrad CPC 6128 - Debugger", 800, 750)
+        .window("Amstrad CPC 6128 - Machine Status", 800, 750)
         .position_centered()
         .hidden()
         .resizable()
