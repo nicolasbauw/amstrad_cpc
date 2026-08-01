@@ -99,6 +99,7 @@ pub struct Machine {
     running: bool,
     stopped_at_breakpoint: bool,
     pub waiting_for_key: bool,
+    config: config::Config,
 }
 
 impl Machine {
@@ -107,7 +108,18 @@ impl Machine {
         let bus = CpcBus::new(memory);
         let cpu = CPU::new();
 
-        let mut m = Self {
+        // Charge la configuration utilisateur (config.toml). En cas d'échec
+        // (fichier absent ou mal formé), une configuration par défaut (tout
+        // désactivé) est utilisée.
+        let config = config::load_config_file().unwrap_or_else(|_| {
+            println!("Config file not found or invalid: drive B disabled by default.");
+            config::Config {
+                drives: config::DriveConfig { drive_b: false },
+                debugger: config::Debugger { keyboard: false },
+            }
+        });
+
+        let m = Self {
             cpu,
             bus,
             total_ticks: 0,
@@ -119,28 +131,25 @@ impl Machine {
             running: true,
             stopped_at_breakpoint: false,
             waiting_for_key: false,
+            config,
         };
 
-        // Charge la configuration utilisateur (config.toml) pour savoir si le
-        // lecteur B doit être activé. En cas d'échec (fichier absent ou mal
-        // formé), le lecteur B reste simplement désactivé par défaut.
-        match config::load_config_file() {
-            Ok(cfg) => {
-                m.bus
-                    .fdc
-                    .borrow_mut()
-                    .set_drive_b_enabled(cfg.drives.drive_b);
-                if cfg.drives.drive_b {
-                    println!("Drive B enabled (config.toml)");
-                }
-            }
-            Err(_) => {
-                println!("Config file not found or invalid: drive B disabled by default.");
-            }
+        m.bus
+            .fdc
+            .borrow_mut()
+            .set_drive_b_enabled(m.config.drives.drive_b);
+        if m.config.drives.drive_b {
+            println!("Drive B enabled (config.toml)");
         }
 
         crate::console::launch(m.cmd_channel.0.clone()).unwrap();
         m
+    }
+
+    /// Indique si la matrice clavier doit être affichée dans la fenêtre
+    /// SDL "Machine Status" (config.toml, section [debugger]).
+    pub fn show_keyboard_matrix(&self) -> bool {
+        self.config.debugger.keyboard
     }
 
     pub fn start(&mut self) {
@@ -575,11 +584,6 @@ impl Machine {
                 }
                 let _ = writeln!(s);
             }
-        } else {
-            let _ = writeln!(
-                s,
-                "\n[Keyboard Matrix] (Hidden - use 'hw kb' or 'hw keyboard' to show)"
-            );
         }
 
         s

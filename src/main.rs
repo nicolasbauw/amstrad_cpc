@@ -267,7 +267,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut debug_text = String::new();
             debug_text.push_str(&machine.get_registers_string());
             debug_text.push_str("\n");
-            debug_text.push_str(&machine.get_hardware_string(true)); // Afficher la matrice clavier en tps réel !
+            debug_text.push_str(&machine.get_hardware_string(machine.show_keyboard_matrix()));
 
             let texture_creator_debug = debug_canvas.texture_creator();
             let mut y = 10;
