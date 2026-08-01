@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-zilog_z80 = { git = "https://github.com/nicolasbauw/ZilogZ80.git", branch = "cpc" }
+zilog_z80 = { path = "../ZilogZ80" }
 sdl2 = { version = "0.38.0", features = ["ttf"] }
+toml = "1.1.4"
