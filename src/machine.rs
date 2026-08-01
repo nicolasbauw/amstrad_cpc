@@ -264,7 +264,8 @@ impl Machine {
             "=== REGISTERS & STATUS ===\n\
              PC :{:#06X}   SP : {:#06X}\n\
              S : {}  Z : {}  H : {}  P : {}  N : {}  C : {}\n\
-             B : {:#04X}  C : {:#04X}  D : {:#04X}  E : {:#04X}  H : {:#04X}  L : {:#04X}  A : {:#04X}\n\
+             BC : {:#06X}  DE : {:#06X}  HL : {:#06X}  AF : {:#06X}\n\
+             BC': {:#06X}  DE': {:#06X}  HL': {:#06X}  AF': {:#06X}\n\
              IXH : {:#04X}  IXL : {:#04X}  IYH : {:#04X}  IYL : {:#04X}\n\
              (SP) : {:#06X}  IFF1 : {}  IFF2 : {}  IM : {}  Pending INT : {}  Pending NMI : {}\n",
             pc,
@@ -275,13 +276,14 @@ impl Machine {
             self.cpu.reg.flags.p as i32,
             self.cpu.reg.flags.n as i32,
             self.cpu.reg.flags.c as i32,
-            self.cpu.reg.b,
-            self.cpu.reg.c,
-            self.cpu.reg.d,
-            self.cpu.reg.e,
-            self.cpu.reg.h,
-            self.cpu.reg.l,
-            self.cpu.reg.a,
+            self.cpu.reg.get_bc(),
+            self.cpu.reg.get_de(),
+            self.cpu.reg.get_hl(),
+            self.cpu.reg.get_af(),
+            self.cpu.alt.get_bc(),
+            self.cpu.alt.get_de(),
+            self.cpu.alt.get_hl(),
+            self.cpu.alt.get_af(),
             self.cpu.reg.ixh,
             self.cpu.reg.ixl,
             self.cpu.reg.iyh,
