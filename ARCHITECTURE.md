@@ -25,5 +25,5 @@ Chaque composant matériel de l'Amstrad CPC doit être isolé dans son propre mo
 - [x] Étape 4 : Boucle d'émulation de base (Fetch/Execute) et timings fins.
 - [x] Étape 5 : Intégration graphique (Rendu VRAM via SDL2 avec les vraies couleurs d'origine).
 - [ ] Étape 6 : Émulation du PSG (src/psg.rs) pour la gestion du clavier et de l'audio.
-- [ ] Étape 7 : Émulation du contrôleur de disquette FDC (src/fdc.rs) pour charger des fichiers d'extension `.DSK`.
+- [x] Étape 7 : Émulation du contrôleur de disquette FDC (src/fdc.rs) pour charger des fichiers d'extension `.DSK`.
 - [x] Étape 8 : Extension du Memory Banking à 128 Ko pour supporter les configurations du 6128.

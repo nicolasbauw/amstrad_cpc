@@ -1,0 +1,57 @@
+- afficher les paires de registres BC/DE/HL/AF, ainsi que les registres alt
+- renommer "debugger en "machine status"
+- rendre débrayable l'affichage de la matrice clavier
+- afficher l'accès en lecture sur les drives
+- pourquoi la ROM de diag indique un CRTC 03 au lieu de 02 ?
+- pourquoi la ROM de diag ne détecte pas le FDC ?
+- voir pourquoi le border ne change pas sous basic (cf diag de claude au sujet du timing et des interruptions)
+- voir l'écran bleu sur avec la ville infernale / crtc editor (lié aux histoires de timing ?) --> dans les deux cas, le CPC n'est pas planté !! juste l'affichage reste figé
+- voir le plantage de discology (cf traces PC plus bas - bug zilog_z80 ?)
+- retirer le field "debug" de la struct CPU
+
+
+
+
+> disk bin/Discology.dsk
+Floppy DSK Loaded on drive A: bin/Discology.dsk
+Disk 'bin/Discology.dsk' loaded on drive A
+> PC before add : 9E7C
+PC before add : 9E98
+PC before add : A6F7
+PC before add : FFDE    <-- ajouter un watch ici ?
+PC before add : FFDF
+PC before add : FFE0
+PC before add : FFE1
+PC before add : FFE2
+PC before add : FFE3
+PC before add : FFE4
+PC before add : FFE5
+PC before add : FFE6
+PC before add : FFE7
+PC before add : FFE8
+PC before add : FFE9
+PC before add : FFEA
+PC before add : FFEB
+PC before add : FFEC
+PC before add : FFED
+PC before add : FFEE
+PC before add : FFEF
+PC before add : FFF0
+PC before add : FFF1
+PC before add : FFF2
+PC before add : FFF3
+PC before add : FFF4
+PC before add : FFF5
+PC before add : FFF6
+PC before add : FFF7
+PC before add : FFF8
+PC before add : FFF9
+PC before add : FFFA
+PC before add : FFFB
+PC before add : FFFC
+PC before add : FFFD
+PC before add : FFFE
+PC before add : FFFF
+
+thread 'main' (300313) panicked at /home/nicolasb/Dev/ZilogZ80/src/cpu.rs:1360:25:
+attempt to add with overflow
