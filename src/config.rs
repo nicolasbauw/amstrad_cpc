@@ -1,6 +1,6 @@
 use directories::UserDirs;
-use serde_derive::Deserialize;
-use std::{fs, path::PathBuf};
+use serde::Deserialize;
+use std::fs;
 
 use crate::machine::MachineError;
 
@@ -22,9 +22,9 @@ pub fn load_config_file() -> Result<Config, MachineError> {
     let config_path = if cfg!(debug_assertions) {
         "config/config.toml"
     } else {
-        cfg
+        cfg.to_str().unwrap()
     };
-    let buf = fs::read_to_string(cfg)?;
+    let buf = fs::read_to_string(config_path)?;
     let config: Config = toml::from_str(&buf).map_err(|_e| MachineError::ConfigFileFmt)?;
     Ok(config)
 }
