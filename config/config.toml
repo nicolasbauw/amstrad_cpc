@@ -1,2 +1,5 @@
 [drives]
 drive_b = true
+
+[debugger]
+keyboard = false

@@ -7,11 +7,17 @@ use crate::machine::MachineError;
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub drives: DriveConfig,
+    pub debugger: Debugger,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DriveConfig {
     pub drive_b: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Debugger {
+    pub keyboard: bool,
 }
 
 pub fn load_config_file() -> Result<Config, MachineError> {
