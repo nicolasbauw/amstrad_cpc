@@ -1,5 +1,6 @@
 use crate::bus::CpcBus;
 use crate::config;
+use crate::gate_array::{GateArray, GateArrayState};
 use crate::hexconversion::HexStringToUnsigned;
 use crate::memory::Memory;
 use crate::monitor::MonitorCmd;
@@ -10,6 +11,10 @@ use std::{
 use zilog_z80::{bus::Bus, cpu::CPU};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Nombre de scanlines mémorisées par trame. Très au-delà des 312 d'une trame
+/// standard, pour couvrir les écrans non standard sans allouer inutilement.
+const MAX_CAPTURED_SCANLINES: usize = 512;
 const HELP: &str = "
 Emulator commands:
     disk d.dsk      Loads the d.dsk disk image on drive A
@@ -93,6 +98,11 @@ pub struct Machine {
     pub current_line: u32,
     /// Armé au début du VSYNC : la trame est complète et peut être affichée.
     pub frame_ready: bool,
+    /// État du Gate Array mémorisé au début de chaque scanline de la trame.
+    /// Le rendu s'appuie dessus plutôt que sur l'état courant, sans quoi une
+    /// reprogrammation du mode ou de la palette en cours de trame (rupture)
+    /// s'appliquerait rétroactivement à tout l'écran.
+    pub scanline_states: Vec<GateArrayState>,
     pub diagnostic_mode: bool, // true = ROM de Diagnostic, false = ROMs d'origine du CPC 6128
     cmd_channel: (
         mpsc::Sender<(MonitorCmd, String, String)>,
@@ -129,6 +139,7 @@ impl Machine {
             hsync_accumulator: 0,
             current_line: 0,
             frame_ready: false,
+            scanline_states: vec![GateArray::new().state(); MAX_CAPTURED_SCANLINES],
             diagnostic_mode: false, // Basculé à false pour tester le boot officiel du CPC 6128 !
             cmd_channel: mpsc::channel(),
             breakpoints: HashSet::new(),
@@ -200,6 +211,7 @@ impl Machine {
         self.hsync_accumulator = 0;
         self.current_line = 0;
         self.frame_ready = false;
+        self.scanline_states.fill(self.bus.gate_array.state());
         self.stopped_at_breakpoint = false;
         self.waiting_for_key = false;
 
@@ -315,6 +327,15 @@ impl Machine {
             let vsync_start = self.bus.crtc.step_scanline();
             self.current_line = self.bus.crtc.scanline;
             self.frame_ready |= vsync_start;
+
+            // step_scanline() a fait basculer le CRTC sur la scanline suivante :
+            // on mémorise l'état du Gate Array tel qu'elle démarre.
+            if let Some(slot) = self
+                .scanline_states
+                .get_mut(self.bus.crtc.scanline as usize)
+            {
+                *slot = self.bus.gate_array.state();
+            }
 
             // On force le bit 1 à 1 pour lire Joystick A par défaut
             self.bus.ppi.set_system_port_b(self.bus.crtc.vsync, true);

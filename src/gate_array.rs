@@ -76,6 +76,29 @@ pub const HARDWARE_TO_PHYSICAL: [usize; 32] = [
     14, // &5F Bleu pastel
 ];
 
+/// Instantané des réglages du Gate Array qui déterminent l'image.
+///
+/// Le mode vidéo et la palette peuvent être reprogrammés en cours de trame :
+/// c'est la technique dite de "rupture", couramment employée pour afficher un
+/// bandeau de score dans un mode ou des couleurs différents du reste de l'écran.
+/// Le rendu doit donc s'appuyer sur l'état ligne par ligne, et non sur l'état
+/// courant du Gate Array, qui n'est que le dernier de la trame.
+#[derive(Clone, Copy)]
+pub struct GateArrayState {
+    pub video_mode: u8,
+    pub palette: [u8; 17],
+}
+
+impl GateArrayState {
+    /// Couleur RGB d'une encre (0 à 15 pour les stylos, 16 pour la bordure).
+    pub fn rgb(&self, index: usize) -> (u8, u8, u8) {
+        match self.palette.get(index) {
+            Some(&hw) => CPC_COLORS_RGB[HARDWARE_TO_PHYSICAL[(hw & 0x1F) as usize]],
+            None => (0, 0, 0),
+        }
+    }
+}
+
 /// Émulation du Gate Array de l'Amstrad CPC.
 pub struct GateArray {
     pub selected_pen: u8,          // Stylo sélectionné (0-15, ou 16 pour la bordure)
@@ -105,12 +128,15 @@ impl GateArray {
 
     /// Récupère la couleur RGB (r, g, b) d'une encre de la palette (0 à 15 pour stylos, 16 pour la bordure).
     pub fn get_rgb_color(&self, index: usize) -> (u8, u8, u8) {
-        if index < 17 {
-            let hw_color = self.palette[index] as usize & 0x1F;
-            let physical_color = HARDWARE_TO_PHYSICAL[hw_color];
-            CPC_COLORS_RGB[physical_color]
-        } else {
-            (0, 0, 0)
+        self.state().rgb(index)
+    }
+
+    /// Instantané des réglages qui déterminent l'image, à mémoriser à chaque
+    /// scanline pour que le rendu suive les changements en cours de trame.
+    pub fn state(&self) -> GateArrayState {
+        GateArrayState {
+            video_mode: self.video_mode,
+            palette: self.palette,
         }
     }
 
@@ -298,6 +324,30 @@ mod tests {
         ga.write_register(0x10, &mut rom_low, &mut rom_high); // stylo 16 = bordure
         ga.write_register(0x54, &mut rom_low, &mut rom_high); // couleur noire
         assert_eq!(ga.get_rgb_color(16), (0, 0, 0));
+    }
+
+    /// L'instantané doit être indépendant du Gate Array : c'est toute son
+    /// utilité, mémoriser l'état d'une scanline avant qu'une rupture ne le
+    /// modifie pour les suivantes.
+    #[test]
+    fn state_snapshot_is_independent_from_later_changes() {
+        let mut ga = GateArray::new();
+        let mut rom_low = true;
+        let mut rom_high = true;
+
+        ga.write_register(0x00, &mut rom_low, &mut rom_high); // stylo 0
+        ga.write_register(0x54, &mut rom_low, &mut rom_high); // noir
+        ga.write_register(0x8D, &mut rom_low, &mut rom_high); // mode 1
+        let captured = ga.state();
+
+        // Rupture : le programme change mode et encre en cours de trame.
+        ga.write_register(0x4B, &mut rom_low, &mut rom_high); // stylo 0 -> blanc
+        ga.write_register(0x8C, &mut rom_low, &mut rom_high); // mode 0
+
+        assert_eq!(captured.video_mode, 1);
+        assert_eq!(captured.rgb(0), (0, 0, 0));
+        assert_eq!(ga.video_mode, 0);
+        assert_eq!(ga.get_rgb_color(0), (255, 255, 255));
     }
 
     /// Numéros des lignes (relatives au début de trame) sur lesquelles une

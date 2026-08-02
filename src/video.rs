@@ -1,3 +1,4 @@
+use crate::gate_array::GateArrayState;
 use crate::machine::Machine;
 
 /// Dimensions du tampon de rendu (une fenêtre de moniteur, bordure comprise).
@@ -33,32 +34,49 @@ fn scanline_y(scanline: u32, vsync_scanline: i32, frame_scanlines: i32) -> i32 {
 /// Décode la VRAM et remplit le buffer RGB en gérant les modes vidéo et la bordure.
 /// Cette implémentation suit rigoureusement la logique MA/RA du CRTC 6845 et du Gate Array.
 pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
-    // 1. Remplissage initial avec la couleur de la bordure (Pen 16)
-    let (br, bg, bb) = machine.bus.gate_array.get_rgb_color(16);
-    for pixel in frame_buffer.chunks_exact_mut(3) {
-        pixel[0] = br;
-        pixel[1] = bg;
-        pixel[2] = bb;
-    }
-
-    // 2. Géométrie programmée dans le CRTC
+    // 1. Géométrie programmée dans le CRTC
     let crtc = &machine.bus.crtc;
     let r1 = crtc.registers[1] as u32; // Caractères affichés par ligne
     let r2 = crtc.registers[2] as i32; // Position du HSYNC
     let r6 = crtc.registers[6] as u32; // Lignes de caractères affichées
     let r9 = (crtc.registers[9] & 0x1F) as u32; // Hauteur d'une ligne de caractères - 1
 
-    if r1 == 0 || r6 == 0 {
-        return; // Aucune zone affichée : l'écran est entièrement en bordure
-    }
-
     let line_chars = crtc.line_chars() as i32;
     let frame_scanlines = crtc.frame_scanlines() as i32;
     let vsync_scanline = crtc.vsync_scanline() as i32;
 
+    // État du Gate Array à une scanline donnée. Le rendu ne consulte jamais
+    // l'état courant : celui-ci n'est que le dernier de la trame et écraserait
+    // les changements de mode ou de palette faits en cours de balayage.
+    let state_at = |scanline: i32| -> GateArrayState {
+        let index = scanline.rem_euclid(frame_scanlines.max(1)) as usize;
+        machine
+            .scanline_states
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| machine.bus.gate_array.state())
+    };
+
+    // 2. Bordure. Elle occupe tout ce qui n'est pas la zone affichée, et sa
+    // couleur se reprogramme aussi en cours de trame : on remplit donc chaque
+    // ligne du tampon avec la couleur en vigueur sur la scanline correspondante.
+    for y in 0..SCREEN_HEIGHT {
+        let lines_since_vsync = y as i32 / PIXELS_PER_SCANLINE + V_BACK_PORCH_LINES;
+        let (br, bg, bb) = state_at(lines_since_vsync + vsync_scanline).rgb(16);
+        let row = &mut frame_buffer[y * SCREEN_WIDTH * 3..(y + 1) * SCREEN_WIDTH * 3];
+        for pixel in row.chunks_exact_mut(3) {
+            pixel[0] = br;
+            pixel[1] = bg;
+            pixel[2] = bb;
+        }
+    }
+
+    if r1 == 0 || r6 == 0 {
+        return; // Aucune zone affichée : l'écran est entièrement en bordure
+    }
+
     // Adresse de départ de l'écran (R12/R13), base du compteur MA.
     let start_addr = ((crtc.registers[12] as u16) << 8) | (crtc.registers[13] as u16);
-    let mode = machine.bus.gate_array.video_mode;
 
     // Abscisses des colonnes de caractères, calculées une fois pour toutes.
     let column_x: Vec<i32> = (0..r1).map(|x| char_x(x, r2, line_chars)).collect();
@@ -76,6 +94,8 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
             if line_y + PIXELS_PER_SCANLINE <= 0 || line_y >= SCREEN_HEIGHT as i32 {
                 continue;
             }
+
+            let state = state_at(scanline as i32);
 
             for x_char in 0..r1 {
                 let ma = line_ma.wrapping_add(x_char as u16) & 0x3FFF;
@@ -97,10 +117,10 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
                         if y < 0 || y >= SCREEN_HEIGHT as i32 {
                             continue;
                         }
-                        match mode {
-                            0 => render_byte_mode0(machine, frame_buffer, byte, x_byte, y as usize),
-                            1 => render_byte_mode1(machine, frame_buffer, byte, x_byte, y as usize),
-                            2 => render_byte_mode2(machine, frame_buffer, byte, x_byte, y as usize),
+                        match state.video_mode {
+                            0 => render_byte_mode0(&state, frame_buffer, byte, x_byte, y as usize),
+                            1 => render_byte_mode1(&state, frame_buffer, byte, x_byte, y as usize),
+                            2 => render_byte_mode2(&state, frame_buffer, byte, x_byte, y as usize),
                             _ => {}
                         }
                     }
@@ -123,62 +143,66 @@ fn put_pixel(frame_buffer: &mut [u8], x: i32, y: usize, (r, g, b): (u8, u8, u8))
 
 /// Peint `width` pixels consécutifs de la même couleur.
 fn draw_pixel_run(
-    machine: &Machine,
+    state: &GateArrayState,
     frame_buffer: &mut [u8],
     color_idx: u8,
     x_start: i32,
     width: i32,
     y: usize,
 ) {
-    let rgb = machine.bus.gate_array.get_rgb_color(color_idx as usize);
+    let rgb = state.rgb(color_idx as usize);
     for dx in 0..width {
         put_pixel(frame_buffer, x_start + dx, y, rgb);
     }
 }
 
 // Mode 0 : 160x200, 16 couleurs (2 pixels par octet)
-fn render_byte_mode0(machine: &Machine, frame_buffer: &mut [u8], byte: u8, x_byte: i32, y: usize) {
+fn render_byte_mode0(
+    state: &GateArrayState,
+    frame_buffer: &mut [u8],
+    byte: u8,
+    x_byte: i32,
+    y: usize,
+) {
     let p0 =
         ((byte & 0x80) >> 7) | ((byte & 0x08) >> 2) | ((byte & 0x20) >> 3) | ((byte & 0x02) << 2);
     let p1 =
         ((byte & 0x40) >> 6) | ((byte & 0x04) >> 1) | ((byte & 0x10) >> 2) | ((byte & 0x01) << 3);
 
     for (i, &color_idx) in [p0, p1].iter().enumerate() {
-        draw_pixel_run(
-            machine,
-            frame_buffer,
-            color_idx,
-            x_byte + i as i32 * 4,
-            4,
-            y,
-        );
+        draw_pixel_run(state, frame_buffer, color_idx, x_byte + i as i32 * 4, 4, y);
     }
 }
 
 // Mode 1 : 320x200, 4 couleurs (4 pixels par octet)
-fn render_byte_mode1(machine: &Machine, frame_buffer: &mut [u8], byte: u8, x_byte: i32, y: usize) {
+fn render_byte_mode1(
+    state: &GateArrayState,
+    frame_buffer: &mut [u8],
+    byte: u8,
+    x_byte: i32,
+    y: usize,
+) {
     let p0 = ((byte & 0x80) >> 7) | ((byte & 0x08) >> 2);
     let p1 = ((byte & 0x40) >> 6) | ((byte & 0x04) >> 1);
     let p2 = ((byte & 0x20) >> 5) | (byte & 0x02);
     let p3 = ((byte & 0x10) >> 4) | ((byte & 0x01) << 1);
 
     for (i, &color_idx) in [p0, p1, p2, p3].iter().enumerate() {
-        draw_pixel_run(
-            machine,
-            frame_buffer,
-            color_idx,
-            x_byte + i as i32 * 2,
-            2,
-            y,
-        );
+        draw_pixel_run(state, frame_buffer, color_idx, x_byte + i as i32 * 2, 2, y);
     }
 }
 
 // Mode 2 : 640x200, 2 couleurs (8 pixels par octet)
-fn render_byte_mode2(machine: &Machine, frame_buffer: &mut [u8], byte: u8, x_byte: i32, y: usize) {
+fn render_byte_mode2(
+    state: &GateArrayState,
+    frame_buffer: &mut [u8],
+    byte: u8,
+    x_byte: i32,
+    y: usize,
+) {
     for i in 0..8 {
         let color_idx = (byte >> (7 - i)) & 1;
-        draw_pixel_run(machine, frame_buffer, color_idx, x_byte + i as i32, 1, y);
+        draw_pixel_run(state, frame_buffer, color_idx, x_byte + i as i32, 1, y);
     }
 }
 
