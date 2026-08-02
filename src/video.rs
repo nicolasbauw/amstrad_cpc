@@ -1,84 +1,106 @@
 use crate::machine::Machine;
 
+/// Dimensions du tampon de rendu (une fenêtre de moniteur, bordure comprise).
+pub const SCREEN_WIDTH: usize = 800;
+pub const SCREEN_HEIGHT: usize = 600;
+
+/// Le moniteur ne connaît pas de coordonnées absolues : il se cale sur les
+/// signaux de synchronisation. La position d'un caractère à l'écran est donc
+/// donnée par sa distance au HSYNC (R2) et au VSYNC (R7), et non par un offset
+/// fixe. Ces deux constantes représentent les temps de retour du faisceau
+/// (back porch) du moniteur, exprimés dans les unités du CRTC ; elles sont
+/// calibrées pour centrer un écran standard 40x25 dans la fenêtre.
+const H_BACK_PORCH_CHARS: i32 = 13;
+const V_BACK_PORCH_LINES: i32 = 22;
+
+/// Un caractère CRTC fait 2 octets, rendus sur 16 pixels de large.
+const PIXELS_PER_CHAR: i32 = 16;
+/// Chaque scanline du CPC est doublée verticalement dans le tampon.
+const PIXELS_PER_SCANLINE: i32 = 2;
+
+/// Abscisse du premier pixel d'une colonne de caractères, mesurée à partir du HSYNC.
+fn char_x(x_char: u32, r2: i32, line_chars: i32) -> i32 {
+    let chars_since_hsync = (x_char as i32 - r2).rem_euclid(line_chars);
+    (chars_since_hsync - H_BACK_PORCH_CHARS) * PIXELS_PER_CHAR
+}
+
+/// Ordonnée de la première ligne du tampon pour une scanline, mesurée à partir du VSYNC.
+fn scanline_y(scanline: u32, vsync_scanline: i32, frame_scanlines: i32) -> i32 {
+    let lines_since_vsync = (scanline as i32 - vsync_scanline).rem_euclid(frame_scanlines);
+    (lines_since_vsync - V_BACK_PORCH_LINES) * PIXELS_PER_SCANLINE
+}
+
 /// Décode la VRAM et remplit le buffer RGB en gérant les modes vidéo et la bordure.
 /// Cette implémentation suit rigoureusement la logique MA/RA du CRTC 6845 et du Gate Array.
 pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
     // 1. Remplissage initial avec la couleur de la bordure (Pen 16)
     let (br, bg, bb) = machine.bus.gate_array.get_rgb_color(16);
-    for i in 0..(frame_buffer.len() / 3) {
-        frame_buffer[i * 3] = br;
-        frame_buffer[i * 3 + 1] = bg;
-        frame_buffer[i * 3 + 2] = bb;
+    for pixel in frame_buffer.chunks_exact_mut(3) {
+        pixel[0] = br;
+        pixel[1] = bg;
+        pixel[2] = bb;
     }
 
-    // 2. Récupération des paramètres CRTC avec valeurs de sécurité
-    let r1 = machine.bus.crtc.registers[1] as u16; // Nb caractères horizontaux
-    let r6 = machine.bus.crtc.registers[6] as u16; // Nb lignes de caractères
-    let r9 = (machine.bus.crtc.registers[9] & 0x1F) as u16; // Hauteur d'un caractère (max scanline)
+    // 2. Géométrie programmée dans le CRTC
+    let crtc = &machine.bus.crtc;
+    let r1 = crtc.registers[1] as u32; // Caractères affichés par ligne
+    let r2 = crtc.registers[2] as i32; // Position du HSYNC
+    let r6 = crtc.registers[6] as u32; // Lignes de caractères affichées
+    let r9 = (crtc.registers[9] & 0x1F) as u32; // Hauteur d'une ligne de caractères - 1
 
-    // Le CPC fonctionne normalement avec 200 lignes visibles, soit 25 lignes de 8 scanlines.
-    // Le CRTC gère RA (Raster Address) qui définit la scanline actuelle au sein du bloc.
-    // L'affichage est "écrasé" si on ignore le saut de scanline ou si on lit trop vite.
+    if r1 == 0 || r6 == 0 {
+        return; // Aucune zone affichée : l'écran est entièrement en bordure
+    }
 
-    let start_addr =
-        ((machine.bus.crtc.registers[12] as u16) << 8) | (machine.bus.crtc.registers[13] as u16);
+    let line_chars = crtc.line_chars() as i32;
+    let frame_scanlines = crtc.frame_scanlines() as i32;
+    let vsync_scanline = crtc.vsync_scanline() as i32;
+
+    // Adresse de départ de l'écran (R12/R13), base du compteur MA.
+    let start_addr = ((crtc.registers[12] as u16) << 8) | (crtc.registers[13] as u16);
     let mode = machine.bus.gate_array.video_mode;
 
-    // Centrage (offset_x/y)
-    let offset_x = 80;
-    let offset_y = 100;
+    // Abscisses des colonnes de caractères, calculées une fois pour toutes.
+    let column_x: Vec<i32> = (0..r1).map(|x| char_x(x, r2, line_chars)).collect();
 
     for char_y in 0..r6 {
-        for pixel_y in 0..=r9 {
-            let line_y_base = offset_y + (char_y * (r9 + 1) + pixel_y) as usize * 2;
-            if line_y_base >= 600 {
-                break;
+        // Le compteur MA repart de l'adresse de base à chaque ligne de
+        // caractères et s'incrémente de R1 : c'est ce qui permet le scrolling
+        // matériel par réécriture de R12/R13.
+        let line_ma = start_addr.wrapping_add((char_y * r1) as u16) & 0x3FFF;
+
+        for raster in 0..=r9 {
+            let scanline = char_y * (r9 + 1) + raster;
+            let line_y = scanline_y(scanline, vsync_scanline, frame_scanlines);
+
+            if line_y + PIXELS_PER_SCANLINE <= 0 || line_y >= SCREEN_HEIGHT as i32 {
+                continue;
             }
 
-            let line_ma = (start_addr + (char_y * r1)) & 0x3FFF;
-
             for x_char in 0..r1 {
-                let ma = (line_ma + x_char) & 0x3FFF;
+                let ma = line_ma.wrapping_add(x_char as u16) & 0x3FFF;
+                // RA ne fournit que 3 bits d'adresse : au delà de 8 scanlines
+                // par ligne de caractères, le CRTC réaffiche les mêmes octets.
                 let addr_base =
-                    ((ma & 0x3000) << 2) | ((pixel_y & 0x07) << 11) | ((ma & 0x03FF) << 1);
+                    ((ma & 0x3000) << 2) | (((raster as u16) & 0x07) << 11) | ((ma & 0x03FF) << 1);
+                let x_base = column_x[x_char as usize];
 
-                for byte_off in 0..2 {
-                    let addr = addr_base + byte_off as u16;
-                    let byte = machine.bus.memory.read_ram_byte(addr);
+                for byte_off in 0..2u16 {
+                    let byte = machine
+                        .bus
+                        .memory
+                        .read_ram_byte(addr_base.wrapping_add(byte_off));
+                    let x_byte = x_base + byte_off as i32 * 8;
 
-                    for dy in 0..2 {
-                        let line_y = line_y_base + dy;
-                        if line_y >= 600 {
+                    for dy in 0..PIXELS_PER_SCANLINE {
+                        let y = line_y + dy;
+                        if y < 0 || y >= SCREEN_HEIGHT as i32 {
                             continue;
                         }
                         match mode {
-                            0 => render_byte_mode0(
-                                machine,
-                                frame_buffer,
-                                byte,
-                                x_char,
-                                byte_off,
-                                line_y,
-                                offset_x,
-                            ),
-                            1 => render_byte_mode1(
-                                machine,
-                                frame_buffer,
-                                byte,
-                                x_char,
-                                byte_off,
-                                line_y,
-                                offset_x,
-                            ),
-                            2 => render_byte_mode2(
-                                machine,
-                                frame_buffer,
-                                byte,
-                                x_char,
-                                byte_off,
-                                line_y,
-                                offset_x,
-                            ),
+                            0 => render_byte_mode0(machine, frame_buffer, byte, x_byte, y as usize),
+                            1 => render_byte_mode1(machine, frame_buffer, byte, x_byte, y as usize),
+                            2 => render_byte_mode2(machine, frame_buffer, byte, x_byte, y as usize),
                             _ => {}
                         }
                     }
@@ -88,87 +110,131 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
     }
 }
 
-// Mode 0 : 160x200, 16 couleurs (2 pixels par octet)
-fn render_byte_mode0(
+/// Écrit un pixel du tampon en écartant tout ce qui sort de la fenêtre.
+fn put_pixel(frame_buffer: &mut [u8], x: i32, y: usize, (r, g, b): (u8, u8, u8)) {
+    if x < 0 || x >= SCREEN_WIDTH as i32 {
+        return;
+    }
+    let idx = (y * SCREEN_WIDTH + x as usize) * 3;
+    frame_buffer[idx] = r;
+    frame_buffer[idx + 1] = g;
+    frame_buffer[idx + 2] = b;
+}
+
+/// Peint `width` pixels consécutifs de la même couleur.
+fn draw_pixel_run(
     machine: &Machine,
     frame_buffer: &mut [u8],
-    byte: u8,
-    x_char: u16,
-    byte_off: u8,
-    line_y: usize,
-    offset_x: usize,
+    color_idx: u8,
+    x_start: i32,
+    width: i32,
+    y: usize,
 ) {
+    let rgb = machine.bus.gate_array.get_rgb_color(color_idx as usize);
+    for dx in 0..width {
+        put_pixel(frame_buffer, x_start + dx, y, rgb);
+    }
+}
+
+// Mode 0 : 160x200, 16 couleurs (2 pixels par octet)
+fn render_byte_mode0(machine: &Machine, frame_buffer: &mut [u8], byte: u8, x_byte: i32, y: usize) {
     let p0 =
         ((byte & 0x80) >> 7) | ((byte & 0x08) >> 2) | ((byte & 0x20) >> 3) | ((byte & 0x02) << 2);
     let p1 =
         ((byte & 0x40) >> 6) | ((byte & 0x04) >> 1) | ((byte & 0x10) >> 2) | ((byte & 0x01) << 3);
 
-    let pixels = [p0, p1];
-    for (i, &color_idx) in pixels.iter().enumerate() {
-        let (r, g, b) = machine.bus.gate_array.get_rgb_color(color_idx as usize);
-        let start_x = offset_x + (x_char as usize * 16) + (byte_off as usize * 8) + (i * 4);
-        for dx in 0..4 {
-            let x = start_x + dx;
-            if x < 800 {
-                let fb_idx = (line_y * 800 + x) * 3;
-                frame_buffer[fb_idx] = r;
-                frame_buffer[fb_idx + 1] = g;
-                frame_buffer[fb_idx + 2] = b;
-            }
-        }
+    for (i, &color_idx) in [p0, p1].iter().enumerate() {
+        draw_pixel_run(
+            machine,
+            frame_buffer,
+            color_idx,
+            x_byte + i as i32 * 4,
+            4,
+            y,
+        );
     }
 }
 
 // Mode 1 : 320x200, 4 couleurs (4 pixels par octet)
-fn render_byte_mode1(
-    machine: &Machine,
-    frame_buffer: &mut [u8],
-    byte: u8,
-    x_char: u16,
-    byte_off: u8,
-    line_y: usize,
-    offset_x: usize,
-) {
+fn render_byte_mode1(machine: &Machine, frame_buffer: &mut [u8], byte: u8, x_byte: i32, y: usize) {
     let p0 = ((byte & 0x80) >> 7) | ((byte & 0x08) >> 2);
     let p1 = ((byte & 0x40) >> 6) | ((byte & 0x04) >> 1);
-    let p2 = ((byte & 0x20) >> 5) | ((byte & 0x02) << 0);
+    let p2 = ((byte & 0x20) >> 5) | (byte & 0x02);
     let p3 = ((byte & 0x10) >> 4) | ((byte & 0x01) << 1);
 
-    let pixels = [p0, p1, p2, p3];
-    for (i, &color_idx) in pixels.iter().enumerate() {
-        let (r, g, b) = machine.bus.gate_array.get_rgb_color(color_idx as usize);
-        let start_x = offset_x + (x_char as usize * 16) + (byte_off as usize * 8) + (i * 2);
-        for dx in 0..2 {
-            let x = start_x + dx;
-            if x < 800 {
-                let fb_idx = (line_y * 800 + x) * 3;
-                frame_buffer[fb_idx] = r;
-                frame_buffer[fb_idx + 1] = g;
-                frame_buffer[fb_idx + 2] = b;
-            }
-        }
+    for (i, &color_idx) in [p0, p1, p2, p3].iter().enumerate() {
+        draw_pixel_run(
+            machine,
+            frame_buffer,
+            color_idx,
+            x_byte + i as i32 * 2,
+            2,
+            y,
+        );
     }
 }
 
 // Mode 2 : 640x200, 2 couleurs (8 pixels par octet)
-fn render_byte_mode2(
-    machine: &Machine,
-    frame_buffer: &mut [u8],
-    byte: u8,
-    x_char: u16,
-    byte_off: u8,
-    line_y: usize,
-    offset_x: usize,
-) {
+fn render_byte_mode2(machine: &Machine, frame_buffer: &mut [u8], byte: u8, x_byte: i32, y: usize) {
     for i in 0..8 {
         let color_idx = (byte >> (7 - i)) & 1;
-        let (r, g, b) = machine.bus.gate_array.get_rgb_color(color_idx as usize);
-        let x = offset_x + (x_char as usize * 16) + (byte_off as usize * 8) + i;
-        if x < 800 {
-            let fb_idx = (line_y * 800 + x) * 3;
-            frame_buffer[fb_idx] = r;
-            frame_buffer[fb_idx + 1] = g;
-            frame_buffer[fb_idx + 2] = b;
-        }
+        draw_pixel_run(machine, frame_buffer, color_idx, x_byte + i as i32, 1, y);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crtc::Crtc;
+
+    /// Sur un écran standard 40x25, le calage par la synchro doit reproduire
+    /// exactement le centrage qui était auparavant codé en dur (80, 100), et
+    /// l'image doit tenir dans la fenêtre.
+    #[test]
+    fn standard_screen_is_centered_in_the_window() {
+        let crtc = Crtc::new();
+        let r2 = crtc.registers[2] as i32;
+        let line_chars = crtc.line_chars() as i32;
+        let frame = crtc.frame_scanlines() as i32;
+        let vsync = crtc.vsync_scanline() as i32;
+
+        assert_eq!(char_x(0, r2, line_chars), 80);
+        assert_eq!(scanline_y(0, vsync, frame), 100);
+
+        // 40 caractères de 16 px = 640 px, 200 scanlines doublées = 400 px.
+        assert_eq!(char_x(39, r2, line_chars) + PIXELS_PER_CHAR, 80 + 640);
+        assert_eq!(
+            scanline_y(199, vsync, frame) + PIXELS_PER_SCANLINE,
+            100 + 400
+        );
+        assert!(80 + 640 <= SCREEN_WIDTH as i32);
+        assert!(100 + 400 <= SCREEN_HEIGHT as i32);
+    }
+
+    /// Retarder une synchro rapproche la zone affichée de la synchro précédente :
+    /// l'image se décale donc vers la gauche (R2) ou vers le haut (R7), ce qui est
+    /// le sens observé sur un vrai CPC.
+    #[test]
+    fn delaying_a_sync_moves_the_picture_back() {
+        let mut crtc = Crtc::new();
+        let line_chars = crtc.line_chars() as i32;
+
+        let x_before = char_x(0, crtc.registers[2] as i32, line_chars);
+        crtc.registers[2] += 2; // HSYNC repoussé de 2 caractères
+        let x_after = char_x(0, crtc.registers[2] as i32, line_chars);
+        assert_eq!(x_after - x_before, -2 * PIXELS_PER_CHAR);
+
+        let y_before = scanline_y(
+            0,
+            crtc.vsync_scanline() as i32,
+            crtc.frame_scanlines() as i32,
+        );
+        crtc.registers[7] += 1; // VSYNC repoussé d'une ligne de caractères
+        let y_after = scanline_y(
+            0,
+            crtc.vsync_scanline() as i32,
+            crtc.frame_scanlines() as i32,
+        );
+        assert_eq!(y_after - y_before, -8 * PIXELS_PER_SCANLINE);
     }
 }

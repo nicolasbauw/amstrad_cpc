@@ -85,17 +85,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let window = video_subsystem
-        .window(window_title, 800, 600)
+        .window(
+            window_title,
+            video::SCREEN_WIDTH as u32,
+            video::SCREEN_HEIGHT as u32,
+        )
         .position_centered()
         .build()?;
     let mut canvas = window.into_canvas().build()?;
     let main_window_id = canvas.window().id();
     let texture_creator = canvas.texture_creator();
-    let mut texture = texture_creator.create_texture_streaming(PixelFormatEnum::RGB24, 800, 600)?;
+    let mut texture = texture_creator.create_texture_streaming(
+        PixelFormatEnum::RGB24,
+        video::SCREEN_WIDTH as u32,
+        video::SCREEN_HEIGHT as u32,
+    )?;
     let mut event_pump = sdl_context.event_pump()?;
 
-    let mut frame_buffer = vec![0u8; 800 * 600 * 3];
-    let ticks_per_frame: u32 = 79_872;
+    let mut frame_buffer = vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 3];
+    // Deux fois la durée d'une trame standard (312 lignes de 256 ticks) : simple
+    // garde-fou pour ne pas bloquer la boucle SDL si le VSYNC n'arrive jamais.
+    let max_ticks_per_frame: u32 = 2 * 79_872;
     let mut running = true;
 
     while running {
@@ -241,20 +251,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        // Une trame s'achève sur le VSYNC généré par le CRTC, pas sur un nombre
+        // de ticks figé : un logiciel qui reprogramme R4/R9 change la durée de
+        // trame, et le rendu doit suivre. La borne en ticks reste comme garde-fou
+        // si le CRTC est programmé sans jamais produire de VSYNC.
+        machine.frame_ready = false;
         let mut frame_ticks: u32 = 0;
 
-        while frame_ticks < ticks_per_frame {
-            if machine.is_running() {
-                frame_ticks += machine.step()
-            } else {
-                break;
-            }
+        while machine.is_running() && !machine.frame_ready && frame_ticks < max_ticks_per_frame {
+            frame_ticks += machine.step();
         }
 
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
-        let _ = texture.update(None, &frame_buffer, 800 * 3);
+        let _ = texture.update(None, &frame_buffer, video::SCREEN_WIDTH * 3);
         let _ = canvas.clear();
         let _ = canvas.copy(&texture, None, None);
         canvas.present();

@@ -83,6 +83,17 @@ impl Crtc {
             + (self.registers[5] & 0x1F) as u32
     }
 
+    /// Scanline (relative au début de trame) sur laquelle démarre le VSYNC.
+    /// C'est la référence sur laquelle le moniteur cale l'image verticalement.
+    pub fn vsync_scanline(&self) -> u32 {
+        self.registers[7] as u32 * ((self.registers[9] & 0x1F) as u32 + 1)
+    }
+
+    /// Nombre total de caractères d'une ligne de balayage horizontal (R0 + 1).
+    pub fn line_chars(&self) -> u32 {
+        self.registers[0] as u32 + 1
+    }
+
     /// Avance le balayage vertical d'une scanline (appelé à chaque HSYNC).
     /// Renvoie true si le VSYNC démarre sur cette scanline (front montant), ce
     /// dont le Gate Array a besoin pour recaler son compteur d'interruptions.

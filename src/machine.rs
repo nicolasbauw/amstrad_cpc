@@ -91,6 +91,8 @@ pub struct Machine {
     pub total_ticks: u64,
     pub hsync_accumulator: u32,
     pub current_line: u32,
+    /// Armé au début du VSYNC : la trame est complète et peut être affichée.
+    pub frame_ready: bool,
     pub diagnostic_mode: bool, // true = ROM de Diagnostic, false = ROMs d'origine du CPC 6128
     cmd_channel: (
         mpsc::Sender<(MonitorCmd, String, String)>,
@@ -126,6 +128,7 @@ impl Machine {
             total_ticks: 0,
             hsync_accumulator: 0,
             current_line: 0,
+            frame_ready: false,
             diagnostic_mode: false, // Basculé à false pour tester le boot officiel du CPC 6128 !
             cmd_channel: mpsc::channel(),
             breakpoints: HashSet::new(),
@@ -196,6 +199,7 @@ impl Machine {
         self.total_ticks = 0;
         self.hsync_accumulator = 0;
         self.current_line = 0;
+        self.frame_ready = false;
         self.stopped_at_breakpoint = false;
         self.waiting_for_key = false;
 
@@ -310,6 +314,7 @@ impl Machine {
             // reprogramme R4/R5/R7/R9 change réellement la géométrie de trame.
             let vsync_start = self.bus.crtc.step_scanline();
             self.current_line = self.bus.crtc.scanline;
+            self.frame_ready |= vsync_start;
 
             // On force le bit 1 à 1 pour lire Joystick A par défaut
             self.bus.ppi.set_system_port_b(self.bus.crtc.vsync, true);
