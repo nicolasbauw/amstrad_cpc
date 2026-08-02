@@ -51,16 +51,3 @@ PC before add : FFFF
 
 thread 'main' (300313) panicked at /home/nicolasb/Dev/ZilogZ80/src/cpu.rs:1360:25:
 attempt to add with overflow
-
-
-Ajouter un test pour évaluer l'enchaînement des instructions suivantes ?
-B941    F3            DI
-B942    08            EX AF,AF'
-B943    38 33         JR C,$B978
-B945    D9            EXX
-B946    79            LD A,C
-B947    37            SCF
-B948    FB            EI
-B949    08            EX AF,AF'
-B94A    F3            DI
-B94B    F5            PUSH AF
