@@ -71,17 +71,27 @@ impl Crtc {
         }
     }
 
-    /// Lecture de données du registre actuellement sélectionné.
+    /// Lecture du port de données (&BFxx).
     ///
-    /// La plupart des registres d'un 6845 sont en écriture seule : seuls R14 à
-    /// R17 (curseur et light pen) se relisent, les autres renvoient 0. C'est
-    /// exactement ce que sondent les routines de détection du type de CRTC, qui
-    /// concluaient à un ASIC (type 3) quand tous les registres se relisaient.
+    /// La plupart des registres d'un 6845 sont en écriture seule. Sur le HD6845S
+    /// monté dans les CPC (type 0), seuls R12 à R17 se relisent ; les autres
+    /// renvoient 0.
     pub fn read_data(&self) -> u8 {
         match self.selected_register {
-            14..=17 => self.registers[self.selected_register as usize],
+            12..=17 => self.registers[self.selected_register as usize],
             _ => 0,
         }
+    }
+
+    /// Lecture du port d'état (&BExx).
+    ///
+    /// Le type 0 ne possède pas de registre d'état : le port n'est pas piloté et
+    /// la lecture renvoie 0. C'est ce qui le distingue des types 1 et 2 (qui y
+    /// exposent des drapeaux) et des ASIC 3/4 (où &BExx et &BFxx renvoient la
+    /// même chose). Les routines de détection du type de CRTC comparent
+    /// exactement ces deux ports.
+    pub fn read_status(&self) -> u8 {
+        0
     }
 
     /// Nombre de scanlines d'une trame complète, tel que programmé dans les
@@ -160,6 +170,54 @@ impl Crtc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reproduit la routine de détection du type de CRTC (méthode Rhino, celle
+    /// utilisée par la ROM Amstrad Diagnostics) : elle écrit une valeur dans R12
+    /// puis compare le port d'état et le port de données. Le CPC doit s'annoncer
+    /// en type 0.
+    #[test]
+    fn crtc_type_detection_reports_type_0() {
+        let mut crtc = Crtc::new();
+        const PROBE: u8 = 0b0110100;
+
+        crtc.select_register(12);
+        crtc.write_data(PROBE);
+
+        let status = crtc.read_status();
+        let data = crtc.read_data();
+
+        assert_ne!(
+            data, status,
+            "types 3/4 : les deux ports renvoient la meme chose"
+        );
+        assert_eq!(data, PROBE, "type 0 : R12 se relit tel qu'ecrit");
+    }
+
+    /// Les registres qui ne se relisent pas renvoient 0, quelle que soit la
+    /// valeur écrite.
+    #[test]
+    fn write_only_registers_read_back_as_zero() {
+        let mut crtc = Crtc::new();
+        for reg in [0u8, 1, 4, 6, 7, 9] {
+            crtc.select_register(reg);
+            crtc.write_data(0x2A);
+            assert_eq!(crtc.read_data(), 0, "R{reg} ne devrait pas se relire");
+        }
+    }
+
+    /// Le registre d'adresse ne compte que 5 bits : une sélection hors plage est
+    /// tronquée, pas ignorée.
+    #[test]
+    fn register_select_is_truncated_to_five_bits() {
+        let mut crtc = Crtc::new();
+        crtc.select_register(12);
+        crtc.select_register(0xFF);
+        assert_eq!(crtc.selected_register, 0x1F);
+
+        // L'écriture suivante ne doit surtout pas retomber dans R12.
+        crtc.write_data(0x2A);
+        assert_eq!(crtc.registers[12], DEFAULT_REGISTERS[12]);
+    }
 
     /// Trame standard du CPC : 39 lignes de caractères de 8 scanlines = 312.
     #[test]
