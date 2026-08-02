@@ -1,3 +1,4 @@
+mod audio;
 mod bus;
 mod config;
 mod console;
@@ -10,6 +11,7 @@ mod memory;
 mod monitor;
 mod ppi;
 mod psg;
+mod sound;
 mod trace;
 mod video;
 
@@ -55,7 +57,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 4. Initialisation de SDL_ttf pour le debugger
+    // 4. Ouverture de la sortie audio. Une machine sans carte son utilisable
+    // ne doit pas empêcher l'émulateur de démarrer : on continue en silence.
+    let mut audio = match audio::Audio::new(&sdl_context) {
+        Ok(a) => Some(a),
+        Err(e) => {
+            println!("Audio disabled: {e}");
+            None
+        }
+    };
+
+    // 5. Initialisation de SDL_ttf pour le debugger
     let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
     let home_dir = std::env::var("HOME")?;
     let font_path = if cfg!(target_os = "macos") {
@@ -109,14 +121,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let max_ticks_per_frame: u32 = 2 * 79_872;
     let mut running = true;
 
-    // Cadence d'exécution. Une scanline dure 64 µs sur le CPC, donc la durée d'une
-    // trame se déduit du nombre de scanlines programmé dans le CRTC : un logiciel
-    // qui reprogramme R4/R9 change réellement la fréquence trame, comme sur le
-    // matériel. On vise une échéance absolue plutôt que de dormir une durée fixe :
-    // avec une attente fixe, la période réelle vaut "temps de calcul + attente" et
-    // la machine émulée tourne durablement trop lentement.
-    const SCANLINE_MICROS: u64 = 64;
+    // Cadence d'exécution. On vise une échéance absolue plutôt que de dormir une
+    // durée fixe : avec une attente fixe, la période réelle vaut "temps de calcul
+    // + attente" et la machine émulée tourne durablement trop lentement.
+    // La durée d'une trame est celle du temps émulé qu'elle a réellement
+    // consommé (voir machine::emulated_duration) : un logiciel qui reprogramme
+    // le CRTC en cours de trame change bien la durée de trame, mais ses
+    // registres ne la décrivent plus une fois la trame finie.
     let mut next_frame = std::time::Instant::now();
+    // Trame arrêtée (émulation en pause) : cadence de repli pour continuer à
+    // rafraîchir l'écran et lire la console sans tourner à vide.
+    const PAUSED_FRAME: std::time::Duration = std::time::Duration::from_millis(20);
+    let mut measure_start = std::time::Instant::now();
+    let mut measured_ticks: u64 = 0;
+    let mut late_frames: u32 = 0;
 
     while running {
         for event in event_pump.poll_iter() {
@@ -272,6 +290,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             frame_ticks += machine.step();
         }
 
+        // Les échantillons produits pendant la trame partent vers la carte
+        // son. En pause, le PSG n'avance plus : rien n'est produit et SDL
+        // enchaîne sur du silence.
+        let samples = machine.bus.psg.sound.take_samples();
+        if let Some(audio) = audio.as_mut() {
+            audio.set_volume(machine.volume());
+            audio.push(&samples);
+        }
+
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
@@ -341,17 +368,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         machine.console_handle().unwrap_or_default();
 
-        let frame_duration = std::time::Duration::from_micros(
-            machine.bus.crtc.frame_scanlines() as u64 * SCANLINE_MICROS,
-        );
+        // Mesure de la vitesse réelle, moyennée sur une seconde : c'est elle
+        // qui dit si la machine tient la cadence, et donc si le son a de quoi
+        // alimenter la carte son en continu.
+        measured_ticks += frame_ticks as u64;
+        if measure_start.elapsed() >= std::time::Duration::from_secs(1) {
+            let emulated = machine::emulated_duration(measured_ticks as u32).as_secs_f32();
+            machine.set_measured_timing(
+                100.0 * emulated / measure_start.elapsed().as_secs_f32(),
+                late_frames,
+            );
+            measured_ticks = 0;
+            late_frames = 0;
+            measure_start = std::time::Instant::now();
+        }
+
+        let frame_duration = if frame_ticks > 0 {
+            machine::emulated_duration(frame_ticks)
+        } else {
+            PAUSED_FRAME
+        };
         let now = std::time::Instant::now();
         if now < next_frame {
             std::thread::sleep(next_frame - now);
             next_frame += frame_duration;
         } else {
             // Trame en retard : on repart de l'instant courant plutôt que de
-            // tenter de rattraper, ce qui emballerait la machine émulée.
+            // tenter de rattraper, ce qui emballerait la machine émulée. Le
+            // temps perdu ne se rattrape donc jamais : la carte son se
+            // retrouve à sec et le silence qu'elle joue à la place étire la
+            // musique d'autant. Un décrochage bref suffit à l'entendre.
             next_frame = now + frame_duration;
+            late_frames += 1;
         }
     }
 

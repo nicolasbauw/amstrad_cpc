@@ -16,6 +16,23 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Nombre de scanlines mémorisées par trame. Très au-delà des 312 d'une trame
 /// standard, pour couvrir les écrans non standard sans allouer inutilement.
 const MAX_CAPTURED_SCANLINES: usize = 512;
+
+/// Durée d'un cycle Z80 à 4 MHz, en nanosecondes.
+const CPU_TICK_NANOS: u64 = 250;
+
+/// Temps réel correspondant à un nombre de cycles Z80 émulés.
+///
+/// C'est la seule mesure fiable pour cadencer l'émulateur. La déduire des
+/// registres du CRTC est un piège : un jeu qui découpe son écran (Barbarian et
+/// son panneau de score, toutes les ruptures) reprogramme R4/R9 en cours de
+/// trame, si bien que la longueur annoncée par les registres à la fin de la
+/// trame n'est pas celle de la trame qui vient d'être émulée. La machine
+/// tournerait alors durablement trop lentement (ou trop vite), ce qui s'entend
+/// immédiatement : le PSG ne produit plus 44100 échantillons par seconde
+/// réelle, et la sortie audio se vide en craquant.
+pub fn emulated_duration(ticks: u32) -> std::time::Duration {
+    std::time::Duration::from_nanos(ticks as u64 * CPU_TICK_NANOS)
+}
 const HELP: &str = "
 Emulator commands:
     disk d.dsk      Loads the d.dsk disk image on drive A
@@ -23,6 +40,8 @@ Emulator commands:
     disk eject      Ejects the disk image from drive A
     disk eject b    Ejects the disk image from drive B
     pc              Performs a power cycle
+    vol             Displays the audio output volume
+    vol 30          Sets the audio output volume to 30 %
 
 Monitor commands:
     d 0x0000        disassembles code at 0x0000 and the 20 next
@@ -122,6 +141,24 @@ pub struct Machine {
     running: bool,
     stopped_at_breakpoint: bool,
     pub waiting_for_key: bool,
+    /// Volume de la sortie audio, dans [0, 1]. Réglable depuis la console, il
+    /// est relu par la boucle principale qui le transmet à la carte son.
+    volume: f32,
+    /// Vitesse d'exécution mesurée par la boucle principale, en % du temps
+    /// réel. En dessous de 100, la machine prend du retard : la musique
+    /// traîne, le jeu ralentit et la sortie audio se vide en craquant.
+    measured_speed: f32,
+    /// Trames ayant manqué leur échéance pendant la dernière seconde.
+    late_frames: u32,
+    /// Longueur de trame réellement balayée (d'un début de VSYNC au suivant)
+    /// et nombre d'interruptions qui y sont tombées. Un Z80 à pleine vitesse
+    /// avec une trame trop longue donne exactement les mêmes symptômes qu'une
+    /// machine trop lente : c'est la fréquence de trame, pas la vitesse du
+    /// CPU, que voit un jeu synchronisé sur le balayage.
+    measured_frame_lines: u32,
+    lines_since_vsync: u32,
+    measured_interrupts_per_frame: u32,
+    interrupts_since_vsync: u32,
     config: config::Config,
 }
 
@@ -157,6 +194,13 @@ impl Machine {
             running: true,
             stopped_at_breakpoint: false,
             waiting_for_key: false,
+            volume: 0.5,
+            measured_speed: 100.0,
+            late_frames: 0,
+            measured_frame_lines: 312,
+            lines_since_vsync: 0,
+            measured_interrupts_per_frame: 6,
+            interrupts_since_vsync: 0,
             config,
         };
 
@@ -176,6 +220,22 @@ impl Machine {
     /// SDL "Machine Status" (config.toml, section [debugger]).
     pub fn show_keyboard_matrix(&self) -> bool {
         self.config.debugger.keyboard
+    }
+
+    /// Volume de la sortie audio, dans [0, 1].
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+
+    /// Renseigne la cadence mesurée par la boucle principale : vitesse en %
+    /// du temps réel, et nombre de trames ayant manqué leur échéance.
+    ///
+    /// Les deux comptent : la moyenne sur une seconde peut afficher 100 %
+    /// alors que des décrochages brefs se sont produits, et chacun d'eux
+    /// étire la musique (voir la note sur la file audio dans audio.rs).
+    pub fn set_measured_timing(&mut self, percent: f32, late_frames: u32) {
+        self.measured_speed = percent;
+        self.late_frames = late_frames;
     }
 
     pub fn start(&mut self) {
@@ -337,6 +397,11 @@ impl Machine {
         let elapsed_ticks = if ticks == 0 { 4 } else { ticks };
         self.total_ticks += elapsed_ticks as u64;
 
+        // Le PSG est cadencé par le même temps que le CPU : il doit avancer
+        // ici, et pas une fois par trame, sinon les changements de registres
+        // en cours de trame (toutes les musiques en font) seraient perdus.
+        self.bus.psg.tick(elapsed_ticks);
+
         // Gestion HSYNC / Interruptions (période 256 ticks = 64µs)
         self.hsync_accumulator += elapsed_ticks;
         while self.hsync_accumulator >= 256 {
@@ -348,6 +413,18 @@ impl Machine {
             let vsync_start = self.bus.crtc.step_scanline();
             self.current_line = self.bus.crtc.scanline;
             self.frame_ready |= vsync_start;
+
+            // Longueur de trame réellement balayée, mesurée d'un début de
+            // VSYNC au suivant. C'est elle qui donne la fréquence de trame que
+            // voit le logiciel, et elle peut différer de ce qu'annoncent les
+            // registres dès qu'un jeu reprogramme le CRTC en cours de trame.
+            self.lines_since_vsync += 1;
+            if vsync_start {
+                self.measured_frame_lines = self.lines_since_vsync;
+                self.lines_since_vsync = 0;
+                self.measured_interrupts_per_frame = self.interrupts_since_vsync;
+                self.interrupts_since_vsync = 0;
+            }
 
             // step_scanline() a fait basculer le CRTC sur la scanline suivante :
             // on mémorise l'état du Gate Array tel qu'elle démarre.
@@ -365,6 +442,7 @@ impl Machine {
             // montant du VSYNC, pas sur son niveau.
             if self.bus.gate_array.step_hsync(vsync_start) {
                 self.cpu.int_request(0xFF);
+                self.interrupts_since_vsync += 1;
             }
         }
         elapsed_ticks
@@ -563,6 +641,85 @@ impl Machine {
             }
         }
         let _ = writeln!(s);
+
+        // Vue "musicien" des mêmes registres : périodes, volumes et état du
+        // mélangeur, autrement dit ce qu'on entend réellement.
+        let regs = &self.bus.psg.registers;
+        let mixer = regs[7];
+        for (channel, name) in ["A", "B", "C"].iter().enumerate() {
+            let period = (regs[channel * 2] as u16) | ((regs[channel * 2 + 1] as u16 & 0x0F) << 8);
+            let frequency = if period == 0 {
+                0
+            } else {
+                crate::sound::PSG_CLOCK / (16 * period as u32)
+            };
+            let amplitude = regs[8 + channel];
+            let volume = if amplitude & 0x10 != 0 {
+                format!("env ({})", self.bus.psg.sound.envelope_volume())
+            } else {
+                format!("{}", amplitude & 0x0F)
+            };
+            let _ = writeln!(
+                s,
+                "  Channel {}          : period {:<4} ({:>5} Hz)  tone {}  noise {}  volume {}",
+                name,
+                period,
+                frequency,
+                if (mixer >> channel) & 1 == 0 {
+                    "on "
+                } else {
+                    "off"
+                },
+                if (mixer >> (channel + 3)) & 1 == 0 {
+                    "on "
+                } else {
+                    "off"
+                },
+                volume
+            );
+        }
+        let _ = writeln!(s, "  Noise period       : {}", regs[6] & 0x1F);
+        let _ = writeln!(
+            s,
+            "  Envelope           : shape {:#04X}  period {}  volume {}",
+            regs[13],
+            (regs[11] as u32) | ((regs[12] as u32) << 8),
+            self.bus.psg.sound.envelope_volume()
+        );
+        // Échantillons produits mais pas encore récupérés par la sortie audio.
+        // Une valeur qui grimpe trahit une trame qui n'est plus rendue.
+        let _ = writeln!(
+            s,
+            "  Pending samples    : {}",
+            self.bus.psg.sound.buffered_samples()
+        );
+
+        // --- CADENCE ---
+        // Le son est un microscope à problèmes de timing : en dessous de 100 %,
+        // la musique traîne, le jeu ralentit et la carte son se retrouve à sec.
+        let _ = writeln!(s, "\n[Timing]");
+        let _ = writeln!(s, "  Emulation speed    : {:.0} %", self.measured_speed);
+        let _ = writeln!(s, "  Late frames        : {} / s", self.late_frames);
+        let _ = writeln!(
+            s,
+            "  Frame (measured)   : {} scanlines ({:.1} Hz)",
+            self.measured_frame_lines,
+            if self.measured_frame_lines > 0 {
+                1_000_000.0 / (self.measured_frame_lines as f32 * 64.0)
+            } else {
+                0.0
+            }
+        );
+        let _ = writeln!(
+            s,
+            "  Frame (registers)  : {} scanlines",
+            self.bus.crtc.frame_scanlines()
+        );
+        let _ = writeln!(
+            s,
+            "  Interrupts / frame : {}",
+            self.measured_interrupts_per_frame
+        );
 
         // --- FDC / LECTEURS DE DISQUETTES ---
         {
@@ -904,6 +1061,15 @@ impl Machine {
             MonitorCmd::PowerCycle => {
                 self.power_cycle();
             }
+            MonitorCmd::Volume => {
+                if !arg.is_empty() {
+                    match arg.parse::<f32>() {
+                        Ok(percent) => self.volume = (percent / 100.0).clamp(0.0, 1.0),
+                        Err(_) => println!("Usage: vol [0-100]"),
+                    }
+                }
+                println!("Audio volume: {} %", (self.volume * 100.0).round());
+            }
             MonitorCmd::ReadRam => {
                 // Vidage de la RAM brute, sans le banking ROM : sur CPC le code
                 // utilisateur vit sous la ROM basse, et c'est justement ce que
@@ -971,5 +1137,86 @@ impl Machine {
             },
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// La cadence de l'émulateur se déduit des cycles Z80 émulés : une trame
+    /// standard (312 lignes de 256 cycles) doit valoir très exactement une
+    /// période de trame CPC.
+    #[test]
+    fn emulated_time_matches_the_cpc_clock() {
+        assert_eq!(
+            emulated_duration(4_000_000),
+            std::time::Duration::from_secs(1),
+            "4 MHz : quatre millions de cycles font une seconde"
+        );
+        assert_eq!(
+            emulated_duration(312 * 256).as_micros(),
+            312 * 64,
+            "une trame standard dure 312 scanlines de 64 us"
+        );
+    }
+
+    /// Test de bout en bout : on laisse le vrai firmware démarrer, puis on lui
+    /// fait émettre le bip de la console (CHR$(7)), et on vérifie qu'un son
+    /// sort effectivement du PSG. Il traverse tout le chemin réel — routine
+    /// son de la ROM, PPI, registres du PSG, synthèse — donc il attrape ce
+    /// qu'aucun test unitaire ne voit : une écriture de registre qui n'arrive
+    /// pas, un mélangeur mal décodé, une horloge de travers.
+    ///
+    /// Le test est ignoré si les ROMs ne sont pas présentes.
+    #[test]
+    fn the_firmware_beep_produces_an_audible_tone() {
+        let mut machine = Machine::new();
+        if machine.load_roms().is_err() {
+            println!("ROMs absentes : test ignore");
+            return;
+        }
+
+        // Deux secondes de temps CPU : le firmware a fini de s'initialiser et
+        // le gestionnaire de son tourne sur interruption.
+        let mut ticks = 0u64;
+        while ticks < 2 * 4_000_000 {
+            ticks += machine.step() as u64;
+            machine.bus.psg.sound.take_samples();
+        }
+
+        // LD A,7 / CALL &BB5A (TXT OUTPUT) / JR $
+        for (offset, byte) in [0x3E, 0x07, 0xCD, 0x5A, 0xBB, 0x18, 0xFE]
+            .into_iter()
+            .enumerate()
+        {
+            machine.bus.write_byte(0x8000 + offset as u16, byte);
+        }
+        machine.cpu.reg.pc = 0x8000;
+
+        let mut samples = Vec::new();
+        let mut ticks = 0u64;
+        while ticks < 2 * 4_000_000 {
+            ticks += machine.step() as u64;
+            samples.append(&mut machine.bus.psg.sound.take_samples());
+        }
+
+        // Le bip du firmware est un ton d'environ 700 Hz : la sortie doit
+        // varier franchement, et pas seulement s'installer à un niveau fixe
+        // (ce que produirait un mélangeur qui laisse tout passer).
+        let max = samples.iter().cloned().fold(f32::MIN, f32::max);
+        let min = samples.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(max > 0.1, "aucun son audible pendant le bip (max {max})");
+        assert!(
+            min == 0.0,
+            "le bip doit alterner avec du silence (min {min})"
+        );
+
+        // Le firmware programme bien un ton, pas du bruit.
+        assert_eq!(
+            machine.bus.psg.registers[7] & 0x38,
+            0x38,
+            "le bip ne doit pas utiliser le generateur de bruit"
+        );
     }
 }

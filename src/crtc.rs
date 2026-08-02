@@ -274,6 +274,45 @@ mod tests {
         }
     }
 
+    /// Piège documenté : `frame_scanlines()` décrit ce que disent les registres
+    /// à l'instant où on les lit, pas la trame qui vient de s'écouler. Un jeu
+    /// qui découpe son écran (panneau de score, rupture) reprogramme R4/R9 en
+    /// cours de trame, et la valeur annoncée devient alors très fausse. C'est
+    /// pourquoi l'émulateur cadence son temps réel sur les cycles Z80 émulés
+    /// (machine::emulated_duration) et jamais sur ce calcul.
+    #[test]
+    fn a_mid_frame_reprogramming_makes_the_announced_length_wrong() {
+        let mut crtc = Crtc::new();
+        assert_eq!(crtc.frame_scanlines(), 312);
+
+        // Moitié haute de l'écran, puis bascule sur une seconde géométrie,
+        // comme le fait un écran découpé.
+        let mut elapsed = 0;
+        for _ in 0..200 {
+            crtc.step_scanline();
+            elapsed += 1;
+        }
+        crtc.registers[4] = 6;
+        crtc.registers[9] = 7;
+
+        assert_eq!(
+            crtc.frame_scanlines(),
+            56,
+            "les registres annoncent desormais une trame six fois trop courte"
+        );
+
+        // Et la trame réelle, elle, continue bel et bien au-delà.
+        while crtc.scanline != 0 {
+            crtc.step_scanline();
+            elapsed += 1;
+        }
+        assert!(
+            elapsed > crtc.frame_scanlines(),
+            "trame reelle de {elapsed} lignes, annoncee {}",
+            crtc.frame_scanlines()
+        );
+    }
+
     /// L'ajustement vertical R5 allonge la trame du nombre de scanlines demandé.
     #[test]
     fn vertical_adjust_extends_the_frame() {

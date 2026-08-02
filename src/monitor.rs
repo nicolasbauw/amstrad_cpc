@@ -21,4 +21,5 @@ pub enum MonitorCmd {
     PowerCycle,
     Trace,
     ReadRam,
+    Volume,
 }

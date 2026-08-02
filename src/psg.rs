@@ -1,4 +1,21 @@
+use crate::sound::Sound;
 use sdl2::keyboard::{Keycode, Scancode};
+
+/// Largeur réelle de chaque registre du PSG. Les bits en trop sont perdus à
+/// l'écriture, et une relecture ne les rend donc jamais : du code qui teste la
+/// présence du PSG écrit souvent &FF dans un registre étroit pour vérifier
+/// qu'il se relit tronqué.
+const REGISTER_MASKS: [u8; 16] = [
+    0xFF, 0x0F, // R0/R1  : période canal A (12 bits)
+    0xFF, 0x0F, // R2/R3  : période canal B
+    0xFF, 0x0F, // R4/R5  : période canal C
+    0x1F, // R6     : période du bruit (5 bits)
+    0xFF, // R7     : mélangeur
+    0x1F, 0x1F, 0x1F, // R8/R9/R10 : amplitudes (4 bits + bit 4 "enveloppe")
+    0xFF, 0xFF, // R11/R12 : période d'enveloppe (16 bits)
+    0x0F, // R13    : forme d'enveloppe
+    0xFF, 0xFF, // R14/R15 : ports d'E/S (clavier sur CPC)
+];
 
 // Émulation de la puce sonore AY-3-8910 (PSG) et de la matrice du clavier de l'Amstrad CPC.
 pub struct Psg {
@@ -7,6 +24,9 @@ pub struct Psg {
     pub keyboard_matrix: [u8; 10],
     pub selected_keyboard_line: u8,
     pub controller_state: [u8; 8], // 0-7: bits de la manette (Up, Down, Left, Right, Fire1, Fire2, Fire3, Fire4)
+    /// Partie génératrice de son : les registres restent ici (ils sont aussi la
+    /// porte du clavier), la synthèse vit dans son propre module.
+    pub sound: Sound,
 }
 
 impl Psg {
@@ -17,7 +37,14 @@ impl Psg {
             keyboard_matrix: [0xFF; 10],
             selected_keyboard_line: 0,
             controller_state: [0; 8],
+            sound: Sound::new(),
         }
+    }
+
+    /// Fait avancer la synthèse sonore de `cpu_ticks` cycles Z80 (4 MHz). Le
+    /// PSG est cadencé au quart de cette fréquence sur le CPC.
+    pub fn tick(&mut self, cpu_ticks: u32) {
+        self.sound.tick_cpu(&self.registers, cpu_ticks);
     }
 
     /// Met à jour l'état d'un bouton de la manette.
@@ -211,7 +238,13 @@ impl Psg {
     pub fn write_current_register(&mut self, val: u8) {
         let reg = self.selected_register as usize;
         if reg < 16 {
-            self.registers[reg] = val;
+            self.registers[reg] = val & REGISTER_MASKS[reg];
+
+            // R13 est le seul registre à effet de bord : toute écriture, même
+            // de la valeur déjà en place, redémarre le générateur d'enveloppe.
+            if reg == 13 {
+                self.sound.write_envelope_shape(self.registers[13]);
+            }
         }
     }
 
@@ -229,5 +262,106 @@ impl Psg {
         } else {
             0xFF
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(psg: &mut Psg, reg: u8, value: u8) {
+        psg.selected_register = reg;
+        psg.write_current_register(value);
+    }
+
+    #[test]
+    fn register_writes_are_masked_to_the_hardware_width() {
+        let mut psg = Psg::new();
+        for reg in 0..16u8 {
+            write(&mut psg, reg, 0xFF);
+        }
+
+        // Ce que le composant rend n'est jamais plus large que le registre :
+        // c'est ainsi que du code détecte un vrai PSG.
+        assert_eq!(psg.registers[1] & 0xF0, 0, "R1 ne garde que 4 bits");
+        assert_eq!(psg.registers[3] & 0xF0, 0, "R3 ne garde que 4 bits");
+        assert_eq!(psg.registers[5] & 0xF0, 0, "R5 ne garde que 4 bits");
+        assert_eq!(psg.registers[6], 0x1F, "R6 ne garde que 5 bits");
+        assert_eq!(psg.registers[8], 0x1F, "R8 ne garde que 5 bits");
+        assert_eq!(psg.registers[13], 0x0F, "R13 ne garde que 4 bits");
+        // Les registres pleine largeur passent tels quels.
+        assert_eq!(psg.registers[0], 0xFF);
+        assert_eq!(psg.registers[7], 0xFF);
+        assert_eq!(psg.registers[11], 0xFF);
+    }
+
+    #[test]
+    fn writing_r13_restarts_the_envelope_even_with_the_same_value() {
+        let mut psg = Psg::new();
+        write(&mut psg, 11, 0x10); // période d'enveloppe
+        write(&mut psg, 12, 0x00);
+        write(&mut psg, 13, 0x08); // rampe descendante répétée
+
+        psg.tick(4 * 16 * 0x10 * 5); // cinq pas de rampe
+        assert_eq!(psg.sound.envelope_volume(), 10);
+
+        write(&mut psg, 13, 0x08);
+        assert_eq!(
+            psg.sound.envelope_volume(),
+            15,
+            "reecrire R13 doit relancer l'enveloppe"
+        );
+    }
+
+    #[test]
+    fn writing_another_register_does_not_disturb_the_envelope() {
+        let mut psg = Psg::new();
+        write(&mut psg, 11, 0x10);
+        write(&mut psg, 13, 0x08);
+        psg.tick(4 * 16 * 0x10 * 5);
+
+        write(&mut psg, 8, 15);
+        assert_eq!(psg.sound.envelope_volume(), 10);
+    }
+
+    #[test]
+    fn the_psg_advances_at_a_quarter_of_the_cpu_clock() {
+        let mut psg = Psg::new();
+        write(&mut psg, 7, 0x3E); // ton A seul
+        write(&mut psg, 0, 100);
+        write(&mut psg, 8, 15);
+
+        // Une seconde de temps CPU, découpée en paquets irréguliers comme le
+        // fait la boucle d'exécution (les instructions Z80 ne durent pas
+        // toutes un multiple de 4 cycles).
+        let mut ticks = 0u32;
+        let mut i = 0;
+        while ticks < 4 * crate::sound::PSG_CLOCK {
+            let chunk = [4u32, 7, 11, 13][i % 4].min(4 * crate::sound::PSG_CLOCK - ticks);
+            psg.tick(chunk);
+            ticks += chunk;
+            i += 1;
+        }
+
+        let produced = psg.sound.buffered_samples();
+        assert!(
+            produced.abs_diff(crate::sound::SAMPLE_RATE as usize) <= 2,
+            "{produced} echantillons pour une seconde de CPU"
+        );
+    }
+
+    /// Le générateur de son partage ses registres avec la porte du clavier :
+    /// R14 doit continuer de rendre la ligne sélectionnée, pas la valeur
+    /// écrite dans le registre.
+    #[test]
+    fn register_14_still_reads_the_selected_keyboard_line() {
+        let mut psg = Psg::new();
+        psg.set_key_state(Keycode::Space, true); // ligne 5, bit 7
+
+        write(&mut psg, 14, 0xFF);
+        psg.selected_keyboard_line = 5;
+        psg.selected_register = 14;
+
+        assert_eq!(psg.read_current_register(), 0b0111_1111);
     }
 }

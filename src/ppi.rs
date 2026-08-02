@@ -135,3 +135,73 @@ impl Ppi {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PORT_A: u16 = 0xF400;
+    const PORT_C: u16 = 0xF600;
+
+    /// Reproduit la séquence qu'utilise le firmware pour écrire un registre du
+    /// PSG : valeur du registre sur le port A, code de fonction sur le port C,
+    /// puis retour à l'état inactif.
+    fn psg_write(ppi: &mut Ppi, psg: &mut Psg, reg: u8, value: u8) {
+        ppi.write_register(PORT_A, reg, psg);
+        ppi.write_register(PORT_C, 0xC0, psg); // sélection de registre
+        ppi.write_register(PORT_C, 0x00, psg); // inactif
+        ppi.write_register(PORT_A, value, psg);
+        ppi.write_register(PORT_C, 0x80, psg); // écriture
+        ppi.write_register(PORT_C, 0x00, psg);
+    }
+
+    #[test]
+    fn the_firmware_write_sequence_reaches_the_sound_registers() {
+        let mut ppi = Ppi::new();
+        let mut psg = Psg::new();
+
+        psg_write(&mut ppi, &mut psg, 0, 0x34); // période A, poids faible
+        psg_write(&mut ppi, &mut psg, 1, 0x02); // période A, poids fort
+        psg_write(&mut ppi, &mut psg, 7, 0x3E); // ton A seul
+        psg_write(&mut ppi, &mut psg, 8, 0x0F); // volume maximum
+
+        assert_eq!(psg.registers[0], 0x34);
+        assert_eq!(psg.registers[1], 0x02);
+        assert_eq!(psg.registers[7], 0x3E);
+        assert_eq!(psg.registers[8], 0x0F);
+
+        // Et le son sort effectivement : une note doit moduler la sortie.
+        psg.tick(4 * 100_000);
+        let samples = psg.sound.take_samples();
+        assert!(
+            samples.iter().any(|&s| s > 0.3) && samples.iter().any(|&s| s == 0.0),
+            "un ton audible etait attendu"
+        );
+    }
+
+    /// La sélection de ligne clavier passe par les mêmes bits du port C que le
+    /// dialogue avec le PSG : les deux doivent cohabiter.
+    #[test]
+    fn selecting_a_keyboard_line_does_not_disturb_the_psg_registers() {
+        let mut ppi = Ppi::new();
+        let mut psg = Psg::new();
+
+        psg_write(&mut ppi, &mut psg, 8, 0x0F);
+        ppi.write_register(PORT_C, 0x45, &mut psg); // lecture + ligne 5
+
+        assert_eq!(psg.selected_keyboard_line, 5);
+        assert_eq!(psg.registers[8], 0x0F, "le registre ne doit pas bouger");
+    }
+
+    #[test]
+    fn the_bit_set_reset_mode_also_updates_the_keyboard_line() {
+        let mut ppi = Ppi::new();
+        let mut psg = Psg::new();
+
+        // Mode "Bit Set/Reset" : bit 0 du port C à 1, puis bit 1 à 1.
+        ppi.write_register(0xF700, 0x01, &mut psg);
+        ppi.write_register(0xF700, 0x03, &mut psg);
+
+        assert_eq!(psg.selected_keyboard_line, 3);
+    }
+}

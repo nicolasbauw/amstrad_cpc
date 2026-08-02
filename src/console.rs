@@ -60,6 +60,7 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                     "pc" => MonitorCmd::PowerCycle,
                     "t" => MonitorCmd::Trace,
                     "mr" => MonitorCmd::ReadRam,
+                    "vol" | "volume" => MonitorCmd::Volume,
                     _ => MonitorCmd::Help,
                 };
 
