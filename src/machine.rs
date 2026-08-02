@@ -356,9 +356,18 @@ impl Machine {
             "ROM Low".to_string()
         } else if addr >= 0xC000
             && self.bus.memory.rom_high_enabled
-            && self.bus.memory.rom_high_present[self.bus.memory.selected_high_rom as usize]
+            && self.bus.memory.effective_high_rom().is_some()
         {
-            format!("ROM High {}", self.bus.memory.selected_high_rom)
+            // La ROM lue n'est pas forcément celle sélectionnée : un numéro
+            // inexistant retombe sur la ROM 0.
+            let selected = self.bus.memory.selected_high_rom;
+            match self.bus.memory.effective_high_rom() {
+                Some(rom) if rom as u8 != selected => {
+                    format!("ROM High {rom} (slot {selected} absent)")
+                }
+                Some(rom) => format!("ROM High {rom}"),
+                None => unreachable!(),
+            }
         } else {
             let phys_addr = self.bus.memory.get_ram_physical_address(addr);
             let bank = phys_addr / 16384;

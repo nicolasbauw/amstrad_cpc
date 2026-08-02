@@ -51,6 +51,29 @@ impl Memory {
         self.selected_high_rom = index;
     }
 
+    /// Index de la ROM haute réellement lue pour la sélection courante.
+    ///
+    /// Les ROMs d'extension décodent elles-mêmes leur numéro sur le bus. Quand
+    /// aucune ne répond, personne ne pilote le bus et c'est la ROM BASIC interne
+    /// (numéro 0) qui reste en place : un numéro inexistant renvoie donc la ROM 0
+    /// répétée, et non du vide. C'est ce sur quoi comptent les routines qui
+    /// parcourent les ROMs, en sautant les slots de type &80 justement parce
+    /// qu'ils sont "la ROM BASIC répétée ailleurs".
+    ///
+    /// Renvoyer 0xFF ferait passer un slot vide pour une ROM d'extension valide,
+    /// dans l'en-tête de laquelle le firmware irait chercher un point d'entrée
+    /// inexistant.
+    pub fn effective_high_rom(&self) -> Option<usize> {
+        let selected = self.selected_high_rom as usize;
+        if self.rom_high_present[selected] {
+            Some(selected)
+        } else if self.rom_high_present[0] {
+            Some(0)
+        } else {
+            None
+        }
+    }
+
     /// Retourne l'adresse physique dans les 128 Ko de RAM pour une adresse CPU donnée.
     pub fn get_ram_physical_address(&self, address: u16) -> usize {
         let page = (address / 0x4000) as usize;
@@ -89,16 +112,14 @@ impl Memory {
             }
         } else if address >= 0xC000 {
             // Zone Haute ($C000 - $FFFF)
-            let selected = self.selected_high_rom as usize;
             if self.rom_high_enabled {
-                if self.rom_high_present[selected] {
-                    let start = selected * 16 * 1024;
-                    let offset = (address - 0xC000) as usize;
-                    self.rom_high[start + offset]
-                } else {
-                    // Slot ROM vide : bus de données flottant -> lecture 0xFF
-                    // (comportement matériel réel, cf. table ROMInfoTable "#FFF0 = EMPTY")
-                    0xFF
+                match self.effective_high_rom() {
+                    Some(rom) => {
+                        let start = rom * 16 * 1024;
+                        let offset = (address - 0xC000) as usize;
+                        self.rom_high[start + offset]
+                    }
+                    None => 0xFF,
                 }
             } else {
                 // ROM haute désactivée : RAM classique (banking normal)
