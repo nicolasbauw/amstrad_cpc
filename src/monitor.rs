@@ -19,4 +19,5 @@ pub enum MonitorCmd {
     RemoveWatchpoint,
     Disk,
     PowerCycle,
+    Trace,
 }

@@ -4,6 +4,7 @@ use crate::gate_array::{GateArray, GateArrayState};
 use crate::hexconversion::HexStringToUnsigned;
 use crate::memory::Memory;
 use crate::monitor::MonitorCmd;
+use crate::trace::{TraceMode, Tracer};
 use std::{
     collections::HashSet, error, error::Error, fmt, fs::File, io::Read, sync::mpsc,
     sync::mpsc::SendError,
@@ -43,7 +44,13 @@ Monitor commands:
                     has been used to halt execution
     hw              displays Gate Array and CRTC status
     hw kb           keyboard test
-    r               displays the contents of flags, registers and interrupts";
+    r               displays the contents of flags, registers and interrupts
+    t               displays trace status
+    t on            records every executed instruction in a ring buffer
+    t calls         records only jumps, calls and returns (far longer reach)
+    t off           stops recording, keeping what has been captured
+    t dump 100      displays the last 100 recorded instructions
+    t save f.txt    writes the whole buffer to a file";
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum MachineError {
@@ -108,6 +115,7 @@ pub struct Machine {
         mpsc::Sender<(MonitorCmd, String, String)>,
         mpsc::Receiver<(MonitorCmd, String, String)>,
     ),
+    pub tracer: Tracer,
     breakpoints: HashSet<u16>,
     running: bool,
     stopped_at_breakpoint: bool,
@@ -142,6 +150,7 @@ impl Machine {
             scanline_states: vec![GateArray::new().state(); MAX_CAPTURED_SCANLINES],
             diagnostic_mode: false, // Basculé à false pour tester le boot officiel du CPC 6128 !
             cmd_channel: mpsc::channel(),
+            tracer: Tracer::new(),
             breakpoints: HashSet::new(),
             running: true,
             stopped_at_breakpoint: false,
@@ -289,6 +298,16 @@ impl Machine {
         }
 
         self.stopped_at_breakpoint = false;
+
+        if self.tracer.is_recording() {
+            let opcode = [
+                self.bus.read_byte(current_pc),
+                self.bus.read_byte(current_pc.wrapping_add(1)),
+                self.bus.read_byte(current_pc.wrapping_add(2)),
+                self.bus.read_byte(current_pc.wrapping_add(3)),
+            ];
+            self.tracer.record(current_pc, self.cpu.reg.sp, opcode);
+        }
 
         // Acquittement de l'interruption : le CPU consomme la requête en attente
         // au moment où il l'accepte, donc la transition true -> false de
@@ -872,6 +891,38 @@ impl Machine {
             MonitorCmd::PowerCycle => {
                 self.power_cycle();
             }
+            MonitorCmd::Trace => match arg.as_str() {
+                "" => println!("{}", self.tracer.status()),
+                "on" => {
+                    self.tracer.start(TraceMode::All);
+                    println!("Trace started (every instruction).");
+                }
+                "calls" => {
+                    self.tracer.start(TraceMode::Branches);
+                    println!("Trace started (jumps, calls and returns only).");
+                }
+                "off" => {
+                    self.tracer.stop();
+                    println!("Trace stopped. {} instruction(s) kept.", self.tracer.len());
+                }
+                "dump" => {
+                    let count = arg2.parse().unwrap_or(32);
+                    print!("{}", self.tracer.format_last(count));
+                }
+                "save" => {
+                    if arg2.is_empty() {
+                        println!("Usage: t save <file>");
+                    } else {
+                        match std::fs::write(&arg2, self.tracer.format_last(usize::MAX)) {
+                            Ok(_) => {
+                                println!("{} instruction(s) written to {arg2}", self.tracer.len())
+                            }
+                            Err(e) => println!("Can't write {arg2}: {e}"),
+                        }
+                    }
+                }
+                _ => println!("Usage: t | t on | t calls | t off | t dump [n] | t save <file>"),
+            },
         }
         Ok(())
     }

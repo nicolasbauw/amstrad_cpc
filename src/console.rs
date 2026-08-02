@@ -58,6 +58,7 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                     "s" => MonitorCmd::SearchMem,
                     "disk" => MonitorCmd::Disk,
                     "pc" => MonitorCmd::PowerCycle,
+                    "t" => MonitorCmd::Trace,
                     _ => MonitorCmd::Help,
                 };
 

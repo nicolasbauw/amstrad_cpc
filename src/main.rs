@@ -10,6 +10,7 @@ mod memory;
 mod monitor;
 mod ppi;
 mod psg;
+mod trace;
 mod video;
 
 use machine::Machine;
