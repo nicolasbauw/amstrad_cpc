@@ -9,6 +9,14 @@ use zilog_z80::bus::Bus;
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+/// L'interface disque du CPC répond quand les bits 10 et 7 du port sont à 0.
+/// Les deux conditions comptent : ne tester que le bit 10 fait aussi répondre le
+/// FDC à des ports destinés à d'autres composants, dont &79FF utilisé pour le
+/// banking RAM.
+fn fdc_selected(port: u16) -> bool {
+    (port & 0x0480) == 0
+}
+
 /// Le Bus système du CPC qui interconnecte tous les composants matériels.
 pub struct CpcBus {
     pub memory: Memory,
@@ -74,15 +82,17 @@ impl Bus for CpcBus {
             }
         }
 
-        // 3. Décodage du FDC (Bit 10 = 0, soit port & 0x0400 == 0)
-        if (port & 0x0400) == 0 {
-            // Le vrai matériel distingue le contrôle moteur (&FA7E) du chip FDC
-            // (&FB7E/&FB7F) via le BIT 8 de l'adresse, PAS le bit 7 :
-            //   &FA7E = 1111 1010 0111 1110  -> bit8 = 0 (moteur)
-            //   &FB7E = 1111 1011 0111 1110  -> bit8 = 1, bit0 = 0 (MSR)
-            //   &FB7F = 1111 1011 0111 1111  -> bit8 = 1, bit0 = 1 (DATA)
-            // Le bit 7 vaut 0 dans les TROIS cas : le tester ne permettait donc
-            // jamais d'atteindre le chip FDC (bug corrigé ici).
+        // 3. Décodage du FDC : l'interface disque répond quand les bits 10 ET 7
+        // sont à 0. Les deux sont nécessaires, et le bit 7 vaut bien 0 dans les
+        // trois adresses utilisées :
+        //   &FA7E = 1111 1010 0111 1110  -> bit10=0, bit7=0, bit8=0 (moteur)
+        //   &FB7E = 1111 1011 0111 1110  -> bit10=0, bit7=0, bit8=1, bit0=0 (MSR)
+        //   &FB7F = 1111 1011 0111 1111  -> bit10=0, bit7=0, bit8=1, bit0=1 (DATA)
+        // Omettre le bit 7 fait répondre le FDC à des ports qui ne le concernent
+        // pas : &79FF, utilisé pour le banking RAM, a bit10=0 et tombait donc
+        // dans son registre de données, ce qui détraquait sa machine à états.
+        if fdc_selected(port) {
+            // C'est le BIT 8 qui sépare le contrôle moteur du chip FDC.
             if (port & 0x0100) != 0 {
                 if (port & 0x0001) != 0 {
                     return self.fdc.borrow_mut().read_data();
@@ -133,8 +143,8 @@ impl Bus for CpcBus {
             self.memory.select_high_rom(value);
         }
 
-        // 5. Décodage du FDC et contrôle du moteur de disquette (Bit 10 = 0, soit port & 0x0400 == 0)
-        if (port & 0x0400) == 0 {
+        // 5. Décodage du FDC et contrôle du moteur (bits 10 et 7 à 0).
+        if fdc_selected(port) {
             // Voir le commentaire détaillé dans read_io : c'est le BIT 8 qui sépare
             // le contrôle moteur (&FA7E, bit8=0) du chip FDC (&FB7E/&FB7F, bit8=1).
             if (port & 0x0100) != 0 {
@@ -148,6 +158,34 @@ impl Bus for CpcBus {
                 // Écriture Contrôle Moteur (&FA7E)
                 self.fdc.borrow_mut().motor_on = (value & 0x01) != 0;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Les trois adresses de l'interface disque, et un échantillon de ports
+    /// destinés aux autres composants qui ne doivent surtout pas l'atteindre.
+    #[test]
+    fn only_the_disc_interface_ports_reach_the_fdc() {
+        for port in [0xFA7E, 0xFB7E, 0xFB7F] {
+            assert!(fdc_selected(port), "{port:#06X} devrait atteindre le FDC");
+        }
+
+        for port in [
+            0x79FF, // Gate Array / banking RAM : bit 10 à 0 mais bit 7 à 1
+            0x7BFF, // idem
+            0x7F00, // Gate Array
+            0xBC00, // CRTC
+            0xBD00, 0xBE00, 0xBF00, 0xDF00, // sélection de ROM haute
+            0xF400, 0xF500, 0xF600, 0xF700, // PPI
+        ] {
+            assert!(
+                !fdc_selected(port),
+                "{port:#06X} ne devrait pas atteindre le FDC"
+            );
         }
     }
 }
