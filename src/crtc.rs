@@ -54,10 +54,12 @@ impl Crtc {
     /// Écriture d'adresse (sélection du registre actif)
     /// Se produit lorsque le port d'I/O a le bit 14 à 0 et le bit 9 à 1.
     pub fn select_register(&mut self, reg: u8) {
-        // Le CRTC possède 18 registres valides (0 à 17)
-        if reg < 18 {
-            self.selected_register = reg;
-        }
+        // Le registre d'adresse du 6845 ne compte que 5 bits : une valeur hors
+        // plage n'est pas ignorée, elle est tronquée. Les routines de détection
+        // du type de CRTC sélectionnent justement des numéros farfelus (0xFF,
+        // 0x77...) avant de relire ; conserver l'ancienne sélection enverrait
+        // les écritures de données suivantes dans le mauvais registre.
+        self.selected_register = reg & 0x1F;
     }
 
     /// Écriture de données dans le registre actuellement sélectionné.
@@ -70,9 +72,16 @@ impl Crtc {
     }
 
     /// Lecture de données du registre actuellement sélectionné.
+    ///
+    /// La plupart des registres d'un 6845 sont en écriture seule : seuls R14 à
+    /// R17 (curseur et light pen) se relisent, les autres renvoient 0. C'est
+    /// exactement ce que sondent les routines de détection du type de CRTC, qui
+    /// concluaient à un ASIC (type 3) quand tous les registres se relisaient.
     pub fn read_data(&self) -> u8 {
-        let reg = self.selected_register as usize;
-        if reg < 18 { self.registers[reg] } else { 0 }
+        match self.selected_register {
+            14..=17 => self.registers[self.selected_register as usize],
+            _ => 0,
+        }
     }
 
     /// Nombre de scanlines d'une trame complète, tel que programmé dans les
