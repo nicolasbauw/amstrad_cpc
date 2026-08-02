@@ -108,6 +108,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let max_ticks_per_frame: u32 = 2 * 79_872;
     let mut running = true;
 
+    // Cadence d'exécution. Une scanline dure 64 µs sur le CPC, donc la durée d'une
+    // trame se déduit du nombre de scanlines programmé dans le CRTC : un logiciel
+    // qui reprogramme R4/R9 change réellement la fréquence trame, comme sur le
+    // matériel. On vise une échéance absolue plutôt que de dormir une durée fixe :
+    // avec une attente fixe, la période réelle vaut "temps de calcul + attente" et
+    // la machine émulée tourne durablement trop lentement.
+    const SCANLINE_MICROS: u64 = 64;
+    let mut next_frame = std::time::Instant::now();
+
     while running {
         for event in event_pump.poll_iter() {
             match event {
@@ -330,7 +339,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         machine.console_handle().unwrap_or_default();
-        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let frame_duration = std::time::Duration::from_micros(
+            machine.bus.crtc.frame_scanlines() as u64 * SCANLINE_MICROS,
+        );
+        let now = std::time::Instant::now();
+        if now < next_frame {
+            std::thread::sleep(next_frame - now);
+            next_frame += frame_duration;
+        } else {
+            // Trame en retard : on repart de l'instant courant plutôt que de
+            // tenter de rattraper, ce qui emballerait la machine émulée.
+            next_frame = now + frame_duration;
+        }
     }
 
     Ok(())
