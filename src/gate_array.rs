@@ -168,6 +168,17 @@ impl GateArray {
         }
         interrupt
     }
+
+    /// Acquittement de l'interruption par le Z80.
+    ///
+    /// Le Gate Array force alors le bit 5 du compteur à zéro, ce qui garantit
+    /// qu'au moins 32 lignes s'écouleront avant l'interruption suivante : sans
+    /// cela, une interruption levée par le recalage VSYNC pourrait être suivie
+    /// presque immédiatement par celle du compteur libre.
+    pub fn acknowledge_interrupt(&mut self) {
+        self.hsync_counter &= 0x1F;
+        self.interrupt_requested = false;
+    }
 }
 
 #[cfg(test)]

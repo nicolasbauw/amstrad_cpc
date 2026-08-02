@@ -261,9 +261,6 @@ impl Machine {
     /// Exécute une instruction et synchronise les périphériques
     pub fn step(&mut self) -> u32 {
         let current_pc = self.cpu.reg.pc;
-        if current_pc == 0x0038 {
-            self.bus.gate_array.interrupt_requested = false;
-        }
 
         if self.breakpoints.contains(&self.cpu.reg.pc) && !self.stopped_at_breakpoint {
             self.stop();
@@ -276,7 +273,17 @@ impl Machine {
         }
 
         self.stopped_at_breakpoint = false;
+
+        // Acquittement de l'interruption : le CPU consomme la requête en attente
+        // au moment où il l'accepte, donc la transition true -> false de
+        // has_pending_int() sur une instruction identifie précisément le cycle
+        // d'acknowledge. C'est plus fiable qu'un test sur PC == 0x0038, qui est
+        // aussi la cible du RST 38h (opcode 0xFF, octet de remplissage courant).
+        let int_pending_before = self.cpu.has_pending_int();
         let ticks = self.cpu.execute(&mut self.bus);
+        if int_pending_before && !self.cpu.has_pending_int() {
+            self.bus.gate_array.acknowledge_interrupt();
+        }
 
         if let Some(addr) = self.bus.watchpoint_hit {
             self.bus.watchpoint_hit = None;
