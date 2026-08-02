@@ -11,13 +11,13 @@ pub const CPC_COLORS_RGB: [(u8, u8, u8); 27] = [
     (255, 0, 255),   // 8: Magenta vif
     (0, 128, 0),     // 9: Vert
     (0, 128, 128),   // 10: Cyan
-    (0, 128, 255),   // 11: Cyan vif
+    (0, 128, 255),   // 11: Bleu ciel
     (128, 128, 0),   // 12: Jaune
     (128, 128, 128), // 13: Blanc cassé / Gris
     (128, 128, 255), // 14: Pastel Bleu
-    (255, 0, 0),     // 15: Orange (utilisé comme index 15 physique sur CPC)
-    (255, 128, 128), // 16: Pastel Rouge
-    (255, 128, 255), // 17: Pastel Rose
+    (255, 128, 0),   // 15: Orange
+    (255, 128, 128), // 16: Rose
+    (255, 128, 255), // 17: Magenta pastel
     (0, 255, 0),     // 18: Vert vif
     (0, 255, 128),   // 19: Vert d'eau
     (0, 255, 255),   // 20: Cyan vif / Turquoise
@@ -29,13 +29,51 @@ pub const CPC_COLORS_RGB: [(u8, u8, u8); 27] = [
     (255, 255, 255), // 26: Blanc brillant
 ];
 
-/// Table de conversion officielle complète entre les index de couleurs matériels du Gate Array (0 à 31)
-/// et l'index de la couleur physique réelle (0 à 26).
+/// Conversion entre l'index de couleur matériel du Gate Array (0 à 31, soit les
+/// valeurs &40 à &5F écrites sur son port) et l'index de la couleur physique.
+///
+/// Les 27 valeurs canoniques sont celles que le firmware émet ; elles sont
+/// reprises telles quelles des constantes de la ROM Amstrad Diagnostics
+/// (Colors.asm), et le test `hardware_palette_matches_the_reference_table` les
+/// revérifie une par une.
+///
+/// Cinq codes (&41, &48, &49, &50, &51) ne correspondent à aucune des 27
+/// couleurs et ne sont jamais émis par le firmware : ce sont des doublons du
+/// Gate Array, marqués ci-dessous, dont la valeur ici est une approximation qui
+/// ne repose pas sur la source de référence.
 pub const HARDWARE_TO_PHYSICAL: [usize; 32] = [
-    13, 17, 19, 26, 1, 10, 21, 22, // 0-7
-    15, 4, 24, 25, 6, 22, 3, 5, // 8-15
-    14, 16, 18, 20, 2, 9, 0, 7, // 16-23
-    12, 21, 10, 13, 13, 13, 13, 13, // 24-31
+    13, // &40 Blanc / Gris
+    13, // &41 (doublon, non documenté)
+    19, // &42 Vert d'eau
+    25, // &43 Jaune pastel
+    1,  // &44 Bleu
+    7,  // &45 Pourpre
+    10, // &46 Cyan
+    16, // &47 Rose
+    7,  // &48 (doublon, non documenté)
+    25, // &49 (doublon, non documenté)
+    24, // &4A Jaune vif
+    26, // &4B Blanc brillant
+    6,  // &4C Rouge vif
+    8,  // &4D Magenta vif
+    15, // &4E Orange
+    17, // &4F Magenta pastel
+    0,  // &50 (doublon, non documenté)
+    2,  // &51 (doublon, non documenté)
+    18, // &52 Vert vif
+    20, // &53 Cyan vif
+    0,  // &54 Noir
+    2,  // &55 Bleu vif
+    9,  // &56 Vert
+    11, // &57 Bleu ciel
+    4,  // &58 Magenta
+    22, // &59 Vert pastel
+    21, // &5A Vert lime
+    23, // &5B Cyan pastel
+    3,  // &5C Rouge
+    5,  // &5D Mauve
+    12, // &5E Jaune
+    14, // &5F Bleu pastel
 ];
 
 /// Émulation du Gate Array de l'Amstrad CPC.
@@ -184,6 +222,83 @@ impl GateArray {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les 27 couleurs canoniques, reprises des constantes de Colors.asm de la
+    /// ROM Amstrad Diagnostics (elles-mêmes issues de la table CPCWiki).
+    /// Format : (valeur écrite sur le Gate Array, index de couleur physique).
+    const REFERENCE_PALETTE: [(u8, usize); 27] = [
+        (0x54, 0),  // Noir
+        (0x44, 1),  // Bleu
+        (0x55, 2),  // Bleu vif
+        (0x5C, 3),  // Rouge
+        (0x58, 4),  // Magenta
+        (0x5D, 5),  // Mauve
+        (0x4C, 6),  // Rouge vif
+        (0x45, 7),  // Pourpre
+        (0x4D, 8),  // Magenta vif
+        (0x56, 9),  // Vert
+        (0x46, 10), // Cyan
+        (0x57, 11), // Bleu ciel
+        (0x5E, 12), // Jaune
+        (0x40, 13), // Blanc / Gris
+        (0x5F, 14), // Bleu pastel
+        (0x4E, 15), // Orange
+        (0x47, 16), // Rose
+        (0x4F, 17), // Magenta pastel
+        (0x52, 18), // Vert vif
+        (0x42, 19), // Vert d'eau
+        (0x53, 20), // Cyan vif
+        (0x5A, 21), // Vert lime
+        (0x59, 22), // Vert pastel
+        (0x5B, 23), // Cyan pastel
+        (0x4A, 24), // Jaune vif
+        (0x43, 25), // Jaune pastel
+        (0x4B, 26), // Blanc brillant
+    ];
+
+    #[test]
+    fn hardware_palette_matches_the_reference_table() {
+        for (hw_value, expected) in REFERENCE_PALETTE {
+            let hw = (hw_value & 0x1F) as usize;
+            assert_eq!(
+                HARDWARE_TO_PHYSICAL[hw], expected,
+                "valeur materielle &{hw_value:02X}"
+            );
+        }
+    }
+
+    /// Les 27 couleurs du CPC sont toutes les combinaisons de R, V, B pris dans
+    /// {0, 128, 255}, et chacune n'apparaît qu'une fois.
+    #[test]
+    fn physical_colors_are_the_27_distinct_rgb_combinations() {
+        let mut seen = CPC_COLORS_RGB.to_vec();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), 27, "couleurs physiques dupliquees");
+
+        for (r, g, b) in CPC_COLORS_RGB {
+            for component in [r, g, b] {
+                assert!(
+                    matches!(component, 0 | 128 | 255),
+                    "composante hors des trois niveaux du CPC dans {:?}",
+                    (r, g, b)
+                );
+            }
+        }
+    }
+
+    /// Le noir doit être noir : c'est la valeur qu'un jeu écrit pour éteindre la
+    /// bordure, et la faire virer au bleu vif se voit immédiatement.
+    #[test]
+    fn border_set_to_black_renders_black() {
+        let mut ga = GateArray::new();
+        let mut rom_low = true;
+        let mut rom_high = true;
+
+        ga.write_register(0x10, &mut rom_low, &mut rom_high); // stylo 16 = bordure
+        ga.write_register(0x54, &mut rom_low, &mut rom_high); // couleur noire
+        assert_eq!(ga.get_rgb_color(16), (0, 0, 0));
+    }
 
     /// Numéros des lignes (relatives au début de trame) sur lesquelles une
     /// interruption est levée, pour une trame de 312 lignes dont le VSYNC
