@@ -43,7 +43,8 @@ pub struct GateArray {
     pub selected_pen: u8,          // Stylo sélectionné (0-15, ou 16 pour la bordure)
     pub palette: [u8; 17],         // Palette des 16 encres + la bordure (valeurs matérielles 0-31)
     pub video_mode: u8,            // Mode vidéo actuel (0, 1, 2)
-    pub hsync_counter: u32,        // Compteur de lignes HSYNC pour générer les interruptions
+    pub hsync_counter: u32,        // Compteur 6 bits de lignes HSYNC générant les interruptions
+    pub vsync_delay: u8,           // HSYNC restants avant le contrôle post-VSYNC (0 = inactif)
     pub interrupt_requested: bool, // Indique si une interruption est en attente
 }
 
@@ -55,6 +56,7 @@ impl GateArray {
             palette: [0; 17],
             video_mode: 1, // Mode 1 par défaut (utilisé par la ROM de diagnostic)
             hsync_counter: 0,
+            vsync_delay: 0,
             interrupt_requested: false,
         };
         for i in 0..17 {
@@ -110,6 +112,7 @@ impl GateArray {
 
                 if (val & 0x10) != 0 {
                     self.hsync_counter = 0;
+                    self.vsync_delay = 0;
                     self.interrupt_requested = false;
                 }
             }
@@ -123,14 +126,111 @@ impl GateArray {
         }
     }
 
-    /// Avance le compteur de cycles (Ticks) du Gate Array.
-    pub fn step_hsync(&mut self) -> bool {
+    /// Avance le compteur d'interruptions du Gate Array d'une ligne (appelé à
+    /// chaque HSYNC). Renvoie true si une interruption doit être levée.
+    ///
+    /// Le compteur 6 bits n'est pas un simple compteur libre : il est recalé sur
+    /// le VSYNC du CRTC, ce qui garantit qu'une interruption tombe toujours juste
+    /// après le début du retour de trame. Le firmware s'en sert pour détecter le
+    /// "frame flyback" (en lisant le bit 0 du port B du PPI depuis le handler) et
+    /// n'y committe la table d'encres vers le matériel qu'à ce moment-là : sans ce
+    /// recalage, INK et BORDER restent définitivement sans effet.
+    ///
+    /// - à 52 HSYNC : interruption, compteur remis à zéro ;
+    /// - 2 HSYNC après le début du VSYNC : interruption si le bit 5 du compteur
+    ///   est armé, puis compteur remis à zéro dans les deux cas.
+    ///
+    /// `vsync_start` doit être vrai uniquement sur la ligne où le VSYNC démarre
+    /// (front montant), pas pendant toute sa durée.
+    pub fn step_hsync(&mut self, vsync_start: bool) -> bool {
+        let mut interrupt = false;
+
         self.hsync_counter += 1;
         if self.hsync_counter >= 52 {
             self.hsync_counter = 0;
-            self.interrupt_requested = true;
-            return true; // Demande d'interruption levée
+            interrupt = true;
         }
-        false
+
+        if vsync_start {
+            self.vsync_delay = 2;
+        } else if self.vsync_delay > 0 {
+            self.vsync_delay -= 1;
+            if self.vsync_delay == 0 {
+                if (self.hsync_counter & 0x20) != 0 {
+                    interrupt = true;
+                }
+                self.hsync_counter = 0;
+            }
+        }
+
+        if interrupt {
+            self.interrupt_requested = true;
+        }
+        interrupt
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Numéros des lignes (relatives au début de trame) sur lesquelles une
+    /// interruption est levée, pour une trame de 312 lignes dont le VSYNC
+    /// démarre à `vsync_line`.
+    fn interrupt_lines(ga: &mut GateArray, vsync_line: u32, frame_lines: u32) -> Vec<u32> {
+        let mut lines = Vec::new();
+        for line in 0..frame_lines {
+            if ga.step_hsync(line == vsync_line) {
+                lines.push(line);
+            }
+        }
+        lines
+    }
+
+    #[test]
+    fn interrupt_every_52_lines_without_vsync() {
+        let mut ga = GateArray::new();
+        assert_eq!(
+            interrupt_lines(&mut ga, u32::MAX, 312),
+            vec![51, 103, 155, 207, 259, 311]
+        );
+    }
+
+    /// Le point qui cassait BORDER/INK : sans recalage, 312 = 6 x 52 fige la
+    /// phase et aucune interruption ne tombe jamais dans la fenêtre VSYNC.
+    #[test]
+    fn interrupt_fires_two_lines_after_vsync_start() {
+        let mut ga = GateArray::new();
+        let vsync_line = 240;
+        // Deuxième trame : le compteur a déjà été recalé par la première.
+        interrupt_lines(&mut ga, vsync_line, 312);
+        let lines = interrupt_lines(&mut ga, vsync_line, 312);
+        assert!(
+            lines.contains(&(vsync_line + 2)),
+            "aucune interruption 2 lignes après le VSYNC : {lines:?}"
+        );
+    }
+
+    /// Compteur < 32 au moment du contrôle : le VSYNC le remet à zéro sans
+    /// lever d'interruption supplémentaire.
+    #[test]
+    fn vsync_resets_counter_without_interrupt_when_bit5_clear() {
+        let mut ga = GateArray::new();
+        ga.hsync_counter = 10;
+        assert!(!ga.step_hsync(true));
+        assert!(!ga.step_hsync(false));
+        assert!(!ga.step_hsync(false));
+        assert_eq!(ga.hsync_counter, 0);
+    }
+
+    /// Compteur >= 32 au moment du contrôle : interruption forcée puis remise à zéro.
+    #[test]
+    fn vsync_forces_interrupt_when_bit5_set() {
+        let mut ga = GateArray::new();
+        ga.hsync_counter = 40;
+        assert!(!ga.step_hsync(true));
+        assert!(!ga.step_hsync(false));
+        assert!(ga.step_hsync(false));
+        assert_eq!(ga.hsync_counter, 0);
     }
 }

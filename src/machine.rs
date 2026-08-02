@@ -297,14 +297,18 @@ impl Machine {
         self.hsync_accumulator += elapsed_ticks;
         while self.hsync_accumulator >= 256 {
             self.hsync_accumulator -= 256;
+            let previous_line = self.current_line;
             self.current_line = (self.current_line + 1) % 312;
 
             // VSYNC actif entre les lignes 280 et 284
             let vsync = self.current_line >= 280 && self.current_line < 284;
+            let was_vsync = previous_line >= 280 && previous_line < 284;
             // On force le bit 1 à 1 pour lire Joystick A par défaut
             self.bus.ppi.set_system_port_b(vsync, true);
 
-            if self.bus.gate_array.step_hsync() {
+            // Le Gate Array recale son compteur d'interruptions sur le front
+            // montant du VSYNC, pas sur son niveau.
+            if self.bus.gate_array.step_hsync(vsync && !was_vsync) {
                 self.cpu.int_request(0xFF);
             }
         }
