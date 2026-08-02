@@ -772,7 +772,18 @@ impl Machine {
                 let a = arg.to_u16()?;
                 let val = self.bus.read_byte(a);
                 let source_str = self.get_address_source_info(a);
-                println!("{:04X}    {:02X} ({})", a, val, source_str);
+                // Sur CPC le code utilisateur vit sous les ROMs : quand une ROM
+                // est en place, la valeur que verrait le CPU masque celle de la
+                // RAM, qui est pourtant souvent celle qu'on cherche.
+                let ram = self.bus.memory.read_ram_byte(a);
+                if ram != val {
+                    println!(
+                        "{:04X}    {:02X} ({})    RAM: {:02X}",
+                        a, val, source_str, ram
+                    );
+                } else {
+                    println!("{:04X}    {:02X} ({})", a, val, source_str);
+                }
             }
             MonitorCmd::WriteMem => {
                 let a = arg.to_u16()?;

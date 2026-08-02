@@ -127,7 +127,14 @@ impl Tracer {
                 base: entry.pc,
                 bytes: entry.opcode,
             };
-            let (text, len) = zilog_z80::dasm::dasm(&bus, entry.pc);
+            let (dasm, len) = zilog_z80::dasm::dasm(&bus, entry.pc);
+            // dasm() préfixe déjà sa chaîne des octets, dans un formatage qui
+            // varie selon le préfixe d'opcode ; on ne garde que le mnémonique et
+            // on affiche les octets nous-mêmes, de façon uniforme.
+            let text = dasm
+                .split_once("  ")
+                .map_or(dasm.as_str(), |(_, rest)| rest.trim_start())
+                .to_string();
             let bytes: Vec<String> = entry.opcode[..len.min(4) as usize]
                 .iter()
                 .map(|b| format!("{b:02X}"))
