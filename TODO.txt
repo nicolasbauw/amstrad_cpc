@@ -1,2 +1,2 @@
-- regarder le comportement "normal" du mode démo de hotshot, et comparer
+- Dans le jeu hotshot, quand on appuie sur ESPACE à l'invite : deux joueurs peuvent se manifester (FIRE + saisie du nom). Ils ont 10 secondes pour le faire. Si au bout des 10 secondes aucun joueur ne s'est manifesté, des joueurs contrôles par l'ordinateur se connectent. Cela fonctionne pour le premier joueur (au bout des 10 secondes, l'ordinateur entre son nom). Le souci : au bout du compte à rebours pour le second joueur (10 secondes donc), il reste figé sur "00" au lieu de saisir un nom automatiquement.
 - retirer le field "debug" de la struct CPU
