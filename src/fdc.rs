@@ -298,6 +298,14 @@ impl Fdc {
     /// Indique si le lecteur actuellement sélectionné est physiquement
     /// disponible : le lecteur A est toujours présent, le lecteur B
     /// uniquement s'il a été activé via config.toml.
+    /// Bits d'identification renvoyés dans ST0 à la fin d'un Seek ou d'un
+    /// Recalibrate : numéro de lecteur (US1/US0) et tête courante (HD, bit 2).
+    /// Un pilote qui gère plusieurs lecteurs ou les deux faces s'en sert pour
+    /// savoir quel déplacement vient de s'achever.
+    fn seek_st0_unit_bits(&self) -> u8 {
+        (self.selected_drive & 0x03) | ((self.drive().current_side & 0x01) << 2)
+    }
+
     fn selected_drive_available(&self) -> bool {
         self.selected_drive == 0 || self.drive_b_enabled
     }
@@ -649,7 +657,7 @@ impl Fdc {
                 // Retourne la tête à la piste 0
                 if self.selected_drive_available() {
                     self.drive_mut().current_track = 0;
-                    self.st0 = 0x20; // Seek End
+                    self.st0 = 0x20 | self.seek_st0_unit_bits(); // Seek End
                 } else {
                     self.st0 = 0x48 | (self.selected_drive & 0x03); // Abnormal termination + Not Ready
                 }
@@ -661,10 +669,14 @@ impl Fdc {
                 // Seek
                 if self.selected_drive_available() {
                     if self.command_buffer.len() >= 3 {
+                        // Le bit 2 (HD) du champ Drive/HD sélectionne la tête, donc
+                        // la face : sur une disquette double face, un Seek vers la
+                        // face 1 doit déplacer la tête ET changer de face.
+                        self.drive_mut().current_side = (self.command_buffer[1] >> 2) & 0x01;
                         let nc = self.command_buffer[2];
                         self.drive_mut().current_track = nc;
                     }
-                    self.st0 = 0x20; // Seek End
+                    self.st0 = 0x20 | self.seek_st0_unit_bits(); // Seek End
                 } else {
                     self.st0 = 0x48 | (self.selected_drive & 0x03); // Abnormal termination + Not Ready
                 }

@@ -29,6 +29,8 @@ Monitor commands:
                     instructions
     m 0xeeee        displays memory content at address 0xeeee
     m 0xeeee 0xaa   sets memory address 0xeeee to the 0xaa value
+    mr 0x1000       dumps 256 raw RAM bytes from 0x1000, ignoring any ROM
+    mr 0x1000 0x1100  dumps the raw RAM range 0x1000..0x1100
     s 0xaa          searches for a byte in memory
     n               steps to next Z80 instruction
     l               steps to next video line
@@ -901,6 +903,39 @@ impl Machine {
             }
             MonitorCmd::PowerCycle => {
                 self.power_cycle();
+            }
+            MonitorCmd::ReadRam => {
+                // Vidage de la RAM brute, sans le banking ROM : sur CPC le code
+                // utilisateur vit sous la ROM basse, et c'est justement ce que
+                // "m" ne peut pas montrer sur une plage.
+                let start = arg.to_u16()?;
+                let end = if arg2.is_empty() {
+                    start.saturating_add(0xFF)
+                } else {
+                    arg2.to_u16()?
+                };
+                let mut addr = start;
+                loop {
+                    let bytes: Vec<u8> = (0..16)
+                        .map(|i| self.bus.memory.read_ram_byte(addr.wrapping_add(i)))
+                        .collect();
+                    let hex: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
+                    let text: String = bytes
+                        .iter()
+                        .map(|&b| {
+                            if (0x20..0x7F).contains(&b) {
+                                b as char
+                            } else {
+                                '.'
+                            }
+                        })
+                        .collect();
+                    println!("{:04X}  {}  {}", addr, hex.join(" "), text);
+                    match addr.checked_add(16) {
+                        Some(next) if next <= end => addr = next,
+                        _ => break,
+                    }
+                }
             }
             MonitorCmd::Trace => match arg.as_str() {
                 "" => println!("{}", self.tracer.status()),
