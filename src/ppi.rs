@@ -81,8 +81,19 @@ impl Ppi {
                     psg.selected_keyboard_line = self.port_c & 0x0F;
                     self.sync_psg(psg);
                 } else {
-                    // Mode de configuration standard de direction des ports
+                    // Mode de configuration standard de direction des ports.
+                    //
+                    // Le 8255 remet à zéro ses registres de sortie à cette
+                    // occasion, et du code s'appuie dessus : Barbarian écrit le
+                    // mot de contrôle, relit le port C, puis y ajoute par un OU
+                    // le numéro de ligne clavier à interroger. Sans cette remise
+                    // à zéro, les numéros de ligne s'accumulent jusqu'à 15, le
+                    // PSG répond 0xFF pour cette ligne inexistante, et le jeu
+                    // conclut que rien n'est jamais pressé.
                     self.control_register = value;
+                    self.port_a = 0;
+                    self.port_c = 0;
+                    psg.selected_keyboard_line = 0;
                 }
             }
             _ => {}
@@ -191,6 +202,56 @@ mod tests {
 
         assert_eq!(psg.selected_keyboard_line, 5);
         assert_eq!(psg.registers[8], 0x0F, "le registre ne doit pas bouger");
+    }
+
+    /// Écrire le mot de contrôle remet les sorties du 8255 à zéro. Barbarian
+    /// interroge son clavier en relisant le port C puis en y ajoutant le numéro
+    /// de ligne par un OU : sans cette remise à zéro, les numéros s'accumulent
+    /// et le jeu ne voit plus jamais aucune touche.
+    #[test]
+    fn setting_the_mode_clears_the_output_registers() {
+        let mut ppi = Ppi::new();
+        let mut psg = Psg::new();
+
+        ppi.write_register(PORT_A, 0xFF, &mut psg);
+        ppi.write_register(PORT_C, 0x0F, &mut psg);
+        assert_eq!(psg.selected_keyboard_line, 0x0F);
+
+        ppi.write_register(0xF700, 0x82, &mut psg);
+
+        assert_eq!(ppi.port_c, 0, "le port C doit repartir de zero");
+        assert_eq!(ppi.port_a, 0, "le port A aussi");
+        assert_eq!(psg.selected_keyboard_line, 0);
+        assert_eq!(ppi.control_register, 0x82, "le mot de controle est retenu");
+    }
+
+    /// La séquence exacte de Barbarian : mot de contrôle, relecture du port C,
+    /// ajout du numéro de ligne par un OU. Chaque ligne demandée doit être
+    /// celle voulue, et non le cumul des précédentes.
+    #[test]
+    fn a_scan_that_ors_the_line_number_still_selects_the_right_line() {
+        let mut ppi = Ppi::new();
+        let mut psg = Psg::new();
+        psg.keyboard_matrix[2] = 0b1111_1011; // une touche pressee sur la ligne 2
+
+        for line in 0..10u8 {
+            ppi.write_register(0xF700, 0x82, &mut psg); // port A en sortie
+            ppi.write_register(PORT_A, 14, &mut psg); // registre clavier
+            let port_c = ppi.read_register(PORT_C, &psg);
+            ppi.write_register(PORT_C, port_c | 0xC0 | line, &mut psg); // selection
+            ppi.write_register(PORT_C, (port_c | 0xC0 | line) & 0x3F, &mut psg);
+            ppi.write_register(0xF700, 0x92, &mut psg); // port A en entree
+            ppi.write_register(PORT_C, line | 0x40, &mut psg); // lecture
+            let value = ppi.read_register(PORT_A, &psg);
+
+            assert_eq!(
+                psg.selected_keyboard_line, line,
+                "ligne {line} demandee, ligne {} selectionnee",
+                psg.selected_keyboard_line
+            );
+            let expected = if line == 2 { 0b1111_1011 } else { 0xFF };
+            assert_eq!(value, expected, "valeur lue pour la ligne {line}");
+        }
     }
 
     #[test]
