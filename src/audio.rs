@@ -33,22 +33,48 @@ const MIN_LATENCY_SAMPLES: u32 = SAMPLE_RATE / 50; // 1 trame, 20 ms
 enum Regulation {
     /// Trop de retard accumulé : la trame est jetée.
     Drop,
-    /// Trame envoyée, précédée de `padding` échantillons de silence pour
-    /// reconstituer le coussin.
+    /// Constitution du coussin de démarrage. C'est le fonctionnement prévu,
+    /// pas un incident : le distinguer évite que le compte rendu ne crie à
+    /// chaque lancement, ce qui le rendrait vite illisible.
+    Prime { padding: u32 },
+    /// Trame envoyée, précédée de `padding` échantillons de silence si le
+    /// coussin a dû être reconstitué en cours de route.
     Send { padding: u32 },
 }
 
 /// Décide du sort d'une trame en fonction de ce qui reste à jouer.
-fn regulate(queued: u32) -> Regulation {
+fn regulate(queued: u32, primed: bool) -> Regulation {
     if queued > MAX_LATENCY_SAMPLES {
         Regulation::Drop
     } else if queued < MIN_LATENCY_SAMPLES {
-        Regulation::Send {
-            padding: TARGET_LATENCY_SAMPLES - queued,
+        let padding = TARGET_LATENCY_SAMPLES - queued;
+        if primed {
+            Regulation::Send { padding }
+        } else {
+            Regulation::Prime { padding }
         }
     } else {
         Regulation::Send { padding: 0 }
     }
+}
+
+/// En-tête WAV mono 16 bits à la fréquence du PSG.
+fn wav_header(samples: u32) -> Vec<u8> {
+    let data_len = samples * 2;
+    let mut h = Vec::with_capacity(44);
+    h.extend(b"RIFF");
+    h.extend(&(36 + data_len).to_le_bytes());
+    h.extend(b"WAVEfmt ");
+    h.extend(&16u32.to_le_bytes());
+    h.extend(&1u16.to_le_bytes());
+    h.extend(&1u16.to_le_bytes());
+    h.extend(&SAMPLE_RATE.to_le_bytes());
+    h.extend(&(SAMPLE_RATE * 2).to_le_bytes());
+    h.extend(&2u16.to_le_bytes());
+    h.extend(&16u16.to_le_bytes());
+    h.extend(b"data");
+    h.extend(&data_len.to_le_bytes());
+    h
 }
 
 /// Constante du filtre coupe-continu, pour un pôle vers 20 Hz à 44,1 kHz.
@@ -62,6 +88,23 @@ pub struct Audio {
     last_output: f32,
     /// Tampon de conversion réutilisé d'une trame à l'autre.
     scratch: Vec<f32>,
+    /// Bilan de la régulation, exposé au débogueur. Un remplissage insère du
+    /// silence dans le flux : la carte son ne saute rien, elle joue ce silence,
+    /// et la musique s'en trouve étirée d'autant. Une seule seconde de jeu
+    /// avec quelques remplissages suffit à l'entendre traîner.
+    refills: u32,
+    padded_samples: u64,
+    dropped_frames: u32,
+    /// Le coussin de démarrage a été constitué.
+    primed: bool,
+    /// Enregistrement du flux réellement envoyé à la carte son, silence de
+    /// remplissage compris. Activé par AMSTRAD_AUDIO_DUMP=<fichier.wav>.
+    /// Comparer la durée du fichier au temps réel écoulé mesure directement
+    /// tout étirement de la restitution.
+    recorder: Option<(std::fs::File, u32)>,
+    /// Instant d'ouverture du périphérique, pour rapporter la durée du son
+    /// produit au temps réel écoulé.
+    opened_at: std::time::Instant,
 }
 
 impl Audio {
@@ -84,6 +127,26 @@ impl Audio {
             last_input: 0.0,
             last_output: 0.0,
             scratch: Vec::new(),
+            refills: 0,
+            padded_samples: 0,
+            dropped_frames: 0,
+            primed: false,
+            opened_at: std::time::Instant::now(),
+            recorder: std::env::var("AMSTRAD_AUDIO_DUMP").ok().and_then(|path| {
+                match std::fs::File::create(&path) {
+                    Ok(mut f) => {
+                        // En-tête WAV provisoire, complété à la fermeture.
+                        use std::io::Write;
+                        let _ = f.write_all(&wav_header(0));
+                        println!("Recording the audio output to {path}");
+                        Some((f, 0))
+                    }
+                    Err(e) => {
+                        println!("Can't record the audio output: {e}");
+                        None
+                    }
+                }
+            }),
         })
     }
 
@@ -98,16 +161,27 @@ impl Audio {
             return;
         }
 
-        let padding = match regulate(self.queued_samples()) {
+        let padding = match regulate(self.queued_samples(), self.primed) {
             // Trop de retard accumulé : on saute cette trame plutôt que de
             // laisser le son dériver durablement derrière l'image. Le filtre
             // est tout de même avancé pour éviter une discontinuité au retour
             // à la normale.
             Regulation::Drop => {
+                self.dropped_frames += 1;
                 self.last_input = *samples.last().unwrap();
                 return;
             }
-            Regulation::Send { padding } => padding,
+            Regulation::Prime { padding } => {
+                self.primed = true;
+                padding
+            }
+            Regulation::Send { padding } => {
+                if padding > 0 {
+                    self.refills += 1;
+                    self.padded_samples += padding as u64;
+                }
+                padding
+            }
         };
 
         let mut scratch = std::mem::take(&mut self.scratch);
@@ -119,7 +193,43 @@ impl Audio {
             scratch.push(filtered);
         }
         let _ = self.queue.queue_audio(&scratch);
+        self.record(&scratch);
         self.scratch = scratch;
+    }
+
+    /// Ajoute au fichier d'enregistrement, si activé.
+    ///
+    /// L'en-tête est réécrit à chaque trame : un fichier interrompu en cours
+    /// de route (Ctrl+C, plantage) reste ainsi lisible, alors qu'un en-tête
+    /// laissé à zéro se relit comme du bruit.
+    fn record(&mut self, samples: &[f32]) {
+        use std::io::{Seek, SeekFrom, Write};
+        if let Some((file, count)) = self.recorder.as_mut() {
+            let mut bytes = Vec::with_capacity(samples.len() * 2);
+            for &s in samples {
+                bytes.extend(&((s.clamp(-1.0, 1.0) * 32000.0) as i16).to_le_bytes());
+            }
+            let _ = file.seek(SeekFrom::End(0));
+            let _ = file.write_all(&bytes);
+            *count += samples.len() as u32;
+            let header = wav_header(*count);
+            let _ = file.seek(SeekFrom::Start(0));
+            let _ = file.write_all(&header);
+        }
+    }
+
+    /// Bilan de la régulation depuis le dernier appel : nombre de
+    /// remplissages, silence inséré (en millisecondes), trames jetées.
+    pub fn take_stats(&mut self) -> (u32, f32, u32) {
+        let stats = (
+            self.refills,
+            1000.0 * self.padded_samples as f32 / SAMPLE_RATE as f32,
+            self.dropped_frames,
+        );
+        self.refills = 0;
+        self.padded_samples = 0;
+        self.dropped_frames = 0;
+        stats
     }
 
     /// Volume de sortie, dans [0, 1].
@@ -138,6 +248,24 @@ impl Audio {
     }
 }
 
+impl Drop for Audio {
+    fn drop(&mut self) {
+        use std::io::{Seek, SeekFrom, Write};
+        let elapsed = self.opened_at.elapsed().as_secs_f32();
+        if let Some((file, count)) = self.recorder.as_mut() {
+            let _ = file.seek(SeekFrom::Start(0));
+            let _ = file.write_all(&wav_header(*count));
+            let sound = *count as f32 / SAMPLE_RATE as f32;
+            let wall = elapsed;
+            println!(
+                "Audio recording closed: {sound:.2} s of sound for {wall:.2} s of real time \
+                 (ratio {:.4} — 1.0000 means the sound is not stretched)",
+                sound / wall
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,11 +275,11 @@ mod tests {
 
     #[test]
     fn an_empty_queue_is_refilled_with_a_cushion() {
-        // Au démarrage, et après tout sous-alimentation, il faut reconstituer
+        // Au démarrage, et après toute sous-alimentation, il faut reconstituer
         // une réserve d'avance : sans elle la carte son retombe à sec dès la
         // trame suivante.
         assert_eq!(
-            regulate(0),
+            regulate(0, true),
             Regulation::Send {
                 padding: TARGET_LATENCY_SAMPLES
             }
@@ -162,18 +290,31 @@ mod tests {
         );
     }
 
+    /// Le coussin de démarrage se distingue d'un remplissage subi : le premier
+    /// est le fonctionnement normal, le second est le symptôme qu'on cherche à
+    /// voir signalé.
+    #[test]
+    fn the_startup_cushion_is_not_reported_as_an_incident() {
+        assert_eq!(
+            regulate(0, false),
+            Regulation::Prime {
+                padding: TARGET_LATENCY_SAMPLES
+            }
+        );
+    }
+
     #[test]
     fn a_healthy_queue_is_left_alone() {
         // Le régime normal ne doit rien ajouter, sinon la latence grimperait
         // d'une trame à l'autre jusqu'au décrochage entre le son et l'image.
         for queued in [MIN_LATENCY_SAMPLES, 2 * FRAME, MAX_LATENCY_SAMPLES] {
-            assert_eq!(regulate(queued), Regulation::Send { padding: 0 });
+            assert_eq!(regulate(queued, true), Regulation::Send { padding: 0 });
         }
     }
 
     #[test]
     fn an_overfull_queue_drops_a_frame() {
-        assert_eq!(regulate(MAX_LATENCY_SAMPLES + 1), Regulation::Drop);
+        assert_eq!(regulate(MAX_LATENCY_SAMPLES + 1, true), Regulation::Drop);
     }
 
     /// La régulation doit converger : en régime stable, elle ne doit ni
@@ -181,10 +322,15 @@ mod tests {
     #[test]
     fn the_regulation_settles_at_a_stable_latency() {
         let mut queued = 0u32;
+        let mut primed = false;
         let mut refills = 0;
         for _ in 0..1000 {
-            match regulate(queued) {
+            match regulate(queued, primed) {
                 Regulation::Drop => queued -= FRAME,
+                Regulation::Prime { padding } => {
+                    primed = true;
+                    queued += padding + FRAME;
+                }
                 Regulation::Send { padding } => {
                     if padding > 0 {
                         refills += 1;
@@ -195,7 +341,7 @@ mod tests {
             // La carte son consomme une trame par trame émulée.
             queued = queued.saturating_sub(FRAME);
         }
-        assert_eq!(refills, 1, "un seul remplissage, au demarrage");
+        assert_eq!(refills, 0, "aucun remplissage subi en regime stable");
         assert!(
             (MIN_LATENCY_SAMPLES..=MAX_LATENCY_SAMPLES).contains(&queued),
             "latence stabilisee hors de la plage visee : {queued}"

@@ -378,6 +378,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 100.0 * emulated / measure_start.elapsed().as_secs_f32(),
                 late_frames,
             );
+            // La régulation audio ne doit rien avoir à faire en régime normal.
+            // Le moindre remplissage insère du silence dans le flux et étire la
+            // musique : on le signale, il ne se voit nulle part ailleurs.
+            // Débrayable, car sur une machine trop juste le message se
+            // répéterait à chaque seconde (config.toml, [debugger] audio).
+            if let Some(audio) = audio.as_mut().filter(|_| machine.report_audio_regulation()) {
+                let (refills, padded_ms, dropped) = audio.take_stats();
+                if refills > 0 || dropped > 0 {
+                    println!(
+                        "Audio: {refills} refill(s) ({padded_ms:.0} ms of silence inserted), \
+                         {dropped} frame(s) dropped, queue {} samples",
+                        audio.queued_samples()
+                    );
+                }
+            }
             measured_ticks = 0;
             late_frames = 0;
             measure_start = std::time::Instant::now();

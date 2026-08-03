@@ -175,7 +175,10 @@ impl Machine {
             println!("Config file not found or invalid: drive B disabled by default.");
             config::Config {
                 drives: config::DriveConfig { drive_b: false },
-                debugger: config::Debugger { keyboard: false },
+                debugger: config::Debugger {
+                    keyboard: false,
+                    audio: false,
+                },
             }
         });
 
@@ -220,6 +223,12 @@ impl Machine {
     /// SDL "Machine Status" (config.toml, section [debugger]).
     pub fn show_keyboard_matrix(&self) -> bool {
         self.config.debugger.keyboard
+    }
+
+    /// Indique si les interventions de la régulation audio doivent être
+    /// signalées sur la console (config.toml, section [debugger]).
+    pub fn report_audio_regulation(&self) -> bool {
+        self.config.debugger.audio
     }
 
     /// Volume de la sortie audio, dans [0, 1].

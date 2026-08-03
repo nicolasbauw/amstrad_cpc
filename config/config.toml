@@ -3,3 +3,8 @@ drive_b = true
 
 [debugger]
 keyboard = false
+# Reports on the console whenever the audio regulation has to step in
+# (silence inserted because the sound card ran dry, or a frame dropped
+# because it was too far behind). Both stretch or skip the sound, so they
+# are worth knowing about when chasing a timing problem.
+audio = false
