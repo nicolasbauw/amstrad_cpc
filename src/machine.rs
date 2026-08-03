@@ -159,6 +159,8 @@ pub struct Machine {
     lines_since_vsync: u32,
     measured_interrupts_per_frame: u32,
     interrupts_since_vsync: u32,
+    /// Instructions non gérées déjà signalées sur la console.
+    unimplemented_reported: u32,
     config: config::Config,
 }
 
@@ -204,6 +206,7 @@ impl Machine {
             lines_since_vsync: 0,
             measured_interrupts_per_frame: 6,
             interrupts_since_vsync: 0,
+            unimplemented_reported: 0,
             config,
         };
 
@@ -387,6 +390,21 @@ impl Machine {
         // aussi la cible du RST 38h (opcode 0xFF, octet de remplissage courant).
         let int_pending_before = self.cpu.has_pending_int();
         let ticks = self.cpu.execute(&mut self.bus);
+
+        // Une instruction que le CPU ne sait pas traiter ne doit pas passer
+        // inaperçue : elle ne fait rien, donc le programme dérive à partir de
+        // là. On la nomme (le désassembleur sait tout décoder) sans pour
+        // autant noyer la console si elle tombe dans une boucle.
+        if let Some(u) = self.cpu.take_unimplemented() {
+            if self.unimplemented_reported < 10 {
+                self.unimplemented_reported += 1;
+                let (text, _) = zilog_z80::dasm::dasm(&self.bus, u.address);
+                println!("\nUnimplemented instruction at {:#06X}: {}", u.address, text);
+                if self.unimplemented_reported == 10 {
+                    println!("(further occurrences silenced, see the hardware status)");
+                }
+            }
+        }
         if int_pending_before && !self.cpu.has_pending_int() {
             self.bus.gate_array.acknowledge_interrupt();
         }
@@ -708,6 +726,10 @@ impl Machine {
         // la musique traîne, le jeu ralentit et la carte son se retrouve à sec.
         let _ = writeln!(s, "\n[Timing]");
         let _ = writeln!(s, "  Emulation speed    : {:.0} %", self.measured_speed);
+        let unimplemented = self.cpu.unimplemented_count();
+        if unimplemented > 0 {
+            let _ = writeln!(s, "  Unimplemented ops  : {unimplemented}");
+        }
         let _ = writeln!(s, "  Late frames        : {} / s", self.late_frames);
         let _ = writeln!(
             s,
