@@ -1,8 +1,8 @@
-# Barbarian : la démo joue au ralenti
+# Barbarian : la démo jouait au ralenti (résolu par ricochet)
 
-Note d'enquête. Le problème n'est pas résolu ; ce document existe pour que la
-reprise ne recommence pas à zéro, et parce que la rétro-ingénierie du moteur de
-ce jeu servira sans doute à d'autres.
+Note d'enquête, conservée pour la rétro-ingénierie du moteur qu'elle contient —
+elle servira sans doute à d'autres jeux. **Le symptôme a disparu**, réglé par un
+correctif fait pour un tout autre bug (voir « Résolution » en fin de document).
 
 ## Le symptôme
 
@@ -152,17 +152,52 @@ Toutes ces pistes ont été mesurées et écartées :
 - **le curseur d'animation** (+2B/+2C) : il reste à zéro parce que la table de
   paramètres le dit, et cette table est correctement chargée.
 
-## Ce qui reste ouvert
+## Ce qui restait ouvert, et la fausse piste qu'il fallait éviter
 
-Nous exécutons la démo exactement comme elle est écrite, et pourtant la
-référence est 3,5 fois plus rapide sur la seule phase de combat, tout en
-concordant sur la phase d'approche.
+Nous exécutions la démo exactement comme elle est écrite, et pourtant la
+référence était 3,5 fois plus rapide sur la seule phase de combat, tout en
+concordant sur la phase d'approche. Toutes les pistes ci-dessus tenaient
+toujours : c'est bien pour ça qu'aucune ne menait nulle part. La démo ne
+prenait pas un chemin plus lent que la référence — **elle prenait un chemin
+différent**, toujours le même, parce qu'une de ses entrées était figée.
 
-**Prochaine étape** : obtenir une **seconde référence**. Le seul témoin extérieur
-est un émulateur en ligne. Essayer la même disquette sur un émulateur reconnu et
-installé localement tranchera :
+## Résolution
 
-- s'il est lent comme nous, la démo de Barbarian est simplement lente et ce
-  défaut n'en est pas un ;
-- s'il est vif, la différence est réelle et il faudra chercher ailleurs que dans
-  tout ce qui est listé ci-dessus.
+En reprenant Caprice32 (installé localement, donc un témoin bien plus fiable
+que l'émulateur en ligne) comme seconde référence, l'écart est apparu net :
+aucune pause n'était visible nulle part, pas même sur les mouvements dont on
+avait vérifié qu'ils programmaient une attente de 320 unités (3,2 s chez
+nous). Un facteur global ne pouvait pas expliquer ça — puisqu'on avait
+justement vérifié que ce facteur (`0x82C7 = 8`) était calculé correctement,
+à partir de données disque elles-mêmes vérifiées correctes.
+
+La bonne question n'était donc pas « pourquoi c'est plus lent » mais
+« pourquoi la démo ne varie-t-elle jamais ». Or entre-temps, une séance sur
+un défaut de Hotshot avait mis au jour que le registre R (compteur de
+rafraîchissement mémoire) du Z80 n'avançait jamais dans `zilog_z80` — un vrai
+bug d'émulation, indépendant de Barbarian, corrigé dans le dépôt `zilog_z80`
+(commit `a8b39ac`, « Advance the R register on every M1 cycle, as the Z80
+actually does »).
+
+La démo de Barbarian se sert elle aussi de R comme source d'aléa à un
+embranchement non identifié dans la rétro-ingénierie ci-dessus (`0x86` et
+`0x89`, marqués « ? » dans la table des opcodes, en sont les candidats les
+plus probables). Avec R figé à zéro, cet embranchement choisissait
+**toujours** la même branche — celle qui contient les 31 répétitions du
+sous-script 0x23 (pause de 23 s) et le final scripté de 11 mouvements, la
+branche la plus lente possible. Une fois R réparé, la démo varie son
+déroulement comme sur le vrai matériel : combat vif, scores qui progressent,
+et un cycle mesuré à ~77 s chez nous contre 70 s chronométrées sur Caprice32
+et 62 s rapportées par l'émulateur en ligne — le même ordre de grandeur,
+avec l'écart résiduel attendu d'une pseudo-alea qui ne tire pas la même
+séquence de branches d'une exécution à l'autre.
+
+Aucun changement n'a été nécessaire dans `amstrad_cpc` : la correction vit
+entièrement dans `zilog_z80`, en dépendance de chemin.
+
+**Leçon pour la suite** : un symptôme de timing qui résiste à toute
+vérification interne de l'arithmétique et de la cadence, mais qui varie
+qualitativement (pas seulement en durée) d'une exécution à l'autre ou d'un
+émulateur à l'autre, vaut la peine d'être regardé sous l'angle « qu'est-ce
+qui pourrait rendre ce chemin non déterministe », avant de continuer à
+chercher un facteur de temps uniforme.
