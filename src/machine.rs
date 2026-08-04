@@ -33,6 +33,27 @@ const CPU_TICK_NANOS: u64 = 250;
 pub fn emulated_duration(ticks: u32) -> std::time::Duration {
     std::time::Duration::from_nanos(ticks as u64 * CPU_TICK_NANOS)
 }
+
+/// Durée réelle d'une instruction sur CPC, à partir de sa durée nominale.
+///
+/// Le Gate Array partage la mémoire avec le processeur, et il se la réserve
+/// l'essentiel du temps pour lire la VRAM : il n'ouvre au Z80 qu'une fenêtre
+/// d'accès par microseconde. Chaque cycle machine attend donc la fenêtre
+/// suivante, et toute instruction dure au bout du compte un nombre entier de
+/// microsecondes — soit un multiple de 4 cycles d'horloge.
+///
+/// Un Z80 nu exécute donc plus d'instructions par trame que le même Z80 dans
+/// un CPC. L'ignorer fait tourner tous les jeux environ 10 % trop vite par
+/// rapport au balayage vidéo et aux interruptions, ce qui déplace tout ce qui
+/// se joue à la scanline près.
+///
+/// Nous arrondissons la durée totale de l'instruction, faute de connaître le
+/// découpage en cycles machine que la crate ne fournit pas. Les deux méthodes
+/// coïncident pour la grande majorité des instructions ; là où elles diffèrent,
+/// l'écart vaut un seul cycle machine, soit un quart de microseconde.
+pub fn cpc_instruction_time(nominal_ticks: u32) -> u32 {
+    nominal_ticks.div_ceil(4) * 4
+}
 const HELP: &str = "
 Emulator commands:
     disk d.dsk      Loads the d.dsk disk image on drive A
@@ -399,7 +420,10 @@ impl Machine {
             if self.unimplemented_reported < 10 {
                 self.unimplemented_reported += 1;
                 let (text, _) = zilog_z80::dasm::dasm(&self.bus, u.address);
-                println!("\nUnimplemented instruction at {:#06X}: {}", u.address, text);
+                println!(
+                    "\nUnimplemented instruction at {:#06X}: {}",
+                    u.address, text
+                );
                 if self.unimplemented_reported == 10 {
                     println!("(further occurrences silenced, see the hardware status)");
                 }
@@ -421,7 +445,7 @@ impl Machine {
             return 0;
         }
 
-        let elapsed_ticks = if ticks == 0 { 4 } else { ticks };
+        let elapsed_ticks = cpc_instruction_time(if ticks == 0 { 4 } else { ticks });
         self.total_ticks += elapsed_ticks as u64;
 
         // Le PSG est cadencé par le même temps que le CPU : il doit avancer
@@ -1174,6 +1198,44 @@ impl Machine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Durées réelles sur CPC de quelques instructions, exprimées en
+    /// microsecondes dans la documentation de la machine : le Gate Array les
+    /// aligne toutes sur sa fenêtre d'accès mémoire.
+    #[test]
+    fn instructions_last_a_whole_number_of_microseconds() {
+        // (durée nominale du Z80, durée sur CPC)
+        for (nominal, cpc) in [
+            (4, 4),   // NOP
+            (6, 8),   // INC HL
+            (7, 8),   // LD A,(HL)
+            (10, 12), // JP nn
+            (11, 12), // PUSH BC
+            (13, 16), // DJNZ pris
+            (17, 20), // CALL nn
+            (19, 20), // LD A,(IX+d)
+            (21, 24), // LDIR, une itération
+            (23, 24), // RES b,(IX+d)
+        ] {
+            assert_eq!(
+                cpc_instruction_time(nominal),
+                cpc,
+                "instruction de {nominal} cycles"
+            );
+        }
+    }
+
+    /// Aucune instruction ne peut durer autre chose qu'un nombre entier de
+    /// microsecondes, et l'arrondi ne raccourcit jamais rien.
+    #[test]
+    fn the_gate_array_never_shortens_an_instruction() {
+        for nominal in 1..=32u32 {
+            let cpc = cpc_instruction_time(nominal);
+            assert_eq!(cpc % 4, 0, "{nominal} cycles");
+            assert!(cpc >= nominal, "{nominal} cycles");
+            assert!(cpc - nominal < 4, "{nominal} cycles : arrondi excessif");
+        }
+    }
 
     /// La cadence de l'émulateur se déduit des cycles Z80 émulés : une trame
     /// standard (312 lignes de 256 cycles) doit valoir très exactement une
