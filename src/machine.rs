@@ -202,6 +202,7 @@ impl Machine {
                     keyboard: false,
                     audio: false,
                 },
+                file: config::FileConfig::default(),
             }
         });
 
@@ -334,6 +335,21 @@ impl Machine {
         self.start();
         println!("Power on.");
         Ok(())
+    }
+
+    /// Charge une image disque sur le lecteur A, en résolvant le nom donné
+    /// via `[file] dsk_path` s'il ne désigne pas déjà un fichier existant.
+    /// Utilisée aussi bien par la commande console `disk` que par l'option
+    /// de ligne de commande `--disk`.
+    pub fn load_disk(&mut self, filename: &str) -> Result<(), String> {
+        let path = self.config.resolve_disk_path(filename);
+        self.bus.fdc.borrow_mut().load_disk(&path)
+    }
+
+    /// Équivalent de [`Machine::load_disk`] pour le lecteur B.
+    pub fn load_disk_b(&mut self, filename: &str) -> Result<(), String> {
+        let path = self.config.resolve_disk_path(filename);
+        self.bus.fdc.borrow_mut().load_disk_b(&path)
     }
 
     /// Coupe puis rétablit l'alimentation de la machine (redémarrage à
@@ -1099,17 +1115,12 @@ impl Machine {
                     }
                 } else {
                     let result = if target_drive_b {
-                        self.bus.fdc.borrow_mut().load_disk_b(&arg)
+                        self.load_disk_b(&arg)
                     } else {
-                        self.bus.fdc.borrow_mut().load_disk(&arg)
+                        self.load_disk(&arg)
                     };
-                    match result {
-                        Ok(_) => println!(
-                            "Disk '{}' loaded on drive {}",
-                            arg,
-                            if target_drive_b { "B" } else { "A" }
-                        ),
-                        Err(e) => println!("Error loading disk: {}", e),
+                    if let Err(e) = result {
+                        println!("Error loading disk: {}", e);
                     }
                 }
             }
@@ -1310,6 +1321,61 @@ mod tests {
             machine.bus.psg.registers[7] & 0x38,
             0x38,
             "le bip ne doit pas utiliser le generateur de bruit"
+        );
+    }
+
+    /// Bout en bout de `--disk` et `--autocmd` : charge une vraie disquette
+    /// par son seul nom (donc via `[file] dsk_path`, comme le ferait la
+    /// ligne de commande), tape `RUN"BARBA.I` au clavier émulé sans
+    /// intervention humaine, et vérifie que le jeu démarre réellement.
+    ///
+    /// Le test est ignoré si les ROMs ou la disquette sont absentes.
+    #[test]
+    fn autocmd_types_a_command_that_actually_starts_the_game() {
+        let mut machine = Machine::new();
+        if machine.load_roms().is_err() {
+            println!("ROMs absentes : test ignore");
+            return;
+        }
+        // Chemin complet plutôt que le seul nom de fichier : ce test vérifie
+        // que la frappe automatique fonctionne, pas la résolution de
+        // `dsk_path`, qui dépend elle-même du fichier de config utilisé
+        // (`config/config.toml` en debug, `~/.config/dart/config.toml` en
+        // release — voir `config::load_config_file`) et n'a donc pas de
+        // comportement fiable identique dans les deux profils de build.
+        if machine.load_disk("bin/Barbarian.dsk").is_err() {
+            println!("Disquette absente : test ignore");
+            return;
+        }
+
+        let mut typer = crate::autotype::AutoTyper::new("RUN\"BARBA.I\n");
+        let mut ticks = 0u64;
+        while !typer.is_done() {
+            let elapsed = machine.step();
+            typer.advance(&mut machine.bus.psg, elapsed);
+            ticks += elapsed as u64;
+            assert!(
+                ticks < 10 * 4_000_000,
+                "la frappe automatique ne se termine pas"
+            );
+        }
+
+        // Le chargement du jeu depuis la disquette prend plusieurs
+        // secondes de temps émulé.
+        let mut ticks = 0u64;
+        while ticks < 90 * 4_000_000 {
+            ticks += machine.step() as u64;
+        }
+
+        // Le code de Barbarian vit entre 0x7000 et 0x9FFF (voir
+        // doc/barbarian-demo.md) ; le BASIC et le firmware, eux, tournent
+        // sous 0x4000 ou dans les ROMs hautes. S'y retrouver prouve que la
+        // commande tapée a bien été reçue et exécutée par le firmware, pas
+        // seulement posée sans effet sur un clavier qui ne répondrait pas.
+        assert!(
+            (0x7000..0xA000).contains(&machine.cpu.reg.pc),
+            "le jeu ne semble pas avoir demarre, PC={:#06X}",
+            machine.cpu.reg.pc
         );
     }
 }

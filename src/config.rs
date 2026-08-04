@@ -1,6 +1,7 @@
 use directories::UserDirs;
 use serde::Deserialize;
 use std::fs;
+use std::path::Path;
 
 use crate::machine::MachineError;
 
@@ -8,6 +9,46 @@ use crate::machine::MachineError;
 pub struct Config {
     pub drives: DriveConfig,
     pub debugger: Debugger,
+    /// Absent des fichiers de configuration existants : sans valeur par
+    /// défaut, ajouter cette section rejetterait d'un bloc tout
+    /// config.toml écrit avant elle.
+    #[serde(default)]
+    pub file: FileConfig,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct FileConfig {
+    /// Répertoire où chercher une image disque désignée par son seul nom de
+    /// fichier (console `disk`, option `--disk`), à la manière du
+    /// `dsk_path` de Caprice32. N'intervient que si le nom donné ne désigne
+    /// déjà un fichier existant tel quel : un chemin complet ou relatif au
+    /// répertoire courant garde toujours la priorité.
+    #[serde(default)]
+    pub dsk_path: Option<String>,
+}
+
+impl Config {
+    /// Résout un nom de disquette en un chemin utilisable.
+    ///
+    /// Le nom donné est essayé tel quel en premier : c'est ce qui permet à
+    /// un chemin absolu ou relatif au répertoire de lancement de continuer à
+    /// fonctionner sans surprise. Ce n'est que s'il ne désigne aucun fichier
+    /// existant, et qu'un `dsk_path` est configuré, qu'on cherche dans ce
+    /// répertoire. Si rien ne convainc, le nom d'origine est renvoyé tel
+    /// quel : le message d'erreur du chargeur de disque reste ainsi
+    /// exploitable plutôt que de désigner un chemin recomposé surprenant.
+    pub fn resolve_disk_path(&self, filename: &str) -> String {
+        if Path::new(filename).is_file() {
+            return filename.to_string();
+        }
+        if let Some(dir) = &self.file.dsk_path {
+            let candidate = Path::new(dir).join(filename);
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+        filename.to_string()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

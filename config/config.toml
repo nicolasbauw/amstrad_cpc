@@ -8,3 +8,10 @@ keyboard = false
 # because it was too far behind). Both stretch or skip the sound, so they
 # are worth knowing about when chasing a timing problem.
 audio = false
+
+[file]
+# Directory searched for a disk image given by its bare filename (console
+# "disk" command, or the --disk command-line option), when that name is not
+# already a valid path as given. A full or relative path still takes
+# priority over this default.
+dsk_path = "bin"

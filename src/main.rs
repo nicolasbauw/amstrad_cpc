@@ -1,4 +1,5 @@
 mod audio;
+mod autotype;
 mod bus;
 mod config;
 mod console;
@@ -20,6 +21,24 @@ use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
 use std::env;
 
+/// Cherche la valeur d'une option `--nom=valeur`, `--nom valeur`, `-nom=valeur`
+/// ou `-nom valeur` parmi les arguments de la ligne de commande. `names`
+/// donne les formes acceptées (par ex. `["--autocmd", "-a"]`), pour ne pas
+/// obliger l'utilisateur à retenir laquelle est la forme longue.
+fn cli_value(args: &[String], names: &[&str]) -> Option<String> {
+    for (i, arg) in args.iter().enumerate() {
+        for name in names {
+            if let Some(v) = arg.strip_prefix(&format!("{name}=")) {
+                return Some(v.to_string());
+            }
+            if arg == name {
+                return args.get(i + 1).cloned();
+            }
+        }
+    }
+    None
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Amstrad CPC 6128 ===");
 
@@ -31,10 +50,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         diag_mode = true;
     }
 
+    // Injection d'une commande BASIC au démarrage, comme le fait Caprice32
+    // avec --autocmd. Utile pour lancer directement un jeu sans repasser par
+    // le clavier à chaque essai — le cas d'usage qui a motivé cette option
+    // est justement le débogage répété d'un même jeu, disquette après
+    // disquette, pendant les séances de mise au point.
+    let autocmd = cli_value(&args, &["--autocmd", "-a"]);
+
+    // Chargement direct d'une image disque sur le lecteur A, sans passer par
+    // la console. "-disk" (sans tiret double) est accepté en plus de la
+    // forme longue habituelle, pour rester proche de la syntaxe Caprice32.
+    let disk = cli_value(&args, &["--disk", "-disk"]);
+
     // 2. Initialisation de la Machine
     let mut machine = Machine::new();
     machine.diagnostic_mode = diag_mode;
     machine.load_roms()?;
+
+    if let Some(path) = &disk {
+        if let Err(e) = machine.load_disk(path) {
+            println!("Can't load disk '{path}': {e}");
+        }
+    }
+
+    let mut autotyper = autocmd.as_deref().map(autotype::AutoTyper::new);
 
     // 3. Initialisation de SDL2
     let sdl_context = sdl2::init()?;
@@ -287,7 +326,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut frame_ticks: u32 = 0;
 
         while machine.is_running() && !machine.frame_ready && frame_ticks < max_ticks_per_frame {
-            frame_ticks += machine.step();
+            let ticks = machine.step();
+            if let Some(typer) = autotyper.as_mut() {
+                typer.advance(&mut machine.bus.psg, ticks);
+                if typer.is_done() {
+                    autotyper = None;
+                }
+            }
+            frame_ticks += ticks;
         }
 
         // Les échantillons produits pendant la trame partent vers la carte

@@ -1,3 +1,17 @@
+## Command-line options
+
+- `--diag` / `-d`: boot the diagnostics ROM instead of the stock CPC 6128 firmware.
+- `--disk=<file>` / `-disk <file>`: load a disk image on drive A at startup. A bare
+  filename (no path) is looked up in `[file] dsk_path` from `config.toml` if it
+  isn't found as given.
+- `--autocmd=<command>` / `-a <command>`: type a command at the emulated keyboard
+  once BASIC is ready, exactly like Caprice32's own `--autocmd`. Handy for
+  jumping straight into a game during a debugging session:
+
+  ```sh
+  cargo run -- --disk=Barbarian.dsk --autocmd='RUN"BARBA.I'
+  ```
+
 ## Manual for the debugger
 
 A concrete example of combined usage:

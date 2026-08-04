@@ -1,5 +1,0 @@
-- ajouter une commande du genre --autocmd='RUN"BARBA.I' pour injecter au basic une commande dès le lancement de l'émulateur, comme le fait caprice32
-- ajouter la commande --disk Barbarian.dsk
-- ajouter dans le fichier de config un path par défaut ou trouver les images DSK
-
-Tout cela a pour objectif de rendre le debug plus rapide, et de faciliter l'intégration à un environnement de developpement.
