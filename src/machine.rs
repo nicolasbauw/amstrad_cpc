@@ -1348,7 +1348,12 @@ mod tests {
             return;
         }
 
-        let mut typer = crate::autotype::AutoTyper::new("RUN\"BARBA.I\n");
+        // Sans le "\n" final : c'est la forme que tape un utilisateur sur la
+        // ligne de commande (--autocmd='RUN"BARBA.I'), et c'est justement
+        // celle qui a échappé aux tests du module autotype — la commande se
+        // tapait mais ne validait jamais rien, faute d'ENTRÉE. C'est
+        // `crate::ensure_validated` (main.rs) qui l'ajoute.
+        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("RUN\"BARBA.I"));
         let mut ticks = 0u64;
         while !typer.is_done() {
             let elapsed = machine.step();

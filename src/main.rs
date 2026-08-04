@@ -39,6 +39,19 @@ fn cli_value(args: &[String], names: &[&str]) -> Option<String> {
     None
 }
 
+/// Une commande `--autocmd` sans retour à la ligne resterait tapée mais
+/// jamais validée : BASIC ne l'exécute qu'après ENTRÉE. On l'ajoute donc
+/// systématiquement, sauf si l'appelant l'a déjà fournie — pour ne pas
+/// envoyer un second ENTRÉE parasite, qui pourrait interagir avec ce que le
+/// jeu affiche juste après (un menu, un choix de touche...).
+fn ensure_validated(command: &str) -> String {
+    if command.ends_with('\n') {
+        command.to_string()
+    } else {
+        format!("{command}\n")
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Amstrad CPC 6128 ===");
 
@@ -73,7 +86,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut autotyper = autocmd.as_deref().map(autotype::AutoTyper::new);
+    let mut autotyper = autocmd
+        .as_deref()
+        .map(|cmd| autotype::AutoTyper::new(&ensure_validated(cmd)));
 
     // 3. Initialisation de SDL2
     let sdl_context = sdl2::init()?;
@@ -465,4 +480,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cas qui a échappé aux tests du module `autotype` : une commande
+    /// donnée sans ENTRÉE final se tapait, mais ne validait jamais rien.
+    /// Repéré à l'usage, pas par un test — d'où celui-ci.
+    #[test]
+    fn a_command_without_a_trailing_newline_gets_one() {
+        assert_eq!(ensure_validated("RUN\"BARBA.I"), "RUN\"BARBA.I\n");
+    }
+
+    #[test]
+    fn a_command_that_already_ends_with_a_newline_is_left_alone() {
+        assert_eq!(ensure_validated("RUN\"BARBA.I\n"), "RUN\"BARBA.I\n");
+    }
+
+    #[test]
+    fn an_empty_command_still_gets_a_newline() {
+        assert_eq!(ensure_validated(""), "\n");
+    }
+
+    #[test]
+    fn cli_value_accepts_the_equals_and_the_space_forms() {
+        let args: Vec<String> = ["prog", "--autocmd=RUN\"A", "-disk", "d.dsk"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        assert_eq!(
+            cli_value(&args, &["--autocmd", "-a"]),
+            Some("RUN\"A".to_string())
+        );
+        assert_eq!(
+            cli_value(&args, &["--disk", "-disk"]),
+            Some("d.dsk".to_string())
+        );
+        assert_eq!(cli_value(&args, &["--diag", "-d"]), None);
+    }
 }
