@@ -14,6 +14,15 @@ pub struct Sector {
     pub id: u8,
     pub size: usize,
     pub data: Vec<u8>,
+    /// Vrai si ce secteur a été enregistré avec la marque d'adresse "Deleted
+    /// Data" (bit 6 de ST2 dans l'en-tête de piste du .dsk), plutôt que la
+    /// marque normale. Un vrai contrôleur µPD765A distingue les deux via les
+    /// commandes Read Data (0x06, données normales) et Read Deleted Data
+    /// (0x0C, données effacées) : plusieurs protections CPC marquent
+    /// volontairement un ou deux secteurs "deleted" sur une piste donnée,
+    /// lisibles uniquement par la seconde commande, pour détecter une copie
+    /// qui ne préserverait pas cette marque.
+    pub deleted: bool,
 }
 
 pub struct Track {
@@ -157,11 +166,13 @@ impl DskImage {
                 break;
             }
             let sec_data = data[sector_data_offset..sector_data_offset + actual_size].to_vec();
+            let st2 = track_header[info_offset + 5];
 
             sectors.push(Sector {
                 id: sec_id,
                 size: actual_size,
                 data: sec_data,
+                deleted: (st2 & 0x40) != 0,
             });
             sector_data_offset += actual_size;
         }
@@ -566,6 +577,7 @@ impl Fdc {
                 0x08 => 1, // Sense Interrupt Status
                 0x0A => 2, // Read ID
                 0x06 => 9, // Read Data
+                0x0C => 9, // Read Deleted Data
                 0x05 => 9, // Write Data
                 0x0D => 6, // Format Track
                 _ => 1,    // Par défaut, commandes inconnues à 1 octet
@@ -753,88 +765,19 @@ impl Fdc {
                 self.phase = FdcPhase::Result;
             }
             0x06 => {
-                // Read Data
-                // Command format: [Cmd, Drive/HD, C, H, R, N, EOT, GPL, DTL]
-                if self.command_buffer.len() >= 9 {
-                    let track = self.command_buffer[2];
-                    let side = self.command_buffer[3] & 0x01;
-                    let start_sector = self.command_buffer[4];
-                    let n = self.command_buffer[5];
-                    let eot = self.command_buffer[6];
-
-                    if !self.selected_drive_available() {
-                        self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
-                        self.result_buffer.push(0x01); // ST1
-                        self.result_buffer.push(0x00); // ST2
-                        self.result_buffer.push(track);
-                        self.result_buffer.push(side);
-                        self.result_buffer.push(start_sector);
-                        self.result_buffer.push(n);
-                        self.phase = FdcPhase::Result;
-                    } else {
-                        self.drive_mut().current_track = track;
-                        self.drive_mut().current_side = side;
-                        self.drive_mut().current_sector = start_sector;
-
-                        // Transfert de tous les secteurs consécutifs entre R et EOT
-                        // (inclus) présents sur la piste, comme le ferait le vrai FDC
-                        // pour une commande couvrant plusieurs secteurs.
-                        let (found_any, combined, last_id) = {
-                            let drv = self.drive();
-                            let mut combined = Vec::new();
-                            let mut last_id = start_sector;
-                            let mut found_any = false;
-
-                            if let Some(ref dsk) = drv.dsk {
-                                if let Some(t) = dsk
-                                    .tracks
-                                    .iter()
-                                    .find(|t| t.number == track && t.side == side)
-                                {
-                                    let mut matched: Vec<&Sector> = t
-                                        .sectors
-                                        .iter()
-                                        .filter(|s| s.id >= start_sector && s.id <= eot)
-                                        .collect();
-                                    matched.sort_by_key(|s| s.id);
-                                    for s in matched {
-                                        combined.extend_from_slice(&s.data);
-                                        last_id = s.id;
-                                        found_any = true;
-                                    }
-                                }
-                            }
-                            (found_any, combined, last_id)
-                        };
-
-                        if found_any {
-                            self.execution_buffer = combined;
-                            self.execution_index = 0;
-                            self.phase = FdcPhase::ExecutionRead;
-
-                            self.result_buffer.push(0x00); // ST0
-                            self.result_buffer.push(0x00); // ST1
-                            self.result_buffer.push(0x00); // ST2
-                            self.result_buffer.push(track);
-                            self.result_buffer.push(side);
-                            self.result_buffer.push(last_id.wrapping_add(1)); // Secteur suivant
-                            self.result_buffer.push(n); // N tel que demandé par la commande
-                        } else {
-                            // Secteur non trouvé (No Data error)
-                            self.result_buffer.push(0x40); // ST0: Abnormal termination
-                            self.result_buffer.push(0x04); // ST1: No Data
-                            self.result_buffer.push(0x00); // ST2
-                            self.result_buffer.push(track);
-                            self.result_buffer.push(side);
-                            self.result_buffer.push(start_sector);
-                            self.result_buffer.push(n);
-                            self.phase = FdcPhase::Result;
-                        }
-                    }
-                } else {
-                    self.phase = FdcPhase::Command;
-                    self.command_buffer.clear();
-                }
+                // Read Data : secteurs enregistrés normalement.
+                self.read_data_command(false);
+            }
+            0x0C => {
+                // Read Deleted Data : mêmes paramètres que Read Data, mais ne
+                // cible que les secteurs enregistrés avec la marque d'adresse
+                // "Deleted Data" (voir la doc de `Sector::deleted`). Plusieurs
+                // protections CPC (dont Teenage Mutant Hero Turtles) marquent
+                // volontairement un ou deux secteurs "deleted" sur une piste
+                // donnée pour détecter une copie qui ne préserverait pas
+                // cette marque : sans cette commande, le jeu boucle
+                // indéfiniment à relire cette piste.
+                self.read_data_command(true);
             }
             0x05 => {
                 // Write Data
@@ -899,6 +842,96 @@ impl Fdc {
                 self.result_buffer.push(0x80); // ST0
                 self.phase = FdcPhase::Result;
             }
+        }
+    }
+
+    /// Commandes Read Data (0x06) et Read Deleted Data (0x0C) : mêmes
+    /// paramètres et même transfert multi-secteurs, seule la marque
+    /// d'adresse recherchée (`Sector::deleted`) diffère.
+    ///
+    /// Command format: [Cmd, Drive/HD, C, H, R, N, EOT, GPL, DTL]
+    fn read_data_command(&mut self, want_deleted: bool) {
+        if self.command_buffer.len() < 9 {
+            self.phase = FdcPhase::Command;
+            self.command_buffer.clear();
+            return;
+        }
+
+        let track = self.command_buffer[2];
+        let side = self.command_buffer[3] & 0x01;
+        let start_sector = self.command_buffer[4];
+        let n = self.command_buffer[5];
+        let eot = self.command_buffer[6];
+
+        if !self.selected_drive_available() {
+            self.result_buffer.push(0x48); // ST0: Abnormal termination + Not Ready
+            self.result_buffer.push(0x01); // ST1
+            self.result_buffer.push(0x00); // ST2
+            self.result_buffer.push(track);
+            self.result_buffer.push(side);
+            self.result_buffer.push(start_sector);
+            self.result_buffer.push(n);
+            self.phase = FdcPhase::Result;
+            return;
+        }
+
+        self.drive_mut().current_track = track;
+        self.drive_mut().current_side = side;
+        self.drive_mut().current_sector = start_sector;
+
+        // Transfert de tous les secteurs consécutifs entre R et EOT (inclus)
+        // présents sur la piste ET portant la marque recherchée, comme le
+        // ferait le vrai FDC pour une commande couvrant plusieurs secteurs.
+        let (found_any, combined, last_id) = {
+            let drv = self.drive();
+            let mut combined = Vec::new();
+            let mut last_id = start_sector;
+            let mut found_any = false;
+
+            if let Some(ref dsk) = drv.dsk {
+                if let Some(t) = dsk
+                    .tracks
+                    .iter()
+                    .find(|t| t.number == track && t.side == side)
+                {
+                    let mut matched: Vec<&Sector> = t
+                        .sectors
+                        .iter()
+                        .filter(|s| s.id >= start_sector && s.id <= eot && s.deleted == want_deleted)
+                        .collect();
+                    matched.sort_by_key(|s| s.id);
+                    for s in matched {
+                        combined.extend_from_slice(&s.data);
+                        last_id = s.id;
+                        found_any = true;
+                    }
+                }
+            }
+            (found_any, combined, last_id)
+        };
+
+        if found_any {
+            self.execution_buffer = combined;
+            self.execution_index = 0;
+            self.phase = FdcPhase::ExecutionRead;
+
+            self.result_buffer.push(0x00); // ST0
+            self.result_buffer.push(0x00); // ST1
+            self.result_buffer.push(0x00); // ST2
+            self.result_buffer.push(track);
+            self.result_buffer.push(side);
+            self.result_buffer.push(last_id.wrapping_add(1)); // Secteur suivant
+            self.result_buffer.push(n); // N tel que demandé par la commande
+        } else {
+            // Secteur non trouvé (No Data error)
+            self.result_buffer.push(0x40); // ST0: Abnormal termination
+            self.result_buffer.push(0x04); // ST1: No Data
+            self.result_buffer.push(0x00); // ST2
+            self.result_buffer.push(track);
+            self.result_buffer.push(side);
+            self.result_buffer.push(start_sector);
+            self.result_buffer.push(n);
+            self.phase = FdcPhase::Result;
         }
     }
 
@@ -977,6 +1010,7 @@ impl Fdc {
                 id: r,
                 size: sector_size,
                 data: vec![fill; sector_size],
+                deleted: false,
             });
         }
 
@@ -1035,4 +1069,98 @@ fn size_to_n(size: usize) -> u8 {
         n += 1;
     }
     n
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fdc_with_track(sectors: Vec<Sector>) -> Fdc {
+        let mut fdc = Fdc::new();
+        fdc.drive_a.disk_loaded = true;
+        fdc.drive_a.dsk = Some(DskImage {
+            tracks: vec![Track {
+                number: 1,
+                side: 0,
+                sector_size: 2,
+                sectors,
+            }],
+        });
+        fdc
+    }
+
+    fn send_command(fdc: &mut Fdc, bytes: &[u8]) {
+        for &b in bytes {
+            fdc.write_data(b);
+        }
+    }
+
+    /// Certaines protections CPC (dont Teenage Mutant Hero Turtles) marquent
+    /// volontairement un secteur avec la marque d'adresse "Deleted Data" pour
+    /// détecter une copie qui ne la préserverait pas : sans Read Deleted Data
+    /// (0x0C), le jeu boucle indéfiniment à relire la piste. Read Data
+    /// (0x06) ne doit pas voir ce secteur.
+    #[test]
+    fn read_deleted_data_finds_a_sector_read_data_cannot_see() {
+        let mut fdc = fdc_with_track(vec![Sector {
+            id: 0x88,
+            size: 512,
+            data: vec![0x42; 512],
+            deleted: true,
+        }]);
+
+        // Read Data (0x06) : Cmd, Drive/HD, C, H, R, N, EOT, GPL, DTL
+        send_command(
+            &mut fdc,
+            &[0x06, 0x00, 0x01, 0x00, 0x88, 0x02, 0x88, 0x2A, 0xFF],
+        );
+        assert_eq!(fdc.phase, FdcPhase::Result);
+        assert_eq!(
+            fdc.result_buffer[0] & 0x40,
+            0x40,
+            "ST0 doit signaler une terminaison anormale"
+        );
+        assert_eq!(
+            fdc.result_buffer[1] & 0x04,
+            0x04,
+            "ST1 doit signaler No Data"
+        );
+
+        // Read Deleted Data (0x0C) : mêmes paramètres, doit réussir.
+        let mut fdc = fdc_with_track(vec![Sector {
+            id: 0x88,
+            size: 512,
+            data: vec![0x42; 512],
+            deleted: true,
+        }]);
+        send_command(
+            &mut fdc,
+            &[0x0C, 0x00, 0x01, 0x00, 0x88, 0x02, 0x88, 0x2A, 0xFF],
+        );
+        assert_eq!(fdc.phase, FdcPhase::ExecutionRead);
+        assert_eq!(fdc.result_buffer[0], 0x00, "ST0 doit signaler un succes");
+        assert_eq!(fdc.execution_buffer, vec![0x42; 512]);
+    }
+
+    /// Symétrique du test précédent : un secteur enregistré normalement
+    /// reste invisible à Read Deleted Data, comme sur le vrai µPD765A.
+    #[test]
+    fn read_deleted_data_does_not_see_a_normal_sector() {
+        let mut fdc = fdc_with_track(vec![Sector {
+            id: 0x41,
+            size: 512,
+            data: vec![0x99; 512],
+            deleted: false,
+        }]);
+        send_command(
+            &mut fdc,
+            &[0x0C, 0x00, 0x01, 0x00, 0x41, 0x02, 0x41, 0x2A, 0xFF],
+        );
+        assert_eq!(fdc.phase, FdcPhase::Result);
+        assert_eq!(
+            fdc.result_buffer[1] & 0x04,
+            0x04,
+            "ST1 doit signaler No Data"
+        );
+    }
 }
