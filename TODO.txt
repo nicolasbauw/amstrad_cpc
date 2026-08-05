@@ -1,0 +1,5 @@
+- ajouter ppi.rs au architecture.md
+- retirer le -d comme option pour le diag (juste laisser --diag)
+- remplacer le -disk par l'option -d (conserver le --disk pour laisser les deux possibilités)
+- une commande inconnue dans la console ne doit plus afficher l'aide, mais un message "Unknown command"
+- s'attaquer au debug d'un symptôme aperçu dans deux jeux : les "sprites" qui clignotent (cauldron, bmx simulator)
