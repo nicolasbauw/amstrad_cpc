@@ -152,6 +152,19 @@ pub struct Machine {
     /// reprogrammation du mode ou de la palette en cours de trame (rupture)
     /// s'appliquerait rétroactivement à tout l'écran.
     pub scanline_states: Vec<GateArrayState>,
+    /// Octets de VRAM affichés sur chaque scanline de la trame, mémorisés au
+    /// moment même où le CRTC balaie cette ligne (voir `capture_scanline_vram`).
+    ///
+    /// Un vrai tube cathodique peint chaque ligne avec le contenu de la VRAM
+    /// tel qu'il est exactement à cet instant, jamais un état figé de fin de
+    /// trame. Sans cette capture progressive, une routine de tracé de sprite
+    /// interrompue par l'interruption vidéo (le XOR classique du CPC ne
+    /// masque pas les interruptions) peut se retrouver à moitié terminée
+    /// pile au moment où `video::render` prend son instantané global,
+    /// produisant un sprite à moitié effacé pendant une seule trame — un
+    /// clignotement très rapide, invisible sur un émulateur cycle-exact
+    /// (bug des sprites qui clignotent dans Cauldron/BMX Simulator, TODO.txt).
+    pub scanline_vram: Vec<Vec<u8>>,
     pub diagnostic_mode: bool, // true = ROM de Diagnostic, false = ROMs d'origine du CPC 6128
     cmd_channel: (
         mpsc::Sender<(MonitorCmd, String, String)>,
@@ -214,6 +227,7 @@ impl Machine {
             current_line: 0,
             frame_ready: false,
             scanline_states: vec![GateArray::new().state(); MAX_CAPTURED_SCANLINES],
+            scanline_vram: vec![Vec::new(); MAX_CAPTURED_SCANLINES],
             diagnostic_mode: false, // Basculé à false pour tester le boot officiel du CPC 6128 !
             cmd_channel: mpsc::channel(),
             tracer: Tracer::new(),
@@ -317,6 +331,9 @@ impl Machine {
         self.current_line = 0;
         self.frame_ready = false;
         self.scanline_states.fill(self.bus.gate_array.state());
+        for slot in &mut self.scanline_vram {
+            slot.clear();
+        }
         self.stopped_at_breakpoint = false;
         self.waiting_for_key = false;
 
@@ -500,6 +517,13 @@ impl Machine {
                 .get_mut(self.bus.crtc.scanline as usize)
             {
                 *slot = self.bus.gate_array.state();
+            }
+
+            // Capture des octets de VRAM affichés sur cette scanline, à
+            // l'instant même où le CRTC la balaie (voir la doc de
+            // `scanline_vram` et `video::capture_scanline_vram`).
+            if let Some(slot) = self.scanline_vram.get_mut(self.bus.crtc.scanline as usize) {
+                crate::video::capture_scanline_vram(&self.bus.crtc, &self.bus.memory, slot);
             }
 
             // On force le bit 1 à 1 pour lire Joystick A par défaut

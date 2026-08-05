@@ -97,6 +97,23 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
 
             let state = state_at(scanline as i32);
 
+            // Octets tels que capturés au moment où le CRTC a réellement
+            // balayé cette scanline pendant l'émulation (voir
+            // `Machine::capture_scanline_vram`), plutôt que relus maintenant
+            // dans la VRAM courante. Un vrai tube cathodique peint chaque
+            // ligne avec le contenu de la VRAM tel qu'il était exactement à
+            // cet instant : une routine de tracé de sprite par XOR (le CPC
+            // ne masque pas les interruptions pendant ce genre de boucle)
+            // peut être interrompue à mi-chemin par l'interruption vidéo,
+            // et sans cette capture progressive, un instantané global pris
+            // en fin de trame la surprendrait à moitié terminée — un
+            // sprite à moitié effacé pendant une seule trame, perçu comme
+            // un clignotement très rapide (voir TODO.txt).
+            let captured = machine
+                .scanline_vram
+                .get(scanline as usize)
+                .filter(|bytes| !bytes.is_empty());
+
             for x_char in 0..r1 {
                 let ma = line_ma.wrapping_add(x_char as u16) & 0x3FFF;
                 // RA ne fournit que 3 bits d'adresse : au delà de 8 scanlines
@@ -106,10 +123,15 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
                 let x_base = column_x[x_char as usize];
 
                 for byte_off in 0..2u16 {
-                    let byte = machine
-                        .bus
-                        .memory
-                        .read_ram_byte(addr_base.wrapping_add(byte_off));
+                    let byte = captured
+                        .and_then(|bytes| bytes.get((x_char * 2 + byte_off as u32) as usize))
+                        .copied()
+                        .unwrap_or_else(|| {
+                            machine
+                                .bus
+                                .memory
+                                .read_ram_byte(addr_base.wrapping_add(byte_off))
+                        });
                     let x_byte = x_base + byte_off as i32 * 8;
 
                     for dy in 0..PIXELS_PER_SCANLINE {
@@ -127,6 +149,38 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
                 }
             }
         }
+    }
+}
+
+/// Capture les octets de VRAM affichés sur la scanline courante du CRTC
+/// (`crtc.char_row`/`crtc.raster`, déjà avancés par `step_scanline`), pour
+/// que `render` puisse ensuite peindre cette ligne avec le contenu exact
+/// qu'un tube cathodique y aurait vu passer — pas l'état (potentiellement
+/// plus tardif) de la VRAM au moment où toute la trame est dessinée d'un
+/// coup. Appelée une fois par scanline depuis `Machine::step`.
+///
+/// Laisse `out` vide (plutôt que d'y mettre des données obsolètes) quand la
+/// ligne courante n'appartient pas à la zone affichée : `render` retombe
+/// alors sur une lecture directe de la VRAM pour cette ligne, ce qui n'a pas
+/// d'incidence puisque seule la bordure y est dessinée.
+pub fn capture_scanline_vram(crtc: &crate::crtc::Crtc, memory: &crate::memory::Memory, out: &mut Vec<u8>) {
+    out.clear();
+    let r1 = crtc.registers[1] as u32;
+    let r6 = crtc.registers[6] as u32;
+    if r1 == 0 || (crtc.char_row as u32) >= r6 {
+        return;
+    }
+
+    let start_addr = ((crtc.registers[12] as u16) << 8) | (crtc.registers[13] as u16);
+    let line_ma = start_addr.wrapping_add((crtc.char_row as u32 * r1) as u16) & 0x3FFF;
+    let raster = crtc.raster as u16;
+
+    out.reserve(2 * r1 as usize);
+    for x_char in 0..r1 as u16 {
+        let ma = line_ma.wrapping_add(x_char) & 0x3FFF;
+        let addr_base = ((ma & 0x3000) << 2) | ((raster & 0x07) << 11) | ((ma & 0x03FF) << 1);
+        out.push(memory.read_ram_byte(addr_base));
+        out.push(memory.read_ram_byte(addr_base.wrapping_add(1)));
     }
 }
 
