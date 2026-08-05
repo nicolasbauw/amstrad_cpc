@@ -1,5 +1,6 @@
 pub enum MonitorCmd {
     Help,
+    Unknown,
     ReadMem,
     WriteMem,
     SearchMem,

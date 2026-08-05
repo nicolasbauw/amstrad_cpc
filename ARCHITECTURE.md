@@ -12,6 +12,7 @@ Chaque composant matériel de l'Amstrad CPC doit être isolé dans son propre mo
 - `src/memory.rs` : Gestion de la mémoire (128 Ko de RAM répartis en 8 banques de 16 Ko, ROM Système, ROM BASIC, ROM AMSDOS).
 - `src/gate_array.rs` : Gestion des couleurs, de la palette, des interruptions et de la sélection des banques mémoire RAM/ROM (configuration E/S `0x7F00`).
 - `src/crtc.rs` : Émulation du contrôleur vidéo 6845 (synchronisation, timings écran).
+- `src/ppi.rs` : Émulation du PPI 8255, qui interconnecte le CPU avec le PSG, le clavier et les signaux système (VSYNC, cassette).
 - `src/psg.rs` : Registres du PSG AY-3-8912 et gestion du clavier (le PSG est la porte du clavier sur CPC).
 - `src/sound.rs` : Synthèse sonore du PSG (tons, bruit, enveloppe, mélangeur) et production des échantillons.
 - `src/audio.rs` : Sortie audio hôte (SDL2) : régulation de latence et coupe-continu.

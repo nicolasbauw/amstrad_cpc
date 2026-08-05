@@ -22,6 +22,13 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                 let arg = parts.next().unwrap_or_default().to_string();
                 let arg2 = parts.next().unwrap_or_default().to_string();
 
+                // Une ligne vide (juste ENTRÉE) n'est pas une commande : on
+                // ne veut ni afficher l'aide ni signaler "Unknown command"
+                // à chaque appui distrait sur ENTRÉE.
+                if cmd_part.is_empty() {
+                    continue;
+                }
+
                 let command = match cmd_part.as_str() {
                     "h" | "help" => MonitorCmd::Help,
                     "r" => MonitorCmd::Registers,
@@ -61,7 +68,7 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                     "t" => MonitorCmd::Trace,
                     "mr" => MonitorCmd::ReadRam,
                     "vol" | "volume" => MonitorCmd::Volume,
-                    _ => MonitorCmd::Help,
+                    _ => MonitorCmd::Unknown,
                 };
 
                 cmd_channel.send((command, arg, arg2))?;

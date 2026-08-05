@@ -1002,6 +1002,9 @@ impl Machine {
                 println!("Version {VERSION}");
                 println!("{HELP}");
             }
+            MonitorCmd::Unknown => {
+                println!("Unknown command");
+            }
             MonitorCmd::Pause => {
                 println!("Emulation paused !");
                 self.stop();

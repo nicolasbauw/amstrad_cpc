@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let mut diag_mode = false; // Par défaut, on démarre en mode normal
 
-    if args.contains(&"--diag".to_string()) || args.contains(&"-d".to_string()) {
+    if args.contains(&"--diag".to_string()) {
         diag_mode = true;
     }
 
@@ -71,9 +71,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let autocmd = cli_value(&args, &["--autocmd", "-a"]);
 
     // Chargement direct d'une image disque sur le lecteur A, sans passer par
-    // la console. "-disk" (sans tiret double) est accepté en plus de la
-    // forme longue habituelle, pour rester proche de la syntaxe Caprice32.
-    let disk = cli_value(&args, &["--disk", "-disk"]);
+    // la console. "-d" (forme courte) est accepté en plus de la forme longue
+    // habituelle, pour rester proche de la syntaxe Caprice32.
+    let disk = cli_value(&args, &["--disk", "-d"]);
 
     // 2. Initialisation de la Machine
     let mut machine = Machine::new();
@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn cli_value_accepts_the_equals_and_the_space_forms() {
-        let args: Vec<String> = ["prog", "--autocmd=RUN\"A", "-disk", "d.dsk"]
+        let args: Vec<String> = ["prog", "--autocmd=RUN\"A", "-d", "d.dsk"]
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -516,9 +516,9 @@ mod tests {
             Some("RUN\"A".to_string())
         );
         assert_eq!(
-            cli_value(&args, &["--disk", "-disk"]),
+            cli_value(&args, &["--disk", "-d"]),
             Some("d.dsk".to_string())
         );
-        assert_eq!(cli_value(&args, &["--diag", "-d"]), None);
+        assert!(!args.contains(&"--diag".to_string()));
     }
 }

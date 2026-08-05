@@ -1,5 +1,1 @@
-- ajouter ppi.rs au architecture.md
-- retirer le -d comme option pour le diag (juste laisser --diag)
-- remplacer le -disk par l'option -d (conserver le --disk pour laisser les deux possibilités)
-- une commande inconnue dans la console ne doit plus afficher l'aide, mais un message "Unknown command"
-- s'attaquer au debug d'un symptôme aperçu dans deux jeux : les "sprites" qui clignotent (cauldron, bmx simulator)
+- résidu de clignotement sous BMX Simulator (un sprite, rarement) : cause probable = bug dans le jeu lui-même (suppose un nombre fixe d'interruptions/trame, or le Gate Array en produit légitimement 5, 6 ou 7 selon la phase). Audit des catégories de cycles Z80 les plus à risque fait, rien trouvé. Reste, si on veut aller plus loin : désassembler BMX Simulator pour savoir quel code tourne autour de la trame qui clignote (voir doc/sprite-flicker.md, section "Résidu après correctif")
