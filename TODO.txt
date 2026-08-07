@@ -1,8 +1,3 @@
-- Créer via les touches de fonction F1, F2, F3, F4 les possibilités suivantes pour l'affichage graphique:
-F1 --> rendu taille normale
-F2 --> taille X2
-F3 --> taille X3
-F4 --> fullscreen
 - rendre la quantité de RAM émulée configurable dans config.toml (au-delà des 128 Ko standard du 6128, à la manière des grosses extensions mémoire de l'époque type Dk'tronics, jusqu'à plusieurs Mo). Doit rester visible/détectable par la ROM de diagnostic (voir comment le 6128 signale sa RAM aujourd'hui, probablement via le nombre de banques que memory.rs expose au MMU) et exploitable plus tard par un éventuel OS maison.
 - résidu de clignotement sous BMX Simulator (un sprite, rarement) : Caprice32 ne montre PAS ce clignotement avec la même disquette, donc pas un bug du jeu lui-même (contrairement à l'hypothèse initialement notée ici) — reste un bug d'émulation (timing/exécution) à trouver. Audit des catégories de cycles Z80 les plus à risque fait, rien trouvé. Reste, si on veut aller plus loin : désassembler BMX Simulator pour savoir quel code tourne autour de la trame qui clignote (voir doc/sprite-flicker.md, section "Résidu après correctif").
 - Bruce Lee : après le lancement de la partie (deux ENTRÉE), seule une fraction du décor s'affiche. Cause identifiée : la table d'encres du firmware (0xB7D5-0xB7E5) ne reçoit que 4 couleurs sur 16, le reste reste gris (indiscernable du fond). Mécanisme d'écriture localisé (fonction ROM générique 0x0CFD-0x0D19), mais pas encore l'appelant qui s'arrête prématurément à l'index 3. Voir doc/bruce-lee-palette.md pour la suite.
