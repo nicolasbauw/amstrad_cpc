@@ -290,24 +290,54 @@ d'origine.
 ### La question à trancher
 
 Le jeu écrit délibérément en `&A800` (adresse en dur), or cette zone
-appartient à AMSDOS une fois le système disque initialisé. Reste donc à
-comprendre pourquoi cela ne casse pas sur une vraie machine / sur
-Caprice32 :
+appartient à AMSDOS une fois le système disque initialisé.
 
-- **notre zone de travail AMSDOS est-elle à la bonne adresse ?** Elle est
-  allouée à l'initialisation des ROMs, sous HIMEM ; sa position dépend du
-  nombre de ROMs installées et de la mémoire que le firmware leur
-  accorde. Vérifier HIMEM et l'adresse de base réclamée par AMSDOS, et
-  comparer avec une vraie 6128 ;
-- **le code du jeu est-il chargé à la bonne adresse ?** Les deux
-  fragments concernés vivent en `&A700` (le copieur) et `&AE00` (le
-  chargeur). S'ils étaient implantés trop haut, la destination `&A800`
-  serait elle-même le symptôme et non la cause : contrôler les en-têtes
-  AMSDOS de `WEC.BIN` et `WEC.BI1` (adresse de chargement, longueur) et
-  les comparer à ce qui est réellement écrit en mémoire ;
-- piste subsidiaire : `TRACK0F.BIN` (piste 2, format particulier) suggère
-  une conversion bande → disque ; une telle conversion laisse volontiers
-  en place des écritures absolues héritées de la version cassette.
+**La zone de travail AMSDOS elle-même n'est probablement pas en cause.**
+Traçage de son installation : la routine d'installation (ROM AMSDOS,
+`&CCA0`) reçoit son adresse de base via le registre `IY`, déjà établi
+avant son premier appel (`&BE7D` contenait déjà `&A700` avant même que la
+routine ne s'exécute). Elle calcule ensuite tout le reste par arithmétique
+relative à `IY` (routine `&CA98` : `DE = IY + DE`, un simple décalage,
+aucune négociation HIMEM à cet endroit précis) :
+
+```
+IY = &A700                          ; base du poste de travail AMSDOS
+IY + &164 = &A864                   ; copie de sauvegarde de &BC77-&BC9D (13 entrées, 39 octets)
+IY + &164 + &27 = &A88B             ; bloc "far address" (CAS IN OPEN..CATALOG)
+IY + &18B = &A88B                   ; (même adresse, retrouvée par le second calcul)
+```
+
+Or `&A700` est l'adresse standard bien documentée du poste de travail
+AMSDOS sur un 6128 avec BASIC 1.1 + AMSDOS seuls (HIMEM par défaut
+`&A6FF`). Notre valeur colle donc à ce qu'on attendrait d'une vraie
+machine — ce n'est probablement pas une négociation HIMEM ratée de notre
+côté.
+
+**Piste bien plus prometteuse : `TRACK0F.BIN` (piste 2) n'est JAMAIS lu.**
+Relevé de toutes les pistes visitées par le lecteur A sur 200 s émulées :
+
+```
+{0, 1, 10}
+```
+
+Piste 0 (catalogue + `WEC.BIN`/`WEC.BI1`), piste 1 (suite de `WEC.BI2`) et
+10 (fin de `WEC.BI2`, cohérent avec la taille des blocs) — **jamais la
+piste 2**. Un fichier au nom aussi explicite que `TRACK0F.BIN` (« track
+0 formatté » ?), jamais chargé par le jeu que nous traçons, sent fortement
+le chargeur de démarrage spécialisé — probablement celui qui, sur la
+vraie disquette, prend la main *avant* `WEC.BIN`/AMSDOS et évite
+précisément ce genre de collision mémoire (en plaçant son propre code
+ailleurs, ou en repoussant IY/HIMEM avant de rendre la main). Si le vrai
+point d'entrée de la disquette n'est pas `RUN"WEC"` mais un amorçage par
+piste 0 personnalisée (secteur boot, chargé automatiquement par le
+firmware à l'insertion), notre reproduction actuelle (`-d ... -a
+'run"wec'`) sauterait purement et simplement cette étape.
+
+À vérifier en priorité la prochaine fois : comment une disquette CPC lance
+normalement un programme à l'insertion (secteur/piste de boot automatique
+du firmware), et si cette disquette en a un — auquel cas la vraie
+commande de reproduction ne serait pas `run"wec` mais un simple boot à
+froid sur cette disquette.
 
 ## Piège d'instrumentation à connaître
 
@@ -328,16 +358,18 @@ instrumentation future du bus doit commencer par vérifier qu'un
 
 ## Ce qui reste à faire
 
-- **Priorité** : instrumenter le far call d'AMSDOS (`RST 3` en `&0018` →
-  dispatcher en RAM `0xB9C7`, restauration en `0xBA06`-`0xB9B8`) et
-  comparer pas à pas l'appel qui réussit (`WEC.BI1`, 2,21 s) et celui qui
-  cascade (`WEC.BI2`, 6,23 s) : c'est là que se joue tout le symptôme ;
-- suspect n°1 : le fichier multi-extents. `WEC.BI2` occupe trois entrées
-  de catalogue ; vérifier le comportement du FDC et d'AMSDOS sur la
-  transition d'extent ;
+- **Priorité** : déterminer si `run"wec"` est la bonne façon de lancer
+  cette disquette, ou si un chargeur par piste 0 personnalisée
+  (`TRACK0F.BIN`, jamais lu dans notre reproduction) devrait intervenir
+  avant/à la place. Si oui, notre séquence de reproduction actuelle
+  (`-d WEC_Le_Mans.dsk -a 'run"wec'`) saute une étape que le vrai
+  matériel ne saute pas ;
+- si `TRACK0F.BIN` doit être lu, vérifier ce qui devrait le déclencher
+  (secteur/piste spéciale interceptée par le firmware disque, ou fichier
+  chargé explicitement par un `WEC.BAS`/autre programme absent de cette
+  image) ;
 - l'entrée cassette n'étant jamais lue, la divergence n'est pas une
   question de périphérique sondé : c'est bien le chemin d'exécution ;
-- vérifier le décodage de `TRACK0F.BIN` (piste 2, format particulier) ;
 - comparer avec Caprice32 si un moyen fiable de trace est disponible
   (tenté sans succès : ni capture X11 ni injection clavier ne
   fonctionnent dans cet environnement).
