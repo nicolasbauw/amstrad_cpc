@@ -360,7 +360,7 @@ impl Fdc {
     pub fn load_disk(&mut self, filename: &str) -> Result<(), String> {
         Self::load_disk_into(&mut self.drive_a, filename)?;
         self.reset_transient_state();
-        println!("Floppy DSK Loaded on drive A: {}", filename);
+        crate::console::notice(format!("Floppy DSK Loaded on drive A: {}", filename));
         Ok(())
     }
 
@@ -375,7 +375,7 @@ impl Fdc {
         }
         Self::load_disk_into(&mut self.drive_b, filename)?;
         self.reset_transient_state();
-        println!("Floppy DSK Loaded on drive B: {}", filename);
+        crate::console::notice(format!("Floppy DSK Loaded on drive B: {}", filename));
         Ok(())
     }
 
@@ -385,20 +385,22 @@ impl Fdc {
         self.drive_a.disk_loaded = false;
         self.drive_a.current_filename = "None".to_string();
         self.reset_transient_state();
-        println!("Floppy DSK Ejected from drive A");
+        crate::console::notice("Floppy DSK Ejected from drive A");
     }
 
     /// Éjecte la disquette du lecteur B.
     pub fn eject_disk_b(&mut self) {
         if !self.drive_b_enabled {
-            println!("Le lecteur B n'est pas activé dans la configuration (config.toml)");
+            crate::console::notice(
+                "Le lecteur B n'est pas activé dans la configuration (config.toml)",
+            );
             return;
         }
         self.drive_b.dsk = None;
         self.drive_b.disk_loaded = false;
         self.drive_b.current_filename = "None".to_string();
         self.reset_transient_state();
-        println!("Floppy DSK Ejected from drive B");
+        crate::console::notice("Floppy DSK Ejected from drive B");
     }
 
     /// Initialise le FDC avec les valeurs par défaut du CPC. `drive_b_enabled`

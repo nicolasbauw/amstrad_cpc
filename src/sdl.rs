@@ -463,7 +463,15 @@ pub fn run(
             debug_canvas.present();
         }
 
-        machine.console_handle().unwrap_or_default();
+        // Une commande traitée (donc sa sortie imprimée, potentiellement
+        // plusieurs lignes) laisse le prompt "> " affiché plus haut par le
+        // fil console remonter hors de vue : on le réimprime ici, juste
+        // après cette sortie, pour qu'il reste visible sous ce qu'on vient
+        // de lire plutôt que de sembler avoir disparu.
+        if machine.console_handle().is_ok() {
+            print!("> ");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
 
         // Mesure de la vitesse réelle, moyennée sur une seconde : c'est elle
         // qui dit si la machine tient la cadence, et donc si le son a de quoi

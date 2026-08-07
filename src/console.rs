@@ -1,7 +1,23 @@
 use crate::monitor::MonitorCmd;
-use std::{io::Write, io::stdin, io::stdout, sync::mpsc, thread, time::Duration};
+use std::{fmt::Display, io::Write, io::stdin, io::stdout, sync::mpsc, thread, time::Duration};
 
 use crate::machine::MachineError;
+
+/// Affiche une ligne côté console, puis réimprime le prompt "> " en dessous.
+///
+/// Le fil console (voir `launch`) n'imprime "> " qu'une fois avant de se
+/// bloquer sur la saisie : tout message affiché entre-temps par un autre
+/// fil (chargement disque, régulation audio...) le fait remonter hors de
+/// vue sans jamais le redessiner, ce qui donne l'impression que la console
+/// a cessé de répondre alors qu'elle attend toujours une entrée. À utiliser
+/// pour ce genre de message ponctuel — pas pour une sortie de commande
+/// console, déjà couverte par le réaffichage fait dans `sdl::run` après
+/// `Machine::console_handle`.
+pub fn notice(msg: impl Display) {
+    println!("{msg}");
+    print!("> ");
+    let _ = stdout().flush();
+}
 
 pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result<(), MachineError> {
     thread::Builder::new().name(String::from("Console")).spawn(
