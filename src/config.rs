@@ -14,6 +14,8 @@ pub struct Config {
     /// config.toml écrit avant elle.
     #[serde(default)]
     pub file: FileConfig,
+    #[serde(default)]
+    pub display: DisplayConfig,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -25,6 +27,16 @@ pub struct FileConfig {
     /// répertoire courant garde toujours la priorité.
     #[serde(default)]
     pub dsk_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct DisplayConfig {
+    /// Niveau de zoom au démarrage : "x1", "x2", "x3" ou "fullscreen".
+    /// Absent ou non reconnu, la fenêtre démarre en taille normale (x1) —
+    /// voir `main.rs`, qui journalise un avertissement sur une valeur non
+    /// reconnue plutôt que d'échouer au démarrage.
+    #[serde(default)]
+    pub default_zoom: Option<String>,
 }
 
 impl Config {
@@ -100,6 +112,17 @@ mod tests {
             !config.debugger.audio,
             "l'option doit etre eteinte par defaut"
         );
+        assert!(
+            config.display.default_zoom.is_none(),
+            "sans section [display], le zoom par defaut doit rester absent"
+        );
+    }
+
+    #[test]
+    fn the_default_zoom_is_read_when_present() {
+        let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n\n[display]\ndefault_zoom = \"x2\"\n";
+        let config: Config = toml::from_str(file).expect("fichier refuse");
+        assert_eq!(config.display.default_zoom.as_deref(), Some("x2"));
     }
 
     #[test]

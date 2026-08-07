@@ -216,6 +216,7 @@ impl Machine {
                     audio: false,
                 },
                 file: config::FileConfig::default(),
+                display: config::DisplayConfig::default(),
             }
         });
 
@@ -268,6 +269,14 @@ impl Machine {
     /// signalées sur la console (config.toml, section [debugger]).
     pub fn report_audio_regulation(&self) -> bool {
         self.config.debugger.audio
+    }
+
+    /// Niveau de zoom à appliquer au démarrage ("x1", "x2", "x3" ou
+    /// "fullscreen"), tel que lu dans config.toml (section [display]).
+    /// Absent si non configuré : la fenêtre démarre alors en taille
+    /// normale (voir `main.rs`).
+    pub fn default_zoom(&self) -> Option<&str> {
+        self.config.display.default_zoom.as_deref()
     }
 
     /// Volume de la sortie audio, dans [0, 1].

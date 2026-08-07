@@ -897,7 +897,9 @@ impl Fdc {
                     let mut matched: Vec<&Sector> = t
                         .sectors
                         .iter()
-                        .filter(|s| s.id >= start_sector && s.id <= eot && s.deleted == want_deleted)
+                        .filter(|s| {
+                            s.id >= start_sector && s.id <= eot && s.deleted == want_deleted
+                        })
                         .collect();
                     matched.sort_by_key(|s| s.id);
                     for s in matched {

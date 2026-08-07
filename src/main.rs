@@ -52,6 +52,73 @@ fn ensure_validated(command: &str) -> String {
     }
 }
 
+/// Niveau de zoom de la fenêtre d'affichage (touches F1-F4, ou
+/// `default_zoom` dans config.toml).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DisplayMode {
+    Normal,
+    X2,
+    X3,
+    Fullscreen,
+}
+
+impl DisplayMode {
+    /// Lit la valeur de `default_zoom` (config.toml, section [display]).
+    /// Une valeur absente ou non reconnue retombe silencieusement sur la
+    /// taille normale (mais journalise un avertissement si elle est
+    /// présente et non reconnue : mieux vaut le signaler qu'échouer
+    /// silencieusement sur une faute de frappe dans le fichier).
+    fn from_config(value: Option<&str>) -> Self {
+        match value {
+            None => DisplayMode::Normal,
+            Some("x1") => DisplayMode::Normal,
+            Some("x2") => DisplayMode::X2,
+            Some("x3") => DisplayMode::X3,
+            Some("fullscreen") => DisplayMode::Fullscreen,
+            Some(other) => {
+                println!(
+                    "Config: display.default_zoom='{other}' non reconnu (attendu x1, x2, x3 ou fullscreen), x1 utilise."
+                );
+                DisplayMode::Normal
+            }
+        }
+    }
+}
+
+/// Applique un niveau de zoom à la fenêtre d'affichage principale.
+///
+/// La taille logique du canvas (fixée une fois pour toutes à
+/// `video::SCREEN_WIDTH`/`HEIGHT`, voir `main`) fait que SDL2 met toujours
+/// à l'échelle en conservant le ratio d'aspect, avec des bandes noires plutôt
+/// qu'une image étirée : il suffit ici de choisir la taille de fenêtre ou le
+/// plein écran, sans recalculer aucun rectangle de destination.
+fn apply_display_mode(canvas: &mut sdl2::render::WindowCanvas, mode: DisplayMode) {
+    let window = canvas.window_mut();
+    match mode {
+        DisplayMode::Fullscreen => {
+            let _ = window.set_fullscreen(sdl2::video::FullscreenType::Desktop);
+            return;
+        }
+        DisplayMode::Normal | DisplayMode::X2 | DisplayMode::X3 => {
+            let _ = window.set_fullscreen(sdl2::video::FullscreenType::Off);
+        }
+    }
+    let factor = match mode {
+        DisplayMode::Normal => 1,
+        DisplayMode::X2 => 2,
+        DisplayMode::X3 => 3,
+        DisplayMode::Fullscreen => unreachable!("traite plus haut, avec un retour anticipe"),
+    };
+    let _ = window.set_size(
+        video::SCREEN_WIDTH as u32 * factor,
+        video::SCREEN_HEIGHT as u32 * factor,
+    );
+    window.set_position(
+        sdl2::video::WindowPos::Centered,
+        sdl2::video::WindowPos::Centered,
+    );
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Amstrad CPC 6128 ===");
 
@@ -160,6 +227,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .position_centered()
         .build()?;
     let mut canvas = window.into_canvas().build()?;
+    // Taille logique fixe : quelle que soit la taille réelle de la fenêtre
+    // (zoom x2/x3, plein écran...), SDL2 met alors automatiquement à
+    // l'échelle en conservant le ratio d'aspect, avec des bandes noires
+    // (letterboxing/pillarboxing) plutôt que d'étirer l'image.
+    canvas.set_logical_size(video::SCREEN_WIDTH as u32, video::SCREEN_HEIGHT as u32)?;
+    apply_display_mode(
+        &mut canvas,
+        DisplayMode::from_config(machine.default_zoom()),
+    );
     let main_window_id = canvas.window().id();
     let texture_creator = canvas.texture_creator();
     let mut texture = texture_creator.create_texture_streaming(
@@ -207,6 +283,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else if window_id == main_window_id {
                         running = false;
                     }
+                }
+                // Taille d'affichage : F1 normale, F2 x2, F3 x3, F4 plein
+                // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
+                // pour ne jamais y rester coincé sans savoir comment en
+                // sortir.
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F1),
+                    ..
+                } => apply_display_mode(&mut canvas, DisplayMode::Normal),
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F2),
+                    ..
+                } => apply_display_mode(&mut canvas, DisplayMode::X2),
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F3),
+                    ..
+                } => apply_display_mode(&mut canvas, DisplayMode::X3),
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F4),
+                    ..
+                } => {
+                    // Bascule : F4 quitte le plein écran s'il est deja actif
+                    // (par F4 ou par default_zoom = "fullscreen").
+                    let currently_fullscreen =
+                        canvas.window().fullscreen_state() != sdl2::video::FullscreenType::Off;
+                    apply_display_mode(
+                        &mut canvas,
+                        if currently_fullscreen {
+                            DisplayMode::Normal
+                        } else {
+                            DisplayMode::Fullscreen
+                        },
+                    );
                 }
                 // Événements d'enfoncement de touches du clavier moderne PC
                 Event::KeyDown {
@@ -520,5 +629,25 @@ mod tests {
             Some("d.dsk".to_string())
         );
         assert!(!args.contains(&"--diag".to_string()));
+    }
+
+    #[test]
+    fn display_mode_recognizes_the_four_config_values() {
+        assert_eq!(DisplayMode::from_config(Some("x1")), DisplayMode::Normal);
+        assert_eq!(DisplayMode::from_config(Some("x2")), DisplayMode::X2);
+        assert_eq!(DisplayMode::from_config(Some("x3")), DisplayMode::X3);
+        assert_eq!(
+            DisplayMode::from_config(Some("fullscreen")),
+            DisplayMode::Fullscreen
+        );
+    }
+
+    /// Absent ou mal orthographié, on ne bloque pas le démarrage : la
+    /// fenêtre s'ouvre en taille normale plutôt que de faire planter
+    /// l'émulateur sur une faute de frappe dans config.toml.
+    #[test]
+    fn display_mode_falls_back_to_normal_when_absent_or_unrecognized() {
+        assert_eq!(DisplayMode::from_config(None), DisplayMode::Normal);
+        assert_eq!(DisplayMode::from_config(Some("XL")), DisplayMode::Normal);
     }
 }

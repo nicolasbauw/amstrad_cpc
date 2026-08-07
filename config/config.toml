@@ -15,3 +15,9 @@ audio = false
 # already a valid path as given. A full or relative path still takes
 # priority over this default.
 dsk_path = "bin"
+
+[display]
+# Window zoom level at startup: "x1", "x2", "x3" or "fullscreen". Same
+# effect as pressing F1/F2/F3/F4 once the window is up. Missing or
+# unrecognized falls back to "x1".
+default_zoom = "x1"

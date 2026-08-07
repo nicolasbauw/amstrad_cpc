@@ -163,7 +163,11 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
 /// ligne courante n'appartient pas à la zone affichée : `render` retombe
 /// alors sur une lecture directe de la VRAM pour cette ligne, ce qui n'a pas
 /// d'incidence puisque seule la bordure y est dessinée.
-pub fn capture_scanline_vram(crtc: &crate::crtc::Crtc, memory: &crate::memory::Memory, out: &mut Vec<u8>) {
+pub fn capture_scanline_vram(
+    crtc: &crate::crtc::Crtc,
+    memory: &crate::memory::Memory,
+    out: &mut Vec<u8>,
+) {
     out.clear();
     let r1 = crtc.registers[1] as u32;
     let r6 = crtc.registers[6] as u32;
