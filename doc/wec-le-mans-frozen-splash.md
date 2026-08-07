@@ -567,17 +567,48 @@ prochaine fois, avec un traçage pas à pas entre la fermeture de
 instruction par instruction les DEUX émulateurs (désormais possible avec
 ROM identiques et frappe fiable — voir méthode ci-dessous).
 
+## Chaîne d'appel jusqu'à l'unique installation
+
+Remontée de pile complète au moment de la seule et unique exécution de
+`0xCCA0` chez nous (2,08 s), pour savoir qui déclenche l'installation et
+d'où repartir la prochaine fois :
+
+```
+0xB99F  CALL $B9B0   -> retour 0xB9A2
+0x0328  CALL $0330   -> retour 0x032B
+0x0346  CALL $C006   -> retour 0x0349
+0x003F  ...          -> retour 0x0040
+0xA6FE  ...          -> retour 0xA6FF
+                         (puis 0xC1C8-0xC1D8, qui appelle 0xCCA0 en 0xC1D3)
+```
+
+Point notable : `0xB99F CALL $B9B0` est exactement l'adresse déjà croisée
+tout au début de cette enquête, dans la boucle d'attente qui scrute le
+clavier (section « Ce qui est confirmé sur la boucle figée » de l'époque,
+avant qu'on comprenne qu'il ne s'agissait pas d'une vraie attente
+clavier). `0xB9B0` ressemble donc à une routine utilitaire générique
+(scrutation clavier ou temporisation), pas spécifique aux disquettes, où
+la logique de réarmement d'AMSDOS semble greffée — cohérent avec le fait
+que Caprice32 la rappelle avant CHAQUE ouverture, pas seulement au
+premier accès disque.
+
+Vérifié précisément : dans notre émulateur, `0xC1D3` (et donc `0xCCA0`)
+ne s'exécute qu'**une seule fois** sur toute la session (2,08 s),
+confirmé sur la fenêtre complète 0-40 s — jamais rappelé, y compris bien
+après l'ouverture de `WEC.BI2` (6,23 s).
+
 ## Ce qui reste à faire
 
-- **Priorité** : tracer pas à pas, dans NOTRE émulateur, tout ce qui se
-  passe entre la fermeture de `WEC.BI1` (`CAS IN CLOSE`, ~4,79 s) et
-  l'ouverture de `WEC.BI2` (`CAS IN OPEN`, ~6,23 s), à la recherche du
-  test de condition qui devrait déclencher un second appel à `0xCCA0`
-  et ne le fait pas. Comparer avec la même tranche chez Caprice32 (ROM
-  identiques désormais possibles, voir méthode ci-dessous) ;
+- **Priorité** : désassembler `0xB9B0` (et son appelant `0x0330`,
+  probablement le point d'entrée standard `KL FAR CALL`/RST correspondant
+  à `0x0030`) pour trouver la condition qui décide d'appeler la chaîne
+  menant à `0xCCA0`. Comparer avec la même zone chez Caprice32 (ROM
+  identiques désormais possibles, voir méthode ci-dessous : injection
+  clavier directe + `dumpScreen()`) pour voir quelle branche est prise
+  chez eux et pas chez nous ;
 - pistes pour cette condition : un drapeau ou compteur d'état (variable
-  système en RAM, ou registre du CPU) que le code d'AMSDOS consulte pour
-  savoir s'il doit se réinstaller — le comportement s'expliquerait par
+  système en RAM, ou registre du CPU) que ce code consulte pour savoir
+  s'il doit relancer l'installation — le comportement s'expliquerait par
   une valeur initiale différente, ou par un effet de bord d'une
   instruction Z80 mal émulée (registre `R`, drapeaux d'une instruction
   spécifique...) qui fait pencher ce test dans le mauvais sens chez

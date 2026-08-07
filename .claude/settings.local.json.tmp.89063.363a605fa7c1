@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build *)",
+      "Read(//home/nicolasb/.cargo/registry/src/**)",
+      "Bash(find / -name \"*.rs\" -path \"*zilog_z80*\")",
+      "Bash(cargo test *)",
+      "Bash(python3 -)",
+      "Bash(timeout 8 cargo run)",
+      "Bash(timeout 12 cargo run)",
+      "Bash(grep -vE \"^warning|^ +\\\\||^ +=|^ +-->|^$|^[0-9]+ \\\\|\")",
+      "Bash(cat > *)",
+      "Bash(timeout 10 cargo run)",
+      "Bash(ls bin/ ; find /home/nicolasb -iname \"*.dsk\" 2>/dev/null | head -20)",
+      "Bash(cargo fmt *)",
+      "Bash(timeout 10 cargo run --release)",
+      "Bash(grep -vE \"^ *Compil|^ *Finished|^ *Running|^warning|^$\")",
+      "Bash(cd /home/nicolasb/Dev/ZilogZ80 && grep -n \"pub fn dasm\" -A 60 src/dasm.rs | head -80 && echo \"=== tests\" && sed -n '5705,5730p;6028,6052p' src/test.rs)",
+      "Bash(cp /tmp/machine_clean.rs *)",
+      "Bash(timeout 12 cargo run --release)",
+      "Bash(cd /home/nicolasb/Dev/ZilogZ80 *)",
+      "Bash(rm -f /tmp/bmx_frame*.ppm /tmp/bmx_frame*.png /tmp/bmx_zoom*.png)",
+      "Bash(grep -ao \"trame 21->22->23:[^$]*\" /tmp/bmxlog2.txt)",
+      "Bash(grep -acE \"^Watchpoint hit: write to 0x[0-9A-F]{4} at PC 0x[0-9A-F]{4}$\" /tmp/brucelee_ink.txt)",
+      "Bash(awk '/Watchpoint hit: write to 0xB7D9 at PC 0x0D07/{c++; print \"occurrence\", c; f=1; next} f{print; if\\(/AF :/\\){f=0}}' /tmp/brucelee_ink.txt)",
+      "Bash(grep -n -B3 -A40 \"Port sequence for full 4MB\\\\|DetectAvailableUpperRAM\" /home/nicolasb/Dev/amstrad-diagnostics/src/CheckUpperRAM.asm | head -150)",
+      "Bash(git commit -m ' *)",
+      "Read(//tmp/**)",
+      "Bash(cd /home/nicolasb/Dev/ZilogZ80 2>/dev/null && grep -rn \"\\\\br\\\\b *:\" src/registers.rs | head -20; echo \"=== R usage in cpu.rs ===\"; grep -n \"\\\\.r\\\\b\" src/*.rs | head -40)",
+      "Bash(grep -rni \"himem\" /home/nicolasb/Dev/amstrad-diagnostics/src/ 2>/dev/null | head -20)",
+      "Bash(git checkout *)",
+      "Bash(git add *)"
+    ]
+  }
+}
