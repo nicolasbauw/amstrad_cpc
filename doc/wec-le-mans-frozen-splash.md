@@ -461,6 +461,21 @@ d'adresses **dans les ROM OS/BASIC** (elles diffèrent), mais reste
 parfaitement valide pour tout ce qui se passe **en RAM utilisateur**
 (code du jeu, chargé depuis le même fichier .dsk).
 
+**Confirmé dans l'autre sens** : faire tourner NOTRE émulateur avec les
+ROM anglaises de Caprice32 (`~/Dev/caprice32/rom/cpc6128.rom` scindé en
+OS+BASIC, `amsdos.rom`) et NOTRE `AutoTyper` produit le symétrique exact
+du problème de l'utilisateur avec Caprice32 (qui n'arrivait pas à taper
+le guillemet `"`) : notre table clavier AZERTY, interprétée par le ROM
+anglais, tape `run3zec` au lieu de `run"wec` (`Syntax error`, capture
+d'écran à l'appui) — le guillemet de notre table (Shift+3 en AZERTY)
+devient `3` pour le firmware anglais. La correspondance clavier est donc
+spécifique à chaque ROM, dans les deux émulateurs : aucun des deux ne
+peut taper correctement une commande contre le ROM de l'autre sans une
+table dédiée. Confirme qu'il faudra soit une table clavier anglaise pour
+notre `AutoTyper`, soit contourner la frappe entièrement (injection
+mémoire directe) pour obtenir la comparaison à ROM strictement identique
+recommandée ci-dessus.
+
 Résultats :
 
 - **Le `LDIR` corrupteur de `&A73C` est identique au nôtre, à l'octet
