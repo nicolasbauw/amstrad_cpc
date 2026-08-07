@@ -1,9 +1,11 @@
 # WEC Le Mans : reste figé sur l'écran de démarrage (ouvert)
 
 Note d'enquête, point de départ pour une reprise ultérieure. **Le symptôme
-n'est pas résolu**, mais la boucle figée est désormais entièrement
-identifiée, et l'hypothèse « attente clavier » de la session précédente
-est réfutée.
+n'est pas résolu**, mais la cause immédiate est désormais identifiée : à
+l'ouverture de `WEC.BI2`, l'exécution dévale le jumpblock cassette du
+firmware jusqu'à `CAS WRITE`, ce qui déclenche une écriture cassette de
+deux minutes (voir « Cause immédiate » plus bas). Reste à comprendre
+pourquoi le far call d'AMSDOS ne revient pas à son appelant.
 
 ## Le symptôme
 
@@ -17,9 +19,22 @@ menu du jeu devrait s'afficher après quelques secondes.
 
 ## Contenu de la disquette
 
-Pas de `WEC.BAS` : `RUN"WEC"` lance `WEC.BIN`. La disquette contient
-`WEC.BIN`, `WEC.SCR` (l'écran de démarrage) et `TRACK0F.BIN`. La commande
-utilisée est donc bien la bonne.
+Pas de `WEC.BAS` : `RUN"WEC"` lance `WEC.BIN`. La commande utilisée est
+donc bien la bonne. Catalogue réel (analyse des entrées de 32 octets des
+quatre premiers secteurs de chaque piste) :
+
+```
+piste 0 : WEC.BIN  (2 records)
+          WEC.BI1  (50 records,  1 extent)
+          WEC.BI2  (128+128+57 records, 3 extents)
+piste 2 : TRACK0F.BIN
+```
+
+Le jeu charge donc `WEC.BIN`, puis `WEC.BI1`, puis `WEC.BI2` — et c'est
+sur ce dernier que tout se joue (voir plus bas). Attention en refaisant
+l'analyse : filtrer les extensions sur une liste blanche du genre
+`BAS/BIN/SCR` masque justement `BI1` et `BI2`, les deux fichiers qui
+comptent.
 
 ## Ce qui a été écarté
 
@@ -145,6 +160,82 @@ attribuée à son PC (toutes les valeurs sont celles attendues) :
 | `2AEE` | `&F4xx` | **le test ESC qui déclenche la cassette** | `FF` |
 | `C6E0`/`C6E5`, `C92x` | `&FB7x` | AMSDOS, lectures de secteurs | — |
 
+## Cause immédiate : une cascade dans le jumpblock cassette
+
+Le jeu ne demande jamais d'écrire quoi que ce soit. Il charge ses fichiers
+par les vecteurs cassette du firmware (`CAS IN OPEN`/`IN DIRECT`/`IN
+CLOSE`), qu'AMSDOS détourne vers le disque. Le code appelant, en `0xAE50`,
+est on ne peut plus banal :
+
+```
+AE51  LD B,$07        ; longueur du nom
+AE53  LD HL,$AE76     ; nom du fichier
+AE56  LD DE,$C000     ; tampon de 2 Ko
+AE59  CALL $BC77      ; CAS IN OPEN  -> une LECTURE
+AE5D  CALL $BC83      ; CAS IN DIRECT
+AE61  CALL $BC7A      ; CAS IN CLOSE
+```
+
+Chronologie relevée sur 200 s émulées :
+
+```
+ 2.21s CAS IN OPEN  WEC.BI1  -> se charge normalement (IN DIRECT 4.49s, IN CLOSE 4.79s)
+ 6.23s CAS IN OPEN  WEC.BI2  retour=AE5C DE=C000 HL=AE76   <- appel correct
+ 6.23s CAS IN CLOSE     |
+ 6.23s CAS IN CHAR      |  l'exécution DÉVALE le jumpblock,
+ 6.23s CAS IN DIRECT    |  entrée par entrée, dans l'ordre des adresses
+ 6.23s CAS OUT OPEN     |
+ 6.23s CAS OUT CHAR     |
+ 6.23s CAS OUT DIRECT   |
+ 6.23s CAS CATALOG      v
+ 6.23s CAS WRITE     <- RST 1 -> routine cassette du firmware (0x29AF)
+```
+
+Autrement dit : l'ouverture de `WEC.BI2` part correctement, mais au lieu
+de revenir à l'appelant (`0xAE5C`), l'exécution **retombe sur l'entrée
+suivante du jumpblock**, et ainsi de suite en cascade jusqu'à `CAS WRITE`
+— la seule entrée qu'AMSDOS ne détourne pas, et qui saute donc pour de bon
+dans l'écriture cassette du firmware.
+
+Le mécanisme se comprend en regardant le contenu du jumpblock (identique à
+une machine vierge, donc non corrompu par le jeu) :
+
+```
+BC77..BC9B  CAS IN OPEN .. CAS CATALOG   = DF 8B A8   (RST 3, far call -> &A88B)
+BC9E        CAS WRITE                    = CF AF A9   (RST 1, low jump -> 0x29AF)
+BCA1        CAS READ                     = CF A6 A9
+BCA4        CAS CHECK                    = CF C1 A9
+```
+
+Toutes les entrées détournées portent **les mêmes trois octets** : AMSDOS
+les route vers un point d'entrée unique et distingue la fonction demandée
+d'après l'adresse de retour empilée par `RST 3` (qui pointe juste après
+les deux octets d'opérande, donc identifie l'entrée). C'est aussi ce qui
+rend la panne si spectaculaire : chaque retour mal ajusté atterrit
+mécaniquement sur l'entrée suivante.
+
+Sur les bits 15-14 de l'adresse d'un `RST 1` (LOW JUMP) : ils encodent la
+configuration ROM, d'où `0xA9AF` → saut en `0x29AF` **avec la ROM basse
+active**. `0x29AF` est donc bien la routine cassette du firmware, en ROM
+basse — et non du code du jeu. De même `0x29A6` (`CAS READ`) n'est jamais
+atteint (compté : 0 fois), simplement parce qu'AMSDOS assure les lectures.
+
+Le figement n'est d'ailleurs pas définitif : l'écriture cassette finit par
+se terminer, et le `CAS IN OPEN` de `WEC.BI2` est rejoué avec succès vers
+**130 s**. Le jeu perd donc environ deux minutes de temps émulé, ce qui à
+l'écran est indiscernable d'un blocage.
+
+### La question à trancher
+
+Pourquoi le far call ne revient-il pas en `0xAE5C` ? Le **même** appel,
+avec les mêmes paramètres (`DE=C000`, `HL=AE76`), fonctionne pour
+`WEC.BI1` à 2,21 s et casse pour `WEC.BI2` à 6,23 s. Différence connue
+entre les deux fichiers : `WEC.BI1` tient en une extent (50 records),
+`WEC.BI2` en occupe **trois** (128 + 128 + 57 records). Piste la plus
+prometteuse : suivre le far call d'AMSDOS pas à pas sur les deux appels et
+comparer là où ils divergent (sélection de ROM, manipulation de pile,
+retour du FDC sur un fichier multi-extents).
+
 ## Piège d'instrumentation à connaître
 
 Le trait `Bus` de `../ZilogZ80` fournit des `read_io`/`write_io` **par
@@ -164,20 +255,16 @@ instrumentation future du bus doit commencer par vérifier qu'un
 
 ## Ce qui reste à faire
 
-Trouver ce qui déraille entre 4,80 s (fin du chargement, moteur coupé) et
-8,80 s (appel de l'écriture cassette). Pistes :
-
-- l'entrée cassette n'étant jamais lue (voir ci-dessus), la divergence
-  n'est pas une question de périphérique sondé : c'est bien le chemin
-  d'exécution qui diffère ;
-- remonter au décideur : qui appelle la routine contenant `0x29AF` ?
-  Il existe deux entrées voisines, `0x29A6` (qui charge : `LD HL,$2A28`)
-  et `0x29AF` (qui écrit : `CALL $2AD4`) — c'est le choix entre les deux
-  qu'il faut expliquer ;
-- surveiller (watchpoints) les variables `0xB1E5`/`0xB1E8`-`0xB1EB` qu'utilise
-  le système cassette, pour voir qui les arme ;
-- vérifier le décodage de `TRACK0F.BIN` : la disquette a un format de
-  piste 0 particulier, et le jeu charge ensuite des pistes brutes ;
+- **Priorité** : instrumenter le far call d'AMSDOS (`RST 3` en `&0018` →
+  dispatcher en RAM `0xB9C7`, restauration en `0xBA06`-`0xB9B8`) et
+  comparer pas à pas l'appel qui réussit (`WEC.BI1`, 2,21 s) et celui qui
+  cascade (`WEC.BI2`, 6,23 s) : c'est là que se joue tout le symptôme ;
+- suspect n°1 : le fichier multi-extents. `WEC.BI2` occupe trois entrées
+  de catalogue ; vérifier le comportement du FDC et d'AMSDOS sur la
+  transition d'extent ;
+- l'entrée cassette n'étant jamais lue, la divergence n'est pas une
+  question de périphérique sondé : c'est bien le chemin d'exécution ;
+- vérifier le décodage de `TRACK0F.BIN` (piste 2, format particulier) ;
 - comparer avec Caprice32 si un moyen fiable de trace est disponible
   (tenté sans succès : ni capture X11 ni injection clavier ne
   fonctionnent dans cet environnement).
