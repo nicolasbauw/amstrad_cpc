@@ -5,3 +5,5 @@
 - config.toml : ajouter une section [rom] séparant les 3 fichiers ROM (système/OS, BASIC, AMSDOS) plutôt que les chemins actuels en dur dans machine.rs::load_roms. Certains fichiers ROM de 32 Ko (ex. ceux de Caprice32, rom/cpc6128.rom) empaquettent d'office système+BASIC en un seul fichier (2×16 Ko) — prévoir de gérer aussi ce cas (découpage en deux si un seul chemin de 32 Ko est fourni pour ces deux-là).
 
 - dans la fenêtre "machine status" (F12), les IFF1 IFF2 et autres interruptions sur cette ligne peuvent être true/false. Il faudrait standardiser la longueur de l'affichage true/false pour qu'ils occupent la même largeur écran (il doit y avoir une option dans format! pour cela ?)
+
+- la fenêtre "machine status" (F12) est un peu trop petite pour afficher le bas des infos, il faudrait l'augmenter (1000 pixels devraient être OK ?)
