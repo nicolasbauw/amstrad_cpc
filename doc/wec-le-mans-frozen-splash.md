@@ -117,11 +117,59 @@ deux des conséquences d'une divergence plus en amont, entre la fin du
 chargement disque (4,80 s) et 8,80 s. Forcer ESC ne fait que déplacer le
 symptôme.
 
+## Hypothèse « détection disque/cassette » : écartée
+
+Hypothèse testée : le jeu choisirait sa source de données (disque ou
+lecteur de cassettes) en sondant le port cassette, et notre émulation de
+ce port le tromperait.
+
+Relevé de **tous** les lecteurs du port B du PPI (&F5xx, dont le bit 7 est
+l'entrée cassette) sur tout le démarrage, 0 → 9 s :
+
+```
+1 seul lecteur : PC=00BA, 2176 fois, valeurs {1E, 1F}, bit 7 toujours 0
+```
+
+`0x00BA` est l'attente de VSYNC du firmware, qui ne teste que le bit 0.
+**Personne ne lit jamais l'entrée cassette**, et aucun code ne teste le
+bit 7. Le jeu ne fait donc pas de détection disque/cassette par ce biais :
+la bascule vient uniquement du test de la touche ESC en `0x2AEC`.
+
+Relevé complémentaire des lectures d'I/O entre 4,5 s et 9,0 s, chacune
+attribuée à son PC (toutes les valeurs sont celles attendues) :
+
+| PC | port | ce que c'est | valeurs |
+|---|---|---|---|
+| `00BA` | `&F5xx` | attente VSYNC du firmware | `1E`,`1F` |
+| `08A3` | `&F44x` | balayage clavier du firmware, 10 lignes | `FF` (repos) |
+| `2AEE` | `&F4xx` | **le test ESC qui déclenche la cassette** | `FF` |
+| `C6E0`/`C6E5`, `C92x` | `&FB7x` | AMSDOS, lectures de secteurs | — |
+
+## Piège d'instrumentation à connaître
+
+Le trait `Bus` de `../ZilogZ80` fournit des `read_io`/`write_io` **par
+défaut qui ne font rien**. En instrumentant `CpcBus`, faire sortir par
+mégarde `write_io` du bloc `impl Bus for CpcBus` (par exemple en ouvrant
+un `impl CpcBus` trop tôt pour y loger un helper) compile sans le moindre
+avertissement, mais **toutes les écritures d'I/O disparaissent en
+silence**. Symptôme observé : le balayage clavier du firmware renvoyait
+`00` sur les dix lignes (« toutes touches enfoncées »), ce qui ressemblait
+beaucoup à un vrai bug d'émulation. Une session entière de mesures a été
+invalidée ainsi.
+
+Le test `bus::tests::io_actually_goes_through_the_bus_trait` verrouille
+désormais ce comportement en passant délibérément par le trait. Toute
+instrumentation future du bus doit commencer par vérifier qu'un
+`OUT &F640` atteint bien `ppi.port_c`.
+
 ## Ce qui reste à faire
 
 Trouver ce qui déraille entre 4,80 s (fin du chargement, moteur coupé) et
 8,80 s (appel de l'écriture cassette). Pistes :
 
+- l'entrée cassette n'étant jamais lue (voir ci-dessus), la divergence
+  n'est pas une question de périphérique sondé : c'est bien le chemin
+  d'exécution qui diffère ;
 - remonter au décideur : qui appelle la routine contenant `0x29AF` ?
   Il existe deux entrées voisines, `0x29A6` (qui charge : `LD HL,$2A28`)
   et `0x29AF` (qui écrit : `CALL $2AD4`) — c'est le choix entre les deux

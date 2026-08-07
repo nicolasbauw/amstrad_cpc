@@ -167,6 +167,40 @@ impl Bus for CpcBus {
 mod tests {
     use super::*;
 
+    /// Le trait `Bus` fournit des `read_io`/`write_io` par défaut qui ne font
+    /// rien : si l'une de nos implémentations sort par mégarde du bloc
+    /// `impl Bus for CpcBus`, le code compile toujours mais TOUTES les
+    /// entrées-sorties disparaissent en silence — le clavier semble alors
+    /// bloqué toutes touches enfoncées, et rien ne le signale. Ce test passe
+    /// donc délibérément par le trait, pas par les méthodes inhérentes.
+    #[test]
+    fn io_actually_goes_through_the_bus_trait() {
+        fn write_through_trait(bus: &mut impl Bus, port: u16, value: u8) {
+            bus.write_io(port, value);
+        }
+        fn read_through_trait(bus: &impl Bus, port: u16) -> u8 {
+            bus.read_io(port)
+        }
+
+        let mut bus = CpcBus::new(Memory::new(0));
+
+        // &F6xx : port C du PPI (sélection de ligne clavier + dialogue PSG).
+        write_through_trait(&mut bus, 0xF640, 0x40);
+        assert_eq!(
+            bus.ppi.port_c, 0x40,
+            "un OUT vers &F6xx doit atteindre le port C du PPI"
+        );
+
+        // Et la lecture correspondante rend bien la ligne clavier demandée,
+        // au repos (aucune touche enfoncée) plutôt qu'un octet nul.
+        bus.psg.selected_register = 14;
+        assert_eq!(
+            read_through_trait(&bus, 0xF400),
+            0xFF,
+            "un IN sur &F4xx doit rendre la ligne clavier au repos"
+        );
+    }
+
     /// Les trois adresses de l'interface disque, et un échantillon de ports
     /// destinés aux autres composants qui ne doivent surtout pas l'atteindre.
     #[test]
