@@ -21,3 +21,11 @@ dsk_path = "bin"
 # effect as pressing F1/F2/F3/F4 once the window is up. Missing or
 # unrecognized falls back to "x1".
 default_zoom = "x1"
+
+[memory]
+# Extra 64KB RAM banks beyond the 6128's standard 128KB, in the style of
+# period third-party expansions (Dk'tronics and the like). Detected by the
+# Amstrad Diagnostics ROM's "UPPER RAM TEST" like real expansion hardware.
+# 0 by default (standard 128KB, unchanged behaviour). Capped at 56 (= 3.5MB
+# of extra RAM, the maximum the expansion protocol can address).
+extra_ram_banks = 0

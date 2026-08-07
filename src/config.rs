@@ -16,6 +16,8 @@ pub struct Config {
     pub file: FileConfig,
     #[serde(default)]
     pub display: DisplayConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -37,6 +39,19 @@ pub struct DisplayConfig {
     /// reconnue plutôt que d'échouer au démarrage.
     #[serde(default)]
     pub default_zoom: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct MemoryConfig {
+    /// Nombre de banques de 64 Ko supplémentaires au-delà des 128 Ko
+    /// standard du 6128. Visibles par le protocole d'extension mémoire
+    /// tierce (Dk'tronics et consorts) que reconnaît la ROM de diagnostic —
+    /// voir `memory::Memory::write_mmu_register`. 0 par défaut (comportement
+    /// standard, inchangé) ; plafonné à `memory::MAX_EXTRA_RAM_GROUPS` (avec
+    /// avertissement) si la valeur donnée dépasse ce que le protocole peut
+    /// adresser.
+    #[serde(default)]
+    pub extra_ram_banks: u32,
 }
 
 impl Config {
@@ -116,6 +131,10 @@ mod tests {
             config.display.default_zoom.is_none(),
             "sans section [display], le zoom par defaut doit rester absent"
         );
+        assert_eq!(
+            config.memory.extra_ram_banks, 0,
+            "sans section [memory], aucune banque supplementaire ne doit etre supposee"
+        );
     }
 
     #[test]
@@ -123,6 +142,13 @@ mod tests {
         let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n\n[display]\ndefault_zoom = \"x2\"\n";
         let config: Config = toml::from_str(file).expect("fichier refuse");
         assert_eq!(config.display.default_zoom.as_deref(), Some("x2"));
+    }
+
+    #[test]
+    fn extra_ram_banks_is_read_when_present() {
+        let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n\n[memory]\nextra_ram_banks = 16\n";
+        let config: Config = toml::from_str(file).expect("fichier refuse");
+        assert_eq!(config.memory.extra_ram_banks, 16);
     }
 
     #[test]

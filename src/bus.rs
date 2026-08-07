@@ -115,10 +115,11 @@ impl Bus for CpcBus {
                 &mut self.memory.rom_high_enabled,
             );
 
-            // Le MMU 128 Ko réagit uniquement à la VALEUR écrite (bits 7-6 = 11),
-            // indépendamment du port exact utilisé pour l'accès au Gate Array.
+            // Le MMU (bits 7-6 = 11) réagit à la valeur écrite ; le port
+            // complet ne compte que pour une éventuelle extension mémoire
+            // tierce (voir Memory::write_mmu_register).
             if (value & 0xC0) == 0xC0 {
-                self.memory.ram_config = value & 0x07;
+                self.memory.write_mmu_register(port, value);
             }
         }
 

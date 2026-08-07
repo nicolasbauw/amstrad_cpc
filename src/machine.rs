@@ -200,13 +200,11 @@ pub struct Machine {
 
 impl Machine {
     pub fn new() -> Self {
-        let memory = Memory::new();
-        let bus = CpcBus::new(memory);
-        let cpu = CPU::new();
-
-        // Charge la configuration utilisateur (config.toml). En cas d'échec
-        // (fichier absent ou mal formé), une configuration par défaut (tout
-        // désactivé) est utilisée.
+        // Charge la configuration utilisateur (config.toml) avant la
+        // mémoire : sa taille dépend de la quantité de RAM étendue
+        // configurée (voir Memory::new). En cas d'échec (fichier absent ou
+        // mal formé), une configuration par défaut (tout désactivé) est
+        // utilisée.
         let config = config::load_config_file().unwrap_or_else(|_| {
             println!("Config file not found or invalid: drive B disabled by default.");
             config::Config {
@@ -217,8 +215,13 @@ impl Machine {
                 },
                 file: config::FileConfig::default(),
                 display: config::DisplayConfig::default(),
+                memory: config::MemoryConfig::default(),
             }
         });
+
+        let memory = Memory::new(config.memory.extra_ram_banks);
+        let bus = CpcBus::new(memory);
+        let cpu = CPU::new();
 
         let m = Self {
             cpu,
@@ -333,7 +336,7 @@ impl Machine {
             )
         };
 
-        self.bus = CpcBus::new(Memory::new());
+        self.bus = CpcBus::new(Memory::new(self.config.memory.extra_ram_banks));
         self.cpu = CPU::new();
         self.total_ticks = 0;
         self.hsync_accumulator = 0;
