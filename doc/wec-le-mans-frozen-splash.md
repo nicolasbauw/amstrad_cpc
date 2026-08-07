@@ -1,16 +1,18 @@
 # WEC Le Mans : reste figé sur l'écran de démarrage (ouvert)
 
 Note d'enquête, point de départ pour une reprise ultérieure. **Le symptôme
-n'est pas résolu**, mais la cause immédiate est désormais identifiée : à
-l'ouverture de `WEC.BI2`, l'exécution dévale le jumpblock cassette du
-firmware jusqu'à `CAS WRITE`, ce qui déclenche une écriture cassette de
-deux minutes (voir « Cause immédiate » plus bas). **Comparaison directe
-avec Caprice32 (voir tout en bas) : la corruption mémoire qui déclenche
-tout ceci se produit à l'identique chez Caprice32 (mêmes registres, mêmes
-octets copiés), et pourtant Caprice32 ne se fige pas — `WEC.BI2` s'ouvre
-et le jeu continue.** C'est donc très probablement un vrai bug
-d'émulation chez nous, pas un défaut du jeu ou de cette disquette
-précise. Reste à localiser l'instruction/le mécanisme exact qui diverge.
+n'est pas résolu, mais la cause racine est cernée avec précision** (voir
+« Cause racine trouvée » plus bas) : AMSDOS réinstalle son mécanisme de
+far-call avant CHAQUE ouverture de fichier sur une vraie machine/Caprice32
+(vérifié avec des ROM strictement identiques aux nôtres), ce qui répare
+une corruption mémoire que le code du jeu provoque lui-même entre deux
+chargements. **Chez nous, cette réinstallation ne se produit qu'une
+seule fois dans toute la session** (confirmé : `0xCCA0` exécuté 1 seule
+fois chez nous contre au moins 3 fois chez Caprice32 sur la même
+disquette) — la corruption n'est donc jamais réparée, d'où la cascade
+dans le jumpblock cassette et l'écriture cassette de deux minutes qui
+suit. Reste à trouver la condition exacte, dans le vrai code AMSDOS, qui
+décide de ce second réinstall et que notre émulation évalue autrement.
 
 ## Le symptôme
 
@@ -493,35 +495,93 @@ Résultats :
   `BYTES`/`BLOBS`/`BITS`/`BUZZ`/`...HILL.`/`...B.`/`...ONAMI.` qu'on avait
   déjà repéré dans les données de `WEC.BI2`).
 - Tentative de comparer précisément le dispatcher far-call lui-même
-  (adresses `0xB9C7`-`0xB9E9`, `0xCCA0`) : **invalidée après coup** — ces
-  adresses viennent de la désassemblage de notre ROM AZERTY, et avec le
-  ROM anglais de ce test, elles ne correspondent pas au même code (un
-  `HL` constant et sans rapport à chaque déclenchement l'a révélé). Ne
-  pas réutiliser ces adresses précises sans le même ROM.
+  (adresses `0xB9C7`-`0xB9E9`, `0xCCA0`) avec le ROM anglais :
+  **invalidée après coup** — ces adresses viennent de la désassemblage de
+  notre ROM AZERTY, et avec le ROM anglais de ce test, elles ne
+  correspondent pas au même code (un `HL` constant et sans rapport à
+  chaque déclenchement l'a révélé). Ne pas réutiliser ces adresses
+  précises sans le même ROM.
 
 **Conclusion de cette comparaison : c'est très probablement un vrai bug
 d'émulation de notre côté**, pas un défaut de cette disquette ou du jeu.
 La même corruption mémoire, produite par le même code de jeu à partir des
 mêmes données, n'entraîne pas le même échec chez Caprice32.
 
+## Cause racine trouvée : AMSDOS ne réinstalle son far-call qu'une fois chez nous
+
+En contournant le piège clavier (voir plus bas : injection directe des
+bits de la matrice clavier plutôt que passage par la table `--autocmd`
+de Caprice32, avec NOTRE ROM AZERTY cette fois — donc adresses
+directement comparables), Caprice32 atteint l'écran complet
+« WEC LE MANS / 1. JOYSTICK / 2. KEYBOARD / 3. REDEFINE KEYS » avec le
+générique de crédits, exactement la capture d'écran de l'utilisateur en
+tout début d'enquête. **Comparaison à ROM strictement identiques,
+définitivement concluante.**
+
+Avec cette comparaison enfin valide, la trace exacte montre :
+
+```
+CCA0(install)#1                       ; premier armement d'AMSDOS
+CAS_IN_OPEN #1 fichier=wec            ; (ouverture liée à RUN"WEC lui-même)
+CCA0(install)#2                       ; <-- reinstall AVANT l'ouverture suivante
+CAS_IN_OPEN #2 fichier=WEC.BI1        ; réussit
+...
+A74B HL=69FE DE=A800 BC=00BD          ; le LDIR corrupteur s'exécute
+B9D5#16 A88B=0C BD 72                 ; &A88B est bien corrompu juste après
+CCA0(install)#3                       ; <-- reinstall AVANT l'ouverture suivante
+CAS_IN_OPEN #3 fichier=WEC.BI2        ; &A88B déjà réparé (30 CD 07) : réussit
+```
+
+**AMSDOS réinstalle son far-call (rappel de `0xCCA0`) avant CHAQUE
+ouverture de fichier** — pas seulement une fois au démarrage. C'est ce
+réinstall systématique qui répare la corruption causée par le `LDIR` du
+jeu, avant que `WEC.BI2` n'en ait besoin.
+
+Vérification symétrique dans notre propre émulateur, à la même adresse
+`0xCCA0` (ROM identique, donc directement comparable) :
+
+```
+WEC# 0xCCA0 (install) #1 a 2.08s
+WEC# 0xBC77 (CAS IN OPEN) #1 a 2.21s fichier="WEC.BI1"
+WEC# 0xBC77 (CAS IN OPEN) #2 a 6.23s fichier="WEC.BI2"
+WEC# total : 1 installs, 2 opens
+```
+
+**Chez nous, `0xCCA0` ne s'exécute qu'une seule fois dans toute la
+session** — avant `WEC.BI1`, jamais rappelé avant `WEC.BI2`. C'est très
+précisément l'écart : notre émulation ne déclenche pas le second
+réinstall qu'AMSDOS effectue normalement avant chaque ouverture. Le
+`LDIR` corrupteur reste donc actif chez nous, alors qu'il aurait dû être
+réparé avant que le jeu n'en ait besoin.
+
+**Reste à trouver** : qu'est-ce qui, dans le vrai code AMSDOS (ROM
+identique des deux côtés), décide de rappeler `0xCCA0` avant chaque
+`CAS IN OPEN` ? Un test de condition quelque part entre l'entrée de
+`CAS IN OPEN` (`0xBC77`/`0x0018`/`0xB9C7`) et le dispatch effectif doit
+évaluer différemment chez nous — piste la plus probable : un drapeau ou
+compteur d'état (en RAM ou registre) qui detecte "pas encore
+réinstallé pour cette session d'ouverture" et que notre émulation du CPU
+ou de la mémoire évalue autrement. C'est là qu'il faut chercher la
+prochaine fois, avec un traçage pas à pas entre la fermeture de
+`WEC.BI1` (`CAS IN CLOSE`) et l'ouverture de `WEC.BI2`, en comparant
+instruction par instruction les DEUX émulateurs (désormais possible avec
+ROM identiques et frappe fiable — voir méthode ci-dessous).
+
 ## Ce qui reste à faire
 
-- **Priorité** : refaire la comparaison ci-dessus avec un ROM
-  **identique au nôtre** des deux côtés, pour localiser l'instruction
-  exacte où le dispatcher (`0xB9C7`-`0xB9E9`, notamment le test `CP $10`
-  /`JR NC,$B9F9` en `0xB9E6`-`0xB9E8`) diverge entre notre émulateur et
-  Caprice32/le vrai matériel. Contourner le piège de frappe : soit
-  patcher la table clavier de Caprice32 pour notre AZERTY, soit injecter
-  directement les octets `RUN"WEC` + retour dans le tampon de saisie
-  BASIC par écriture mémoire plutôt que par simulation de frappe, soit
-  utiliser `--inject` avec un petit programme qui saute directement au
-  point d'entrée voulu ;
-- pistes pour cette instruction exacte : le `CP $10` compare le numéro
-  de ROM à 0x10 — sur un vrai 6128/Caprice32, peut-être que la valeur
-  lue n'a pas le même sens qu'on le suppose (le test pourrait chercher
-  autre chose qu'un simple garde-fou « ROM valide »), ou le chemin
-  « sans ROM » (`&B9F9` et suite) fait réellement quelque chose
-  d'acceptable qu'on n'a pas tracé jusqu'au bout ;
+- **Priorité** : tracer pas à pas, dans NOTRE émulateur, tout ce qui se
+  passe entre la fermeture de `WEC.BI1` (`CAS IN CLOSE`, ~4,79 s) et
+  l'ouverture de `WEC.BI2` (`CAS IN OPEN`, ~6,23 s), à la recherche du
+  test de condition qui devrait déclencher un second appel à `0xCCA0`
+  et ne le fait pas. Comparer avec la même tranche chez Caprice32 (ROM
+  identiques désormais possibles, voir méthode ci-dessous) ;
+- pistes pour cette condition : un drapeau ou compteur d'état (variable
+  système en RAM, ou registre du CPU) que le code d'AMSDOS consulte pour
+  savoir s'il doit se réinstaller — le comportement s'expliquerait par
+  une valeur initiale différente, ou par un effet de bord d'une
+  instruction Z80 mal émulée (registre `R`, drapeaux d'une instruction
+  spécifique...) qui fait pencher ce test dans le mauvais sens chez
+  nous ;
 - l'entrée cassette n'étant jamais lue, la divergence n'est pas une
   question de périphérique sondé : c'est bien le chemin d'exécution.
 
@@ -571,3 +631,27 @@ imprimer `z80.IY.d`/`z80.HL.d`/etc. via `fprintf(stderr, ...)` — accès
 mémoire tel que vu par le CPU via `membank_read[addr >> 14][addr &
 0x3FFF]` (`extern byte *membank_read[4];`). Toujours `git checkout
 src/z80.cpp` après usage : ce n'est pas notre dépôt.
+
+**Frappe fiable avec NOTRE ROM (contourne le piège clavier) :** plutôt
+que `--autocmd` (qui passe par la table caractère→matrice interne de
+Caprice32, calée sur son ROM anglais par défaut), injecter directement
+les bits de la matrice clavier dans le même hook de `z80_execute()`, en
+utilisant les positions (ligne, bit) déjà connues correctes pour notre
+ROM (`src/autotype.rs::key_for_char`) :
+
+```cpp
+extern byte keyboard_matrix[16]; // défini dans cap32.cpp
+// séquence pour run"wec + Entrée :
+// r=(6,2) u=(5,2) n=(5,6) "=(7,1) w=(8,7) e=(7,2) c=(7,6) Entree=(2,2)
+// presser ~15000 "instructions", relâcher ~20000 avant la suivante —
+// IMPORTANT : une pression trop longue (essayé 500000) déclenche
+// l'auto-répétition du firmware et retape la touche en boucle.
+keyboard_matrix[line] &= ~(1 << bit); // presser
+keyboard_matrix[line] |=  (1 << bit); // relâcher
+```
+
+Capture d'écran directe (sans passer par notre propre rendu vidéo) :
+`extern void dumpScreen();` (définie dans `cap32.cpp`) écrit un PNG dans
+`CPC.sdump_dir` (par défaut `<app>/screenshots/`, créer le dossier au
+besoin) — bien plus simple que de reconstruire une image depuis la VRAM
+à la main.
