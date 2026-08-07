@@ -130,7 +130,7 @@ pub fn run(
 
     let mut debug_visible = false;
     let debug_window = video_subsystem
-        .window("Amstrad CPC 6128 - Machine Status", 800, 750)
+        .window("Amstrad CPC 6128 - Machine Status", 800, 1000)
         .position_centered()
         .hidden()
         .resizable()

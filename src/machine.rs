@@ -603,7 +603,7 @@ impl Machine {
              BC : {:#06X}  DE : {:#06X}  HL : {:#06X}  AF : {:#06X}\n\
              BC': {:#06X}  DE': {:#06X}  HL': {:#06X}  AF': {:#06X}\n\
              IXH : {:#04X}  IXL : {:#04X}  IYH : {:#04X}  IYL : {:#04X}\n\
-             (SP) : {:#06X}  IFF1 : {}  IFF2 : {}  IM : {}  Pending INT : {}  Pending NMI : {}\n",
+             (SP) : {:#06X}  IFF1 : {:<5}  IFF2 : {:<5}  IM : {}  Pending INT : {:<5}  Pending NMI : {:<5}\n",
             pc,
             sp,
             self.cpu.reg.flags.s as i32,
@@ -662,17 +662,17 @@ impl Machine {
         );
         let _ = writeln!(
             s,
-            "  Interrupt Requested: {}",
+            "  Interrupt Requested: {:<5}",
             self.bus.gate_array.interrupt_requested
         );
         let _ = writeln!(
             s,
-            "  Low ROM Enabled    : {}",
+            "  Low ROM Enabled    : {:<5}",
             self.bus.memory.rom_low_enabled
         );
         let _ = writeln!(
             s,
-            "  High ROM Enabled   : {}",
+            "  High ROM Enabled   : {:<5}",
             self.bus.memory.rom_high_enabled
         );
         let _ = writeln!(
@@ -712,7 +712,7 @@ impl Machine {
             self.bus.crtc.char_row,
             self.bus.crtc.raster
         );
-        let _ = writeln!(s, "  VSYNC              : {}", self.bus.crtc.vsync);
+        let _ = writeln!(s, "  VSYNC              : {:<5}", self.bus.crtc.vsync);
         let _ = write!(s, "  Registers          : ");
         for (i, val) in self.bus.crtc.registers.iter().enumerate() {
             let _ = write!(s, "R{}={:<3} ", i, val);
@@ -727,7 +727,7 @@ impl Machine {
         let _ = writeln!(s, "  Port A (PSG Data)  : {:#04X}", self.bus.ppi.port_a);
         let _ = writeln!(
             s,
-            "  Port B (System)    : {:#04X} (VSYNC: {})",
+            "  Port B (System)    : {:#04X} (VSYNC: {:<5})",
             self.bus.ppi.port_b_input,
             (self.bus.ppi.port_b_input & 0x01) != 0
         );
@@ -851,7 +851,7 @@ impl Machine {
                 crate::fdc::FdcPhase::ExecutionRead | crate::fdc::FdcPhase::ExecutionWrite
             );
             let _ = writeln!(s, "\n[FDC]");
-            let _ = writeln!(s, "  Motor On           : {}", fdc.motor_on);
+            let _ = writeln!(s, "  Motor On           : {:<5}", fdc.motor_on);
             let _ = writeln!(
                 s,
                 "  Disk access        : {}",
