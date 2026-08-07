@@ -316,26 +316,44 @@ WEC.BI2 (bloc 9, son 1er bloc) : nom d'origine = TRACK0F.BIN
 ```
 
 C'est la signature classique d'une **conversion cassette → disquette** :
-les fichiers cassette d'origine (un écran, une donnée de piste de course
-nommée d'après son numéro) ont été renommés en `WEC.BI1`/`WEC.BI2`/`WEC.BIN`
-pour le catalogue du disque, mais chaque en-tête AMSDOS a conservé le nom
-sous lequel il avait été sauvegardé à l'origine. `WEC.BI2` est
-probablement plusieurs fichiers cassette d'origine concaténés en un seul
-bloc disque (il est nettement le plus gros, ~39 Ko) — ce qui expliquerait
-directement le rôle du `LDIR` de `&A73C` : ce n'est pas une écriture
-arbitraire, c'est très probablement le code du jeu qui **redistribue en
-mémoire les morceaux du blob fusionné vers leurs adresses de chargement
-cassette d'origine**, une par une, exactement comme l'aurait fait un
-chargement cassette réel fichier par fichier.
+les fichiers cassette d'origine ont été renommés en
+`WEC.BI1`/`WEC.BI2`/`WEC.BIN` pour le catalogue du disque, mais chaque
+en-tête AMSDOS a conservé le nom sous lequel il avait été sauvegardé à
+l'origine.
 
-Si c'est bien le cas, la collision avec `&A800` n'est peut-être pas un bug
-de notre émulateur du tout, mais un défaut de **cette conversion
-disquette précise** : le convertisseur a pu choisir de regrouper les
-blocs cassette sans tenir compte du fait qu'une fois passé par le système
-de fichiers AMSDOS (plutôt que par un chargement cassette brut sans
-AMSDOS), l'adresse `&A800` n'est plus libre. Reste à vérifier si c'est
-plausible en regardant à quoi ressemblent les 189 octets copiés (code,
-table de données, écran ?).
+**Précision (et correction d'une première hypothèse) : la source réelle
+du `LDIR` de `&A73C` a été vérifiée directement, ce n'est pas `WEC.BI2`
+mais `WEC.BI1`/`WEC.SCR`.** Capture au moment exact de l'instruction :
+
+```
+4,80 s  LDIR : source HL=&69FE  destination DE=&A800  longueur BC=&BD (189)
+        &69FE - &68F1 (adresse de chargement declarée de WEC.SCR) = +269
+```
+
+`&69FE` tombe très exactement 269 octets après le début du chargement de
+`WEC.BI1`/`WEC.SCR` (`&68F1`, la longueur déclarée dans son en-tête). Le
+contenu copié n'est ni du texte ni du code reconnaissable — une suite
+d'octets qui décroît puis remonte (`F5 F1 E0 D0 B5 B3 91 81 78 6E 4B 42
+25 0B 09 07 05 03 01 F4 C8 B8 ...`), plus compatible avec une table
+(dégradé, sinus, palette) qu'avec du code exécutable. Cette copie a lieu
+**juste après la fermeture de `WEC.BI1`** (4,79 s) et **avant même
+l'ouverture de `WEC.BI2`** (6,23 s) : elle n'a donc rien à voir avec la
+cascade dans le jumpblock qui, elle, ne se produit que plus tard, sur le
+second fichier.
+
+Le fichier `WEC.SCR` d'origine (6169 octets, bien plus petit qu'un écran
+mode 1 complet de 16 Ko) contient donc vraisemblablement, en plus des
+données d'écran, une ou plusieurs tables annexes que le jeu redistribue
+en mémoire après le chargement — exactement le genre d'étape de
+post-traitement qu'un chargement cassette réel aurait exécutée à
+l'identique. Si `&A800` était déjà la destination sur la version cassette
+d'origine, la collision avec le poste de travail AMSDOS serait alors
+**inhérente à cette combinaison** (ce jeu + AMSDOS + cette adresse), pas
+spécifique à la conversion disquette — et la question redevient : sur un
+vrai 6128, qu'est-ce qui empêche normalement cette collision ? (HIMEM
+déjà abaissé avant le premier accès disque par un mécanisme qu'on n'a pas
+encore identifié, ou bien le poste de travail AMSDOS s'installe
+réellement ailleurs sur le vrai matériel.)
 
 ### La question à trancher
 
@@ -395,15 +413,17 @@ instrumentation future du bus doit commencer par vérifier qu'un
 
 ## Ce qui reste à faire
 
-- **Priorité** : examiner le contenu des 189 octets copiés par le `LDIR`
-  de `&A73C` vers `&A800` (code ? table de données ? un autre écran ?)
-  pour confirmer l'hypothèse « redistribution de blocs cassette fusionnés
-  vers leurs adresses de chargement d'origine », et voir si une adresse
-  différente aurait été plus logique — ce qui trancherait entre « bug de
-  cette conversion disquette précise » et « bug de notre émulateur » ;
-- si c'est bien un défaut de la conversion, chercher si une version
-  disquette différente de cette même image circule (dump alternatif,
-  peut-être moins buggé) ;
+- **Priorité** : comprendre ce qui, sur un vrai 6128, protège
+  normalement `&A800` avant que le jeu n'y écrive à 4,80 s — puisque
+  cette copie a lieu bien avant l'ouverture de `WEC.BI2` (6,23 s) et
+  semble être une étape de post-traitement du chargement de `WEC.SCR`
+  qui existerait à l'identique sur la version cassette. Deux
+  possibilités à trancher : (a) le jeu abaisse HIMEM lui-même quelque
+  part avant le premier accès disque, et notre émulation d'un mécanisme
+  lié (MEMORY, négociation ROM au boot...) ne le prend pas en compte ;
+  (b) le poste de travail AMSDOS s'installe réellement à une autre
+  adresse sur le vrai matériel, et notre IY=&A700 est faux malgré sa
+  ressemblance avec la valeur documentée ;
 - l'entrée cassette n'étant jamais lue, la divergence n'est pas une
   question de périphérique sondé : c'est bien le chemin d'exécution ;
 - comparer avec Caprice32 si un moyen fiable de trace est disponible
