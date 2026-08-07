@@ -20,14 +20,15 @@ menu du jeu devrait s'afficher après quelques secondes.
 ## Contenu de la disquette
 
 Pas de `WEC.BAS` : `RUN"WEC"` lance `WEC.BIN`. La commande utilisée est
-donc bien la bonne. Catalogue réel (analyse des entrées de 32 octets des
-quatre premiers secteurs de chaque piste) :
+donc bien la bonne. Catalogue réel — **le vrai catalogue AMSDOS n'existe
+que sur la piste 0** (secteurs C1-C4), jamais un par piste ; le traiter
+par piste fait apparaître de faux fichiers (voir la correction plus bas
+à propos de « TRACK0F.BIN ») :
 
 ```
-piste 0 : WEC.BIN  (2 records)
-          WEC.BI1  (50 records,  1 extent)
-          WEC.BI2  (128+128+57 records, 3 extents)
-piste 2 : TRACK0F.BIN
+WEC.BIN  (2 records,  1 extent)
+WEC.BI1  (50 records, 1 extent)
+WEC.BI2  (128+128+57 records, 3 extents)
 ```
 
 Le jeu charge donc `WEC.BIN`, puis `WEC.BI1`, puis `WEC.BI2` — et c'est
@@ -287,6 +288,55 @@ Notre ROM AMSDOS est authentique (16 Ko, version 1.0.5, RSX `|CPM`
 `|DRIVE` `|USER`), donc le placement de sa zone de travail est celui
 d'origine.
 
+### Correction : `TRACK0F.BIN` n'existe pas comme fichier séparé
+
+**Erreur de méthode dans la session précédente, à corriger.** Le « catalogue
+piste 2 » qui semblait révéler un fichier `TRACK0F.BIN` jamais chargé
+était un faux positif : le vrai catalogue AMSDOS n'existe que sur la
+**piste 0** (secteurs C1-C4), jamais un par piste. Le scan qui l'a
+« trouvé » traitait par erreur le début de chaque piste comme un
+catalogue.
+
+Le catalogue réel, complet, ne contient que 3 fichiers :
+
+```
+WEC.BI1 (1 extent, 50 records)
+WEC.BI2 (3 extents, 128+128+57 records)
+WEC.BIN (1 extent, 2 records)
+```
+
+Ce qu'on a réellement trouvé : les octets `TRACK0F.BIN` sont le **nom
+d'origine embarqué dans l'en-tête AMSDOS du tout premier bloc de
+`WEC.BI2`** — exactement comme `WEC.BI1` embarque `WEC.SCR` comme nom
+d'origine (déjà relevé plus haut, section « cause immédiate ») :
+
+```
+WEC.BI1 (bloc 2, son 1er bloc) : nom d'origine = WEC.SCR   load=&68F1
+WEC.BI2 (bloc 9, son 1er bloc) : nom d'origine = TRACK0F.BIN
+```
+
+C'est la signature classique d'une **conversion cassette → disquette** :
+les fichiers cassette d'origine (un écran, une donnée de piste de course
+nommée d'après son numéro) ont été renommés en `WEC.BI1`/`WEC.BI2`/`WEC.BIN`
+pour le catalogue du disque, mais chaque en-tête AMSDOS a conservé le nom
+sous lequel il avait été sauvegardé à l'origine. `WEC.BI2` est
+probablement plusieurs fichiers cassette d'origine concaténés en un seul
+bloc disque (il est nettement le plus gros, ~39 Ko) — ce qui expliquerait
+directement le rôle du `LDIR` de `&A73C` : ce n'est pas une écriture
+arbitraire, c'est très probablement le code du jeu qui **redistribue en
+mémoire les morceaux du blob fusionné vers leurs adresses de chargement
+cassette d'origine**, une par une, exactement comme l'aurait fait un
+chargement cassette réel fichier par fichier.
+
+Si c'est bien le cas, la collision avec `&A800` n'est peut-être pas un bug
+de notre émulateur du tout, mais un défaut de **cette conversion
+disquette précise** : le convertisseur a pu choisir de regrouper les
+blocs cassette sans tenir compte du fait qu'une fois passé par le système
+de fichiers AMSDOS (plutôt que par un chargement cassette brut sans
+AMSDOS), l'adresse `&A800` n'est plus libre. Reste à vérifier si c'est
+plausible en regardant à quoi ressemblent les 189 octets copiés (code,
+table de données, écran ?).
+
 ### La question à trancher
 
 Le jeu écrit délibérément en `&A800` (adresse en dur), or cette zone
@@ -313,31 +363,18 @@ AMSDOS sur un 6128 avec BASIC 1.1 + AMSDOS seuls (HIMEM par défaut
 machine — ce n'est probablement pas une négociation HIMEM ratée de notre
 côté.
 
-**Piste bien plus prometteuse : `TRACK0F.BIN` (piste 2) n'est JAMAIS lu.**
-Relevé de toutes les pistes visitées par le lecteur A sur 200 s émulées :
-
-```
-{0, 1, 10}
-```
-
-Piste 0 (catalogue + `WEC.BIN`/`WEC.BI1`), piste 1 (suite de `WEC.BI2`) et
-10 (fin de `WEC.BI2`, cohérent avec la taille des blocs) — **jamais la
-piste 2**. Un fichier au nom aussi explicite que `TRACK0F.BIN` (« track
-0 formatté » ?), jamais chargé par le jeu que nous traçons, sent fortement
-le chargeur de démarrage spécialisé — probablement celui qui, sur la
-vraie disquette, prend la main *avant* `WEC.BIN`/AMSDOS et évite
-précisément ce genre de collision mémoire (en plaçant son propre code
-ailleurs, ou en repoussant IY/HIMEM avant de rendre la main). Si le vrai
-point d'entrée de la disquette n'est pas `RUN"WEC"` mais un amorçage par
-piste 0 personnalisée (secteur boot, chargé automatiquement par le
-firmware à l'insertion), notre reproduction actuelle (`-d ... -a
-'run"wec'`) sauterait purement et simplement cette étape.
-
-À vérifier en priorité la prochaine fois : comment une disquette CPC lance
-normalement un programme à l'insertion (secteur/piste de boot automatique
-du firmware), et si cette disquette en a un — auquel cas la vraie
-commande de reproduction ne serait pas `run"wec` mais un simple boot à
-froid sur cette disquette.
+**Piste abandonnée : la piste 2 (physique) n'est jamais visitée par le
+lecteur sur 200 s émulées** (`{0, 1, 10}` seulement, jamais 2). Cette
+observation en elle-même n'est pas fausse, mais l'interprétation qui en
+avait été tirée l'était (« `TRACK0F.BIN` est un fichier séparé jamais
+chargé ») — voir la correction ci-dessus, ce fichier n'existe pas. La
+vraie explication est plus simple : les blocs 9-13 de `WEC.BI2` (son
+tout premier morceau) vivent physiquement sur la piste 2, mais la
+cascade dans le jumpblock cassette se produit **avant même que le FDC
+n'ait besoin d'y chercher quoi que ce soit** — `CAS IN OPEN` s'égare dans
+le dispatcher AMSDOS avant d'atteindre l'étape qui interrogerait
+réellement le disque pour cette piste. Piste 2 jamais visitée = symptôme
+de la cascade, pas une étape de chargement manquante.
 
 ## Piège d'instrumentation à connaître
 
@@ -358,16 +395,15 @@ instrumentation future du bus doit commencer par vérifier qu'un
 
 ## Ce qui reste à faire
 
-- **Priorité** : déterminer si `run"wec"` est la bonne façon de lancer
-  cette disquette, ou si un chargeur par piste 0 personnalisée
-  (`TRACK0F.BIN`, jamais lu dans notre reproduction) devrait intervenir
-  avant/à la place. Si oui, notre séquence de reproduction actuelle
-  (`-d WEC_Le_Mans.dsk -a 'run"wec'`) saute une étape que le vrai
-  matériel ne saute pas ;
-- si `TRACK0F.BIN` doit être lu, vérifier ce qui devrait le déclencher
-  (secteur/piste spéciale interceptée par le firmware disque, ou fichier
-  chargé explicitement par un `WEC.BAS`/autre programme absent de cette
-  image) ;
+- **Priorité** : examiner le contenu des 189 octets copiés par le `LDIR`
+  de `&A73C` vers `&A800` (code ? table de données ? un autre écran ?)
+  pour confirmer l'hypothèse « redistribution de blocs cassette fusionnés
+  vers leurs adresses de chargement d'origine », et voir si une adresse
+  différente aurait été plus logique — ce qui trancherait entre « bug de
+  cette conversion disquette précise » et « bug de notre émulateur » ;
+- si c'est bien un défaut de la conversion, chercher si une version
+  disquette différente de cette même image circule (dump alternatif,
+  peut-être moins buggé) ;
 - l'entrée cassette n'étant jamais lue, la divergence n'est pas une
   question de périphérique sondé : c'est bien le chemin d'exécution ;
 - comparer avec Caprice32 si un moyen fiable de trace est disponible
