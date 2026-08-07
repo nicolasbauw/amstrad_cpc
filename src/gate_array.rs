@@ -126,11 +126,6 @@ impl GateArray {
         ga
     }
 
-    /// Récupère la couleur RGB (r, g, b) d'une encre de la palette (0 à 15 pour stylos, 16 pour la bordure).
-    pub fn get_rgb_color(&self, index: usize) -> (u8, u8, u8) {
-        self.state().rgb(index)
-    }
-
     /// Instantané des réglages qui déterminent l'image, à mémoriser à chaque
     /// scanline pour que le rendu suive les changements en cours de trame.
     pub fn state(&self) -> GateArrayState {
@@ -323,7 +318,7 @@ mod tests {
 
         ga.write_register(0x10, &mut rom_low, &mut rom_high); // stylo 16 = bordure
         ga.write_register(0x54, &mut rom_low, &mut rom_high); // couleur noire
-        assert_eq!(ga.get_rgb_color(16), (0, 0, 0));
+        assert_eq!(ga.state().rgb(16), (0, 0, 0));
     }
 
     /// L'instantané doit être indépendant du Gate Array : c'est toute son
@@ -347,7 +342,7 @@ mod tests {
         assert_eq!(captured.video_mode, 1);
         assert_eq!(captured.rgb(0), (0, 0, 0));
         assert_eq!(ga.video_mode, 0);
-        assert_eq!(ga.get_rgb_color(0), (255, 255, 255));
+        assert_eq!(ga.state().rgb(0), (255, 255, 255));
     }
 
     /// Numéros des lignes (relatives au début de trame) sur lesquelles une

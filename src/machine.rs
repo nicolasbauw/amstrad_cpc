@@ -60,6 +60,8 @@ Emulator commands:
     disk d.dsk b        Loads the d.dsk disk image on drive B (if enabled in config.toml)
     disk eject          Ejects the disk image from drive A
     disk eject b        Ejects the disk image from drive B
+    blank d.dsk         Creates a blank formatted disk image and inserts it in drive A
+    blank d.dsk b       Creates a blank formatted disk image and inserts it in drive B
     pc                  Performs a power cycle
     vol                 Displays the audio output volume
     vol 30              Sets the audio output volume to 30 %
@@ -379,6 +381,19 @@ impl Machine {
     pub fn load_disk_b(&mut self, filename: &str) -> Result<(), String> {
         let path = self.config.resolve_disk_path(filename);
         self.bus.fdc.borrow_mut().load_disk_b(&path)
+    }
+
+    /// Crée une disquette vierge formatée (voir [`crate::fdc::Fdc::blank_dsk_image`])
+    /// au nom donné, résolu via `[file] dsk_path` s'il ne contient pas déjà
+    /// un chemin explicite, puis l'insère dans le lecteur A ou B.
+    pub fn create_blank_disk(&mut self, filename: &str, drive_b: bool) -> Result<(), String> {
+        let path = self.config.resolve_new_disk_path(filename);
+        crate::fdc::Fdc::write_dsk_file(&crate::fdc::Fdc::blank_dsk_image(), &path)?;
+        if drive_b {
+            self.load_disk_b(&path)
+        } else {
+            self.load_disk(&path)
+        }
     }
 
     /// Coupe puis rétablit l'alimentation de la machine (redémarrage à
@@ -1163,6 +1178,14 @@ impl Machine {
                     }
                 }
             }
+            MonitorCmd::Blank => {
+                // "blank d.dsk" cible le lecteur A, "blank d.dsk b" le lecteur B.
+                let target_drive_b = arg2.eq_ignore_ascii_case("b");
+                match self.create_blank_disk(&arg, target_drive_b) {
+                    Ok(()) => println!("Blank disk created and inserted: {}", arg),
+                    Err(e) => println!("Error creating blank disk: {}", e),
+                }
+            }
             MonitorCmd::PowerCycle => {
                 self.power_cycle();
             }
@@ -1421,5 +1444,28 @@ mod tests {
             "le jeu ne semble pas avoir demarre, PC={:#06X}",
             machine.cpu.reg.pc
         );
+    }
+
+    /// La commande `blank` doit écrire un .dsk formaté à l'emplacement
+    /// résolu puis l'insérer immédiatement dans le lecteur visé, comme si
+    /// l'utilisateur venait d'y glisser une disquette vierge fraîchement
+    /// achetée.
+    #[test]
+    fn create_blank_disk_writes_a_file_and_inserts_it() {
+        let mut machine = Machine::new();
+        let path = std::env::temp_dir().join("amstrad_cpc_test_machine_blank.dsk");
+        let path = path.to_str().unwrap();
+        std::fs::remove_file(path).ok();
+
+        machine
+            .create_blank_disk(path, false)
+            .expect("creation de la disquette vierge");
+
+        assert!(
+            machine.bus.fdc.borrow().drive_a.disk_loaded,
+            "la disquette vierge doit etre inseree dans le lecteur A"
+        );
+        assert!(std::path::Path::new(path).is_file());
+        std::fs::remove_file(path).ok();
     }
 }

@@ -76,6 +76,27 @@ impl Config {
         }
         filename.to_string()
     }
+
+    /// Résout le chemin où créer une *nouvelle* disquette (commande `blank`).
+    ///
+    /// Contrairement à [`Config::resolve_disk_path`], le fichier n'existe pas
+    /// encore : on ne peut donc pas se fier à sa présence pour décider où le
+    /// placer. Un nom qui contient déjà un séparateur de chemin (ou qui est
+    /// absolu) est laissé tel quel — il désigne explicitement un emplacement.
+    /// Un simple nom de fichier est en revanche créé dans `dsk_path` s'il est
+    /// configuré, à la manière de `resolve_disk_path` pour la lecture.
+    pub fn resolve_new_disk_path(&self, filename: &str) -> String {
+        let has_explicit_dir = Path::new(filename)
+            .parent()
+            .is_some_and(|p| !p.as_os_str().is_empty());
+        if has_explicit_dir {
+            return filename.to_string();
+        }
+        if let Some(dir) = &self.file.dsk_path {
+            return Path::new(dir).join(filename).to_string_lossy().into_owned();
+        }
+        filename.to_string()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -149,6 +170,37 @@ mod tests {
         let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n\n[memory]\nextra_ram_banks = 16\n";
         let config: Config = toml::from_str(file).expect("fichier refuse");
         assert_eq!(config.memory.extra_ram_banks, 16);
+    }
+
+    #[test]
+    fn resolve_new_disk_path_joins_a_bare_filename_with_dsk_path() {
+        let mut config = Config {
+            drives: DriveConfig { drive_b: false },
+            debugger: Debugger {
+                keyboard: false,
+                audio: false,
+            },
+            file: FileConfig {
+                dsk_path: Some("bin".to_string()),
+            },
+            display: DisplayConfig::default(),
+            memory: MemoryConfig::default(),
+        };
+        assert_eq!(config.resolve_new_disk_path("d.dsk"), "bin/d.dsk");
+
+        config.file.dsk_path = None;
+        assert_eq!(
+            config.resolve_new_disk_path("d.dsk"),
+            "d.dsk",
+            "sans dsk_path configure, le nom est laisse tel quel"
+        );
+
+        config.file.dsk_path = Some("bin".to_string());
+        assert_eq!(
+            config.resolve_new_disk_path("other/d.dsk"),
+            "other/d.dsk",
+            "un chemin qui contient deja un repertoire ne doit pas etre recompose"
+        );
     }
 
     #[test]

@@ -403,23 +403,39 @@ impl Fdc {
         crate::console::notice("Floppy DSK Ejected from drive B");
     }
 
-    /// Initialise le FDC avec les valeurs par défaut du CPC. `drive_b_enabled`
-    /// n'est volontairement PAS réinitialisé ici : c'est un paramètre de
-    /// configuration, pas un état transitoire de session.
-    pub fn init_defaults(&mut self) {
-        self.drive_a = Drive::new();
-        self.drive_b = Drive::new();
-        self.selected_drive = 0;
-        self.motor_on = false;
-        self.reset_transient_state();
+    /// Crée une disquette vierge, formatée AMSDOS standard (40 pistes, une
+    /// face, 9 secteurs de 512 octets numérotés 0xC1-0xC9, remplis de l'octet
+    /// de bourrage habituel de Format Track). Rien n'est écrit dans un
+    /// fichier ici, seulement construit en mémoire — voir
+    /// [`Fdc::write_dsk_file`] pour la persister.
+    pub fn blank_dsk_image() -> DskImage {
+        const NUM_TRACKS: u8 = 40;
+        const NUM_SECTORS: u8 = 9;
+        const SECTOR_SIZE: usize = 512;
+        const FILL: u8 = 0xE5;
+
+        let tracks = (0..NUM_TRACKS)
+            .map(|number| Track {
+                number,
+                side: 0,
+                sector_size: 2, // 128 << 2 = 512 octets
+                sectors: (0..NUM_SECTORS)
+                    .map(|i| Sector {
+                        id: 0xC1 + i,
+                        size: SECTOR_SIZE,
+                        data: vec![FILL; SECTOR_SIZE],
+                        deleted: false,
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        DskImage { tracks }
     }
 
-    fn save_disk_from(drive: &Drive, filename: &str) -> Result<(), String> {
-        let dsk = drive
-            .dsk
-            .as_ref()
-            .ok_or_else(|| "Aucune disquette chargée".to_string())?;
-
+    /// Écrit une image disquette en mémoire vers un fichier .dsk (format
+    /// standard, non-Extended).
+    pub fn write_dsk_file(dsk: &DskImage, filename: &str) -> Result<(), String> {
         let num_tracks = dsk
             .tracks
             .iter()
@@ -494,17 +510,6 @@ impl Fdc {
         let mut f = File::create(filename).map_err(|e| e.to_string())?;
         f.write_all(&out).map_err(|e| e.to_string())?;
         Ok(())
-    }
-
-    /// Réécrit l'image disquette du lecteur A en mémoire vers un fichier .dsk
-    /// (format standard, non-Extended).
-    pub fn save_disk(&self, filename: &str) -> Result<(), String> {
-        Self::save_disk_from(&self.drive_a, filename)
-    }
-
-    /// Réécrit l'image disquette du lecteur B en mémoire vers un fichier .dsk.
-    pub fn save_disk_b(&self, filename: &str) -> Result<(), String> {
-        Self::save_disk_from(&self.drive_b, filename)
     }
 
     /// Lecture du registre de statut (MSR) sur le port &FB7E
@@ -1166,5 +1171,33 @@ mod tests {
             0x04,
             "ST1 doit signaler No Data"
         );
+    }
+
+    /// Une disquette vierge écrite sur disque puis relue doit retrouver
+    /// exactement le même nombre de pistes/secteurs et le même octet de
+    /// bourrage : c'est ce que la commande console `blank` insère ensuite
+    /// dans un lecteur, elle doit donc être un .dsk valide et cohérent.
+    #[test]
+    fn a_blank_disk_survives_a_round_trip_through_a_dsk_file() {
+        let dsk = Fdc::blank_dsk_image();
+        let path = std::env::temp_dir().join("amstrad_cpc_test_blank.dsk");
+        let path = path.to_str().unwrap();
+
+        Fdc::write_dsk_file(&dsk, path).expect("ecriture du .dsk vierge");
+        let raw = std::fs::read(path).expect("lecture du .dsk vierge");
+        std::fs::remove_file(path).ok();
+
+        let reloaded = DskImage::parse(&raw).expect(".dsk vierge non reconnu");
+        assert_eq!(reloaded.tracks.len(), dsk.tracks.len());
+        for track in &reloaded.tracks {
+            assert_eq!(track.sectors.len(), 9, "9 secteurs par piste attendus");
+            for sec in &track.sectors {
+                assert_eq!(sec.size, 512);
+                assert!(
+                    sec.data.iter().all(|&b| b == 0xE5),
+                    "secteur vierge attendu (bourrage 0xE5)"
+                );
+            }
+        }
     }
 }
