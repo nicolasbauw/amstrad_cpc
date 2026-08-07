@@ -83,6 +83,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Err(e) = machine.load_disk(path) {
             println!("Can't load disk '{path}': {e}");
         }
+        // Contrairement aux commandes tapées dans la console (dont la sortie
+        // est suivie d'un réaffichage de "> " par `sdl::run`, voir
+        // `Machine::console_handle`), ce message s'affiche ici avant même
+        // que le fil console ait fini son propre prompt initial : sans ce
+        // réaffichage, il resterait sans prompt visible en dessous.
+        print!("> ");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 
     let autotyper = autocmd
