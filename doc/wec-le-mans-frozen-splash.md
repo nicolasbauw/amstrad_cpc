@@ -4,8 +4,13 @@ Note d'enquête, point de départ pour une reprise ultérieure. **Le symptôme
 n'est pas résolu**, mais la cause immédiate est désormais identifiée : à
 l'ouverture de `WEC.BI2`, l'exécution dévale le jumpblock cassette du
 firmware jusqu'à `CAS WRITE`, ce qui déclenche une écriture cassette de
-deux minutes (voir « Cause immédiate » plus bas). Reste à comprendre
-pourquoi le far call d'AMSDOS ne revient pas à son appelant.
+deux minutes (voir « Cause immédiate » plus bas). **Comparaison directe
+avec Caprice32 (voir tout en bas) : la corruption mémoire qui déclenche
+tout ceci se produit à l'identique chez Caprice32 (mêmes registres, mêmes
+octets copiés), et pourtant Caprice32 ne se fige pas — `WEC.BI2` s'ouvre
+et le jeu continue.** C'est donc très probablement un vrai bug
+d'émulation chez nous, pas un défaut du jeu ou de cette disquette
+précise. Reste à localiser l'instruction/le mécanisme exact qui diverge.
 
 ## Le symptôme
 
@@ -428,24 +433,82 @@ désormais ce comportement en passant délibérément par le trait. Toute
 instrumentation future du bus doit commencer par vérifier qu'un
 `OUT &F640` atteint bien `ppi.port_c`.
 
+## Comparaison directe avec Caprice32 (décisive)
+
+L'utilisateur dispose d'un checkout Caprice32 compilable localement
+(`~/Dev/caprice32`), avec ses ROM par défaut ET les octets `amsdos.rom`
+strictement identiques aux nôtres (md5 égaux). Son OS+BASIC par défaut
+(`rom/cpc6128.rom`) est en revanche une variante **anglaise**, différente
+de notre `OS6128-AZERTY.rom`/`BASIC1-1-AZERTY.ROM` — importante précaution
+avant de comparer quoi que ce soit.
+
+Méthode : Caprice32 accepte `--autocmd` et un mode headless
+(`SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy`, `-O system.limit_speed=0`
+pour tourner à vitesse débridée). Instrumentation ajoutée temporairement
+dans `src/z80.cpp` (boucle `z80_execute`, revert après usage — voir
+`extern t_z80regs z80`, `membank_read[4]` pour lire la mémoire telle que
+vue par le CPU) : impression sur stderr à des adresses précises.
+
+**Piège rencontré, à savoir pour une prochaine tentative :** utiliser
+notre propre ROM (via `-O rom.rom_path=...`) pour comparer aux mêmes
+adresses casse la frappe automatique — la table `--autocmd`
+caractère→matrice clavier de Caprice32 suppose vraisemblablement le ROM
+anglais par défaut, et produit une saisie incorrecte contre notre ROM
+AZERTY (rien ne se passe, `RUN"WEC` n'est jamais réellement exécuté). Les
+comparaisons ci-dessous utilisent donc le ROM anglais PAR DÉFAUT de
+Caprice32 (frappe fiable), ce qui rend invalide toute comparaison
+d'adresses **dans les ROM OS/BASIC** (elles diffèrent), mais reste
+parfaitement valide pour tout ce qui se passe **en RAM utilisateur**
+(code du jeu, chargé depuis le même fichier .dsk).
+
+Résultats :
+
+- **Le `LDIR` corrupteur de `&A73C` est identique au nôtre, à l'octet
+  près** : `HL=&69FE DE=&A800 BC=&00BD`, et les 189 octets sources
+  copiés se terminent identiquement par `...0C BD 72...` à l'offset
+  correspondant à l'équivalent de `&A88B` — la même corruption qu'on a
+  documentée plus haut se produit donc à l'identique chez Caprice32 ;
+- **Caprice32 n'en reste pas moins pas figé** : l'ouverture suivante de
+  `WEC.BI2` (`CAS_IN_OPEN fichier=WEC.BI2`) est franchie, et l'exécution
+  continue vers des adresses (`0x2FCD`, `0x2F5F`, `0x2ED1`, `0x2F5D`,
+  `0x3535`...) sans aucun rapport avec notre boucle figée
+  (`0x2BAE`/`0x2BAF`, `0x42BD`/`0x42EF`) — signe que le jeu progresse
+  réellement vers du nouveau code (cohérent avec la capture d'écran de
+  l'utilisateur, montrant l'écran d'options/crédits avec le texte
+  `BYTES`/`BLOBS`/`BITS`/`BUZZ`/`...HILL.`/`...B.`/`...ONAMI.` qu'on avait
+  déjà repéré dans les données de `WEC.BI2`).
+- Tentative de comparer précisément le dispatcher far-call lui-même
+  (adresses `0xB9C7`-`0xB9E9`, `0xCCA0`) : **invalidée après coup** — ces
+  adresses viennent de la désassemblage de notre ROM AZERTY, et avec le
+  ROM anglais de ce test, elles ne correspondent pas au même code (un
+  `HL` constant et sans rapport à chaque déclenchement l'a révélé). Ne
+  pas réutiliser ces adresses précises sans le même ROM.
+
+**Conclusion de cette comparaison : c'est très probablement un vrai bug
+d'émulation de notre côté**, pas un défaut de cette disquette ou du jeu.
+La même corruption mémoire, produite par le même code de jeu à partir des
+mêmes données, n'entraîne pas le même échec chez Caprice32.
+
 ## Ce qui reste à faire
 
-- **Priorité** : comprendre ce qui, sur un vrai 6128, protège
-  normalement `&A800` avant que le jeu n'y écrive à 4,80 s — puisque
-  cette copie a lieu bien avant l'ouverture de `WEC.BI2` (6,23 s) et
-  semble être une étape de post-traitement du chargement de `WEC.SCR`
-  qui existerait à l'identique sur la version cassette. Deux
-  possibilités à trancher : (a) le jeu abaisse HIMEM lui-même quelque
-  part avant le premier accès disque, et notre émulation d'un mécanisme
-  lié (MEMORY, négociation ROM au boot...) ne le prend pas en compte ;
-  (b) le poste de travail AMSDOS s'installe réellement à une autre
-  adresse sur le vrai matériel, et notre IY=&A700 est faux malgré sa
-  ressemblance avec la valeur documentée ;
+- **Priorité** : refaire la comparaison ci-dessus avec un ROM
+  **identique au nôtre** des deux côtés, pour localiser l'instruction
+  exacte où le dispatcher (`0xB9C7`-`0xB9E9`, notamment le test `CP $10`
+  /`JR NC,$B9F9` en `0xB9E6`-`0xB9E8`) diverge entre notre émulateur et
+  Caprice32/le vrai matériel. Contourner le piège de frappe : soit
+  patcher la table clavier de Caprice32 pour notre AZERTY, soit injecter
+  directement les octets `RUN"WEC` + retour dans le tampon de saisie
+  BASIC par écriture mémoire plutôt que par simulation de frappe, soit
+  utiliser `--inject` avec un petit programme qui saute directement au
+  point d'entrée voulu ;
+- pistes pour cette instruction exacte : le `CP $10` compare le numéro
+  de ROM à 0x10 — sur un vrai 6128/Caprice32, peut-être que la valeur
+  lue n'a pas le même sens qu'on le suppose (le test pourrait chercher
+  autre chose qu'un simple garde-fou « ROM valide »), ou le chemin
+  « sans ROM » (`&B9F9` et suite) fait réellement quelque chose
+  d'acceptable qu'on n'a pas tracé jusqu'au bout ;
 - l'entrée cassette n'étant jamais lue, la divergence n'est pas une
-  question de périphérique sondé : c'est bien le chemin d'exécution ;
-- comparer avec Caprice32 si un moyen fiable de trace est disponible
-  (tenté sans succès : ni capture X11 ni injection clavier ne
-  fonctionnent dans cet environnement).
+  question de périphérique sondé : c'est bien le chemin d'exécution.
 
 ## Harnais de diagnostic
 
@@ -469,3 +532,27 @@ Méthode réutilisable, éprouvée ici :
 Note : la console de l'émulateur réimprime son prompt `> ` sur stdout
 pendant les tests ; filtrer la sortie (`sed 's/> //g'`) et préfixer les
 lignes utiles (ici `WEC#`) rend les relevés lisibles.
+
+**Comparaison Caprice32**, méthode réutilisable (voir section dédiée
+plus haut pour les résultats) :
+
+```bash
+cd ~/Dev/caprice32
+# ROM identique à la nôtre (nécessaire pour comparer des adresses ROM,
+# mais casse la frappe --autocmd — voir le piège documenté plus haut) :
+mkdir -p /tmp/wec_roms
+cat .../bin/OS6128-AZERTY.rom .../bin/BASIC1-1-AZERTY.ROM > /tmp/wec_roms/cpc6128.rom
+cp rom/amsdos.rom rom/MF2.rom /tmp/wec_roms/
+make -j$(nproc)   # après avoir ajouté un hook de debug dans z80_execute() (src/z80.cpp)
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./cap32 \
+  -O system.model=2 -O system.limit_speed=0 \
+  [-O rom.rom_path=/tmp/wec_roms pour notre ROM, omis pour le ROM anglais par défaut] \
+  -a 'run"wec' chemin/vers/WEC_Le_Mans.dsk 2>&1 | grep WECDBG
+```
+
+Hook de debug : dans `z80_execute()` (`src/z80.cpp`, juste avant l'appel
+à `z80_execute_instruction()`), tester `_PCdword == <adresse>` et
+imprimer `z80.IY.d`/`z80.HL.d`/etc. via `fprintf(stderr, ...)` — accès
+mémoire tel que vu par le CPU via `membank_read[addr >> 14][addr &
+0x3FFF]` (`extern byte *membank_read[4];`). Toujours `git checkout
+src/z80.cpp` après usage : ce n'est pas notre dépôt.
