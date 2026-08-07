@@ -225,16 +225,89 @@ se terminer, et le `CAS IN OPEN` de `WEC.BI2` est rejoué avec succès vers
 **130 s**. Le jeu perd donc environ deux minutes de temps émulé, ce qui à
 l'écran est indiscernable d'un blocage.
 
+### Chaîne causale complète
+
+Le point de divergence exact entre l'appel qui marche et celui qui casse a
+été isolé en capturant les deux chemins d'exécution et en les comparant
+(en filtrant les adresses du gestionnaire d'interruption, qui tombe à des
+instants différents et produirait des divergences fictives). Il tient en
+deux instructions du dispatcher de far call, en RAM :
+
+```
+B9C9  POP HL          ; adresse de retour -> opérande du RST 3
+B9CA  LD E,(HL) / INC HL / LD D,(HL)   ; DE = &A88B (bloc "far address")
+B9CF  EX DE,HL
+B9D0  LD E,(HL) / INC HL / LD D,(HL)   ; DE = adresse cible
+B9D5  LD A,(HL)       ; A = NUMÉRO DE ROM
+B9D6  CP $FC / JR NC,$B998
+B9E6  CP $10
+B9E8  JR NC,$B9F9     ; A >= 0x10 -> voie "sans ROM"   <-- LA divergence
+```
+
+Ce que lit le dispatcher dans le bloc `&A88B` :
+
+| appel | bloc `&A88B` | cible | n° ROM | voie prise |
+|---|---|---|---|---|
+| `WEC.BI1` (2,21 s) | `30 CD 07` | `&CD30` | **7** (AMSDOS) | voie ROM → chargement OK |
+| `WEC.BI2` (6,23 s) | `0C BD 72` | `&BD0C` | **0x72** | voie « sans ROM » → cascade |
+
+Et le bloc est bel et bien écrasé entre les deux, par du **code du jeu** :
+
+```
+2,08 s  PC=CCC1/CCC4/CCCA (ROM AMSDOS) écrit 30 CD 07 en &A88B  <- installation correcte
+4,80 s  PC=A74B (code du jeu)         écrase &A880-&A8BC
+```
+
+Le coupable, en `&A73C` :
+
+```
+A742  LD DE,$A800     ; destination fixe
+A745  LD A,($A7FD)    ; longueur
+A74A  LD C,A          ; BC = 0x00BD = 189 octets
+A74B  LDIR            ; écrit &A800..&A8BC — donc &A88B-&A88D
+```
+
+Soit, bout à bout :
+
+1. le jeu charge `WEC.BI1` par `CAS IN OPEN` → AMSDOS le sert depuis le
+   disque, tout va bien ;
+2. juste après la fermeture du fichier, le jeu recopie 189 octets en
+   `&A800`, ce qui **écrase la zone de travail d'AMSDOS**, dont le bloc
+   far address de `&A88B` ;
+3. le `CAS IN OPEN` suivant (`WEC.BI2`) fait lire au dispatcher un numéro
+   de ROM devenu `0x72` au lieu de `7` ;
+4. `CP $10 / JR NC` l'envoie sur la voie « sans ROM » : l'appel n'atteint
+   jamais AMSDOS et ne revient jamais à l'appelant ;
+5. l'exécution retombe sur l'entrée suivante du jumpblock et dévale toute
+   la table jusqu'à `CAS WRITE`, seule entrée non détournée → écriture
+   cassette de deux minutes.
+
+Notre ROM AMSDOS est authentique (16 Ko, version 1.0.5, RSX `|CPM`
+`|DISC` `|DISC.IN` `|DISC.OUT` `|TAPE` `|TAPE.IN` `|TAPE.OUT` `|A` `|B`
+`|DRIVE` `|USER`), donc le placement de sa zone de travail est celui
+d'origine.
+
 ### La question à trancher
 
-Pourquoi le far call ne revient-il pas en `0xAE5C` ? Le **même** appel,
-avec les mêmes paramètres (`DE=C000`, `HL=AE76`), fonctionne pour
-`WEC.BI1` à 2,21 s et casse pour `WEC.BI2` à 6,23 s. Différence connue
-entre les deux fichiers : `WEC.BI1` tient en une extent (50 records),
-`WEC.BI2` en occupe **trois** (128 + 128 + 57 records). Piste la plus
-prometteuse : suivre le far call d'AMSDOS pas à pas sur les deux appels et
-comparer là où ils divergent (sélection de ROM, manipulation de pile,
-retour du FDC sur un fichier multi-extents).
+Le jeu écrit délibérément en `&A800` (adresse en dur), or cette zone
+appartient à AMSDOS une fois le système disque initialisé. Reste donc à
+comprendre pourquoi cela ne casse pas sur une vraie machine / sur
+Caprice32 :
+
+- **notre zone de travail AMSDOS est-elle à la bonne adresse ?** Elle est
+  allouée à l'initialisation des ROMs, sous HIMEM ; sa position dépend du
+  nombre de ROMs installées et de la mémoire que le firmware leur
+  accorde. Vérifier HIMEM et l'adresse de base réclamée par AMSDOS, et
+  comparer avec une vraie 6128 ;
+- **le code du jeu est-il chargé à la bonne adresse ?** Les deux
+  fragments concernés vivent en `&A700` (le copieur) et `&AE00` (le
+  chargeur). S'ils étaient implantés trop haut, la destination `&A800`
+  serait elle-même le symptôme et non la cause : contrôler les en-têtes
+  AMSDOS de `WEC.BIN` et `WEC.BI1` (adresse de chargement, longueur) et
+  les comparer à ce qui est réellement écrit en mémoire ;
+- piste subsidiaire : `TRACK0F.BIN` (piste 2, format particulier) suggère
+  une conversion bande → disque ; une telle conversion laisse volontiers
+  en place des écritures absolues héritées de la version cassette.
 
 ## Piège d'instrumentation à connaître
 
