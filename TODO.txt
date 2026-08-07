@@ -8,7 +8,7 @@ elles peuvent être factorisées pour avoir le drive en argument
 en outre, je ne vois pas leur utilité, car les programmes utiliseront plutôt leurs fonctions internes d'écriture disque.
 idem pour save_disk_from, je ne vois pas son utilité.
 
-Par contre ce qui peut être utile c'est de créer puis d'insérer un "blank disk" : genre
+Par contre ce qui peut être utile c'est de créer (donc, au path par défaut présent dans le fichier de config) puis d'insérer un "blank disk" : genre
 blank d.dsk
 et
 blank d.dsk b
