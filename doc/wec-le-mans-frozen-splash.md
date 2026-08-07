@@ -381,6 +381,23 @@ AMSDOS sur un 6128 avec BASIC 1.1 + AMSDOS seuls (HIMEM par défaut
 machine — ce n'est probablement pas une négociation HIMEM ratée de notre
 côté.
 
+**Confirmation : la négociation est bien dynamique, pas une constante
+figée.** Test décisif — ajouter une ROM supplémentaire au démarrage
+(mode diagnostic, ROM en slot 15) fait bouger `IY` :
+
+```
+sans ROM diagnostic : IY = &A700
+avec ROM diagnostic  : IY = &A6FC   (4 octets de moins, HIMEM baisse)
+```
+
+Le mécanisme réagit donc correctement au nombre de ROM installées, comme
+sur une vraie machine — ce n'est manifestement pas une valeur codée en
+dur côté émulateur. Avec la configuration réelle utilisée pour WEC (2
+ROM : BASIC 1.1 + AMSDOS, aucune autre), `&A700` reste la valeur la plus
+probable. Sans référence matérielle ou Caprice32 fonctionnelle dans cet
+environnement pour trancher au bit près, l'analyse statique/dynamique
+seule ne permet pas d'aller plus loin sur ce point précis.
+
 **Piste abandonnée : la piste 2 (physique) n'est jamais visitée par le
 lecteur sur 200 s émulées** (`{0, 1, 10}` seulement, jamais 2). Cette
 observation en elle-même n'est pas fausse, mais l'interprétation qui en
