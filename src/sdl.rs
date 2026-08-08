@@ -18,7 +18,7 @@ use sdl2::surface::Surface;
 /// dès `set_icon` : la surface elle-même n'a pas besoin de survivre à cet
 /// appel.
 fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
-    let img = image::open("assets/croco_red.png")
+    let img = image::open("assets/bytebox.png")
         .map_err(|e| e.to_string())?
         .into_rgba8();
     let (width, height) = img.dimensions();
