@@ -1,18 +1,11 @@
-# WEC Le Mans : reste figé sur l'écran de démarrage (ouvert)
+# WEC Le Mans : reste figé sur l'écran de démarrage (RÉSOLU)
 
-Note d'enquête, point de départ pour une reprise ultérieure. **Le symptôme
-n'est pas résolu, mais la cause racine est cernée avec précision** (voir
-« Cause racine trouvée » plus bas) : AMSDOS réinstalle son mécanisme de
-far-call avant CHAQUE ouverture de fichier sur une vraie machine/Caprice32
-(vérifié avec des ROM strictement identiques aux nôtres), ce qui répare
-une corruption mémoire que le code du jeu provoque lui-même entre deux
-chargements. **Chez nous, cette réinstallation ne se produit qu'une
-seule fois dans toute la session** (confirmé : `0xCCA0` exécuté 1 seule
-fois chez nous contre au moins 3 fois chez Caprice32 sur la même
-disquette) — la corruption n'est donc jamais réparée, d'où la cascade
-dans le jumpblock cassette et l'écriture cassette de deux minutes qui
-suit. Reste à trouver la condition exacte, dans le vrai code AMSDOS, qui
-décide de ce second réinstall et que notre émulation évalue autrement.
+**Résolu.** Cause racine : un vrai bug d'émulation CPU dans `../ZilogZ80`
+(crate séparée, pas ce dépôt), corrigé sur sa branche `cpc`. Voir tout en
+bas, section « Résolution : le bug CPU exact », pour le correctif. Le
+reste de ce document est conservé tel quel comme trace de l'enquête —
+plusieurs fausses pistes explorées et écartées en cours de route restent
+instructives pour de futures investigations similaires.
 
 ## Le symptôme
 
@@ -645,24 +638,59 @@ d'interruption VSYNC, ou vérification faite à un autre moment du cycle
 clavier/curseur) qui, sur le vrai matériel/Caprice32, revalide
 périodiquement les ROM d'arrière-plan installées. Reste à l'identifier.
 
-## Ce qui reste à faire
+## Résolution : le bug CPU exact
 
-- **Priorité** : identifier le troisième déclencheur de `0xCCA0` chez
-  Caprice32 (ni le jeu, ni la fin d'une opération AMSDOS réussie). Piste
-  la plus probable : un mécanisme périodique lié à l'interruption VSYNC
-  ou à la gestion du curseur/clavier du firmware. Tracer, chez
-  Caprice32 (ROM identiques, méthode d'injection clavier + `dumpScreen()`
-  déjà en place), TOUT ce qui touche `0xC1C8`-`0xC1D8` ou `0x0326` entre
-  6,12 s et 6,23 s (juste avant l'ouverture de `WEC.BI2`) pour remonter à
-  son propre appelant, puis chercher le même point chez nous — c'est très
-  probablement là que se situe le comportement manquant ;
-- pistes pour ce déclencheur : un gestionnaire d'interruption qui,
-  périodiquement (ou sur une condition liée au clavier/curseur),
-  revalide les ROM d'arrière-plan — vérifier notre émulation du
-  gestionnaire d'interruption `0x0038` et de ce qu'il appelle en aval sur
-  une fenêtre assez longue pour capturer une occurrence naturelle ;
-- l'entrée cassette n'étant jamais lue, la divergence n'est pas une
-  question de périphérique sondé : c'est bien le chemin d'exécution.
+Le troisième déclencheur de `0xCCA0` (celui qui manquait chez nous) s'est
+révélé être `0xAE3B CALL $6903`, dans le code du jeu lui-même — appelé une
+fois, entre la fermeture de `WEC.BI1` et l'ouverture de `WEC.BI2` (pas un
+mécanisme caché du firmware, contrairement à l'hypothèse du paragraphe
+précédent). En suivant ce chemin en détail (voir git blame de ce fichier
+pour le repérage complet), il mène à `0xBEA2 RST $18` : un far-call
+standard, avec son opérande (adresse-lointaine + numéro de ROM) codé en
+dur en RAM à `$BEA6` — vérifié correct (`06 C0 07`, cible `$C006`/ROM 7,
+soit AMSDOS) juste avant l'exécution du `RST`.
+
+Et pourtant, juste après, le registre `A` (censé contenir `0x07`, le
+numéro de ROM) valait `0x3C` — une valeur totalement différente, lue un
+octet plus loin que prévu. En remontant : `POP HL` (dans le dispatcher
+générique de far-call, `0xB9C9`) rendait `0xBEA2` — **l'adresse du `RST`
+lui-même**, pas `0xBEA3` (l'adresse de retour normale, juste après). Le
+`RST` n'avait pas incrémenté le PC avant d'empiler son adresse de retour.
+
+**La cause : un vrai bug dans `../ZilogZ80`** (le crate CPU, séparé de ce
+dépôt). Les huit gestionnaires `RST` de `cpu.rs` décidaient d'incrémenter
+le PC (ou pas) en testant `self.int.is_some()` — pensé pour le cas où un
+périphérique injecte lui-même l'opcode `RST` (mode d'interruption 0/1),
+auquel cas le PC ne doit effectivement pas avancer (l'opcode ne vient pas
+du flux normal). Mais `self.int.is_some()` signifie seulement *"une
+interruption est en attente"* — pas *"cet opcode précis vient d'une
+interruption"*. Une interruption VSYNC peut très bien rester en attente
+(masquée par un `DI`) pendant qu'un `RST` tout ce qu'il y a de plus réel,
+lu normalement en mémoire, s'exécute par ailleurs. C'est exactement ce
+qui se produisait ici : une interruption VSYNC s'était mise en attente
+juste avant `0xBEA2`, et le code tournait alors dans une section `DI`
+(confirmé : `has_pending_int()=true`, `iff1=false` pile à ce moment,
+contre `false`/`true` aux deux far calls précédents qui, eux,
+réussissaient). Le gestionnaire de `RST` voyait `self.int` à `Some` et
+sautait l'incrément du PC, croyant à tort avoir affaire à un opcode
+injecté.
+
+**Corrigé** (branche `cpc` de `../ZilogZ80`) : un nouveau champ
+`interrupt_acknowledge`, positionné une fois par `execute()` d'après la
+VRAIE origine de l'opcode courant (déjà calculée localement sous ce nom
+avant la correction, juste jamais rendue visible aux gestionnaires de
+`RST`), remplace les huit tests `self.int` par ce champ. Test de
+non-régression ajouté (`a_pending_but_masked_interrupt_does_not_confuse_a_real_rst`,
+`src/test.rs`) : vérifié qu'il échoue bien sans le correctif (adresse de
+retour fausse) et réussit avec.
+
+**Conséquence potentiellement large** : ce bug touche N'IMPORTE QUEL
+`RST` exécuté juste après qu'une interruption se soit mise en attente
+pendant une section protégée par `DI` — un schéma courant en
+programmation CPC (désactiver les interruptions le temps d'une section
+critique). D'autres jeux ou programmes touchés par des blocages
+similaires, difficiles à reproduire car dépendants du moment exact où
+tombe l'interruption, sont plausibles.
 
 ## Harnais de diagnostic
 
