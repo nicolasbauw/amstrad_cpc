@@ -4,6 +4,4 @@
 
 - config.toml : ajouter une section [rom] séparant les 3 fichiers ROM (système/OS, BASIC, AMSDOS) plutôt que les chemins actuels en dur dans machine.rs::load_roms. Certains fichiers ROM de 32 Ko (ex. ceux de Caprice32, rom/cpc6128.rom) empaquettent d'office système+BASIC en un seul fichier (2×16 Ko) — prévoir de gérer aussi ce cas (découpage en deux si un seul chemin de 32 Ko est fourni pour ces deux-là).
 
-- ajouter l'icône d'application (assets.croco.png):
-    1) visible dans la fenêtre de l'émulateur lancé, à la place du logo wayland
-    2) je pense qu'il faut créer un .desktop pour en faire une icône d'application kde, que l'on puisse voir par exemple lors du alt-tab ?
+- packaging (PKGBUILD AUR ?) : quand on s'y met, mettre à jour packaging/amstrad-cpc.desktop en conséquence (chemins actuellement en dur pour un usage personnel, Exec/Path pointent vers ~/Dev/amstrad_cpc).
