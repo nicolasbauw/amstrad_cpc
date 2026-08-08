@@ -6,11 +6,18 @@ vérification (voir les sections « Ce qui a été écarté » et « Le FDC est
 au cœur du chemin de données », cette dernière revenant sur une
 conclusion intermédiaire erronée qui écartait le FDC à tort).
 
-État actuel : l'octet qui provoque le crash est lu dans le **tampon de
-secteur d'AMSDOS**, alimenté en direct par le port de données du FDC, et
-recopié par un `LDIR` dans une fenêtre de 11 ms entre deux réécritures du
-tampon. La piste sérieuse est donc le **timing de notre émulation FDC**,
-pas le contenu du disque.
+**Le fait central : Caprice32 lance la course normalement avec la même
+disquette et les mêmes ROM, alors que nous redémarrons.** Les octets en
+mémoire sont pourtant identiques des deux côtés (`0x4375=0x1F`,
+`table[15]→0xEF06`, vérifiés). La divergence est donc dans l'exécution,
+et **le bug est bien chez nous** — ce n'est ni un défaut de la disquette,
+ni un problème de chargement, ni une question de timing FDC (les trois
+ont été testés et écartés, voir plus bas).
+
+Piste courante : le dispatcher ne saute sur la table que si un **drapeau
+« objet actif »** (`IX+1`) est non nul. L'hypothèse à tester est que cet
+objet de type 15 devrait rester inactif, et qu'il est actif à tort chez
+nous.
 
 ## Le symptôme
 
@@ -245,24 +252,21 @@ type  2 → 1F15    type 10 → 1F80    type 17 → 0A01 (garbage, identique)
 ```
 
 **Byte pour byte identique à notre propre dump**, y compris l'entrée 15
-invalide (`0xEF06`) et le motif de données non initialisées au-delà.
-Ceci **écarte définitivement l'hypothèse 1** (chargement/décompression
-incomplet côté notre émulateur) : la table est construite ainsi dès le
-chargement du disque, sur les deux émulateurs, avec la même ROM et la
-même image disque. Ce n'est donc ni un bug d'émulation CPU, ni un bug de
-notre gestion mémoire — la donnée sur la disquette elle-même ne contient
-qu'une table à 15 entrées valides.
+invalide (`0xEF06`) et le motif de données non initialisées au-delà. La
+table est donc construite ainsi dès le chargement du disque, sur les deux
+émulateurs, avec la même ROM et la même image disque : **ce n'est pas un
+problème de chargement/décompression de notre côté.**
 
-Reste l'hypothèse 2, mais reformulée : ce n'est plus « un index qui
-dérive à cause d'un écart de timing d'émulation », mais plus
-probablement **un bug réel du jeu ou de cette image disque précise**
-(la disquette porte des marques de groupe de crack — `BYTES/BLOBS/BITS/
-BUZZ` — ce qui rend plausible une table tronquée par erreur lors du
-craquage/repackaging à l'époque, un phénomène courant sur les images
-piratées de ce genre). Si tel est le cas, **le jeu planterait aussi sur
-un vrai CPU 6128 avec cette même disquette** — ce ne serait alors pas un
-bug d'émulation à corriger dans ce dépôt, mais une caractéristique (bug)
-de cette copie particulière de WEC Le Mans.
+> **ATTENTION — ne pas en tirer la conclusion inverse.** Une version
+> antérieure de cette note enchaînait ici sur « donc c'est un défaut de
+> cette image disque crackée, le jeu planterait aussi sur un vrai 6128 ».
+> **C'est faux : sous Caprice32, avec cette même disquette, la course se
+> lance normalement et ne plante pas** (constaté par l'utilisateur).
+>
+> Données identiques + comportements différents = **le problème est chez
+> nous, dans l'exécution**, pas dans la donnée. La piste « disquette
+> crackée défectueuse » est morte, et avec elle l'idée que ce bug ne
+> serait pas à corriger dans ce dépôt. Il l'est.
 
 ## Le FDC est au cœur du chemin de données (et le piège qui l'avait masqué)
 
@@ -320,35 +324,85 @@ t=12,7890 s   0xAB64 <- 0x00   (ecrase par le secteur suivant)
 ```
 
 Le `LDIR` lit ce tampon dans une fenêtre de **11 ms**, entre deux
-réécritures espacées d'environ 23 ms. Décaler le timing d'une fraction de
-trame suffit à faire recopier un octet différent. Ce n'est donc pas une
-donnée statique gravée sur le disque : **c'est un tampon volatile, et
-l'octet retenu dépend de la position relative de la lecture FDC et de la
-copie — exactement le genre de course que des timings d'émulation
-différents résolvent différemment.**
+réécritures espacées d'environ 23 ms.
+
+**Attention : il est tentant d'en conclure à une course dont l'issue
+dépendrait du timing. C'est faux, et ç'a été vérifié directement.** En
+rejouant la scène avec la frappe décalée de 0, 3, 5, 8, 11, 17, 23 et
+40 ms (donc bien au-delà de la période de réécriture de 23 ms), le
+résultat est *rigoureusement identique à chaque fois* : type d'objet
+`0x0F` en `0x8662`, et redémarrage à +1,18 s.
+
+```
+offset  0 ms : types vus en 0x8662 = [00, 0F]   reboot = OUI a +1.184s
+offset 11 ms : types vus en 0x8662 = [00, 0F]   reboot = OUI a +1.173s
+offset 23 ms : types vus en 0x8662 = [00, 0F]   reboot = OUI a +1.181s
+offset 40 ms : types vus en 0x8662 = [00, 0F]   reboot = OUI a +1.200s
+```
+
+La raison est simple une fois vue : le remplissage du tampon et le `LDIR`
+ne sont pas deux processus indépendants qui courent l'un contre l'autre,
+ce sont **deux étapes successives d'un même appel de lecture AMSDOS**
+(remplir le tampon de secteur, puis en extraire l'enregistrement). La
+« fenêtre de 11 ms » n'est que l'intervalle normal entre ces deux étapes.
+Décaler la frappe décale les deux ensemble. Le timing du FDC n'est donc
+**pas** la variable recherchée — le chemin de données passe bien par le
+FDC, mais son résultat est déterministe.
 
 Ceci ne contredit pas la comparaison Caprice32 de la section précédente :
 la table `0x43DC` y était bien identique, mais elle a été relevée au
 niveau du **menu**, avant cette phase de chargement continu. Les deux
 observations portent sur des instants différents.
 
-## Prochaine étape recommandée
+## Données confirmées identiques chez Caprice32 (2e relevé)
 
-La piste est maintenant le **timing de notre FDC** (cadence de livraison
-des octets, délais entre secteurs, moment où l'interruption de fin de
-secteur tombe), pas le contenu du disque. Pistes concrètes :
+Second passage sous Caprice32 (même ROM, même disquette), relevé au
+niveau du menu :
 
-1. instrumenter les deux émulateurs sur la même fenêtre (t≈12,7 s) pour
-   comparer *le contenu du tampon `0xAB50` au moment précis du `LDIR`* —
-   c'est la valeur qui décide de tout, et c'est elle qu'il faut voir
-   diverger ;
-2. comparer la cadence de notre FDC à celle de Caprice32 : nombre de
-   cycles Z80 entre deux octets livrés, entre deux secteurs, et position
-   des interruptions vis-à-vis de ces transferts ;
-3. vérifier si notre `LDIR` (non interruptible d'un bloc chez nous ? il
-   l'est — voir `repeating_instructions_are_interruptible` dans
-   `ZilogZ80`) et la boucle d'attente `JP P` du FDC s'entrelacent comme
-   sur le matériel réel.
+```
+0x4375 = 1F          (octet source du type d'objet — IDENTIQUE au notre)
+table[15] -> EF06    (entree de dispatch invalide — IDENTIQUE)
+```
+
+Les données chargées depuis le disque sont donc **au même endroit avec
+la même valeur** dans les deux émulateurs. Combiné au caractère
+déterministe démontré plus haut, cela veut dire qu'un émulateur correct
+exécutant ce code arrivera au même `JP (HL)` vers `0xEF06`.
+
+**Et pourtant Caprice32 ne plante pas :** avec cette même disquette, la
+course s'y lance normalement (constaté par l'utilisateur en usage
+interactif). Mes trois tentatives d'automatiser la touche « 2 » sous
+Caprice32 ont échoué (le menu reste affiché) alors que la même méthode
+passe pour `run"wec` — mais c'est une limite de mon harnais, pas du jeu.
+**Ne pas repartir sur cette automatisation sans idée neuve** : trois
+essais y sont déjà passés (pressions longues en trames, pressions
+courtes en nombre d'instructions, avec et sans SHIFT).
+
+**C'est le fait central de l'enquête :** mêmes ROM, même disquette,
+mêmes octets en mémoire (`0x4375=0x1F`, `table[15]→0xEF06`) — et
+pourtant Caprice32 joue la course quand nous redémarrons. La divergence
+est donc dans **l'exécution**, et le bug est chez nous.
+
+## Piste suivante : le drapeau « objet actif », pas le type
+
+Le dispatcher ne saute *pas* systématiquement sur le type d'objet. Il
+teste d'abord un drapeau d'activité :
+
+```
+1ED4  LD A,(IX+1)     ; drapeau "objet actif"
+1EDD  AND A
+1EDE  LD A,(HL)       ; type de l'objet
+1EDF  JP Z,$1EE6      ; drapeau nul -> on saute le dispatch
+```
+
+Autrement dit, un objet de type 15 **inactif** ne provoque aucun saut, et
+l'entrée invalide `0xEF06` n'est jamais lue. L'hypothèse à tester devient
+donc : sur matériel réel, cet objet existe bien avec le type 15 mais
+reste **inactif** ; chez nous, quelque chose le rend actif à tort.
+
+Concrètement : tracer la valeur de `(IX+1)` pour cet objet (quel `IX`,
+qui écrit ce drapeau, et quand) plutôt que de continuer à s'acharner sur
+le type lui-même, qui est confirmé identique partout.
 
 Note : l'audit demandé sur `LDIR` lui-même n'a rien donné — les
 drapeaux documentés (H, N, P/V) sont correctement posés par les
