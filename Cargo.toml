@@ -1,5 +1,5 @@
 [package]
-name = "amstrad_cpc"
+name = "bytebox"
 version = "0.1.0"
 edition = "2024"
 

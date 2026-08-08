@@ -150,12 +150,18 @@ pub fn run(
         .map_err(|e| e.to_string())?;
 
     let mut debug_visible = false;
-    let debug_window = video_subsystem
+    let mut debug_window = video_subsystem
         .window("Amstrad CPC 6128 - Machine Status", 800, 1000)
         .position_centered()
         .hidden()
         .resizable()
         .build()?;
+    // Même icône que la fenêtre principale : sans cet appel, le gestionnaire
+    // de fenêtres retombe sur son icône par défaut (le logo Wayland sous
+    // KDE/Wayland) pour cette fenêtre-ci uniquement.
+    if let Err(e) = set_window_icon(&mut debug_window) {
+        println!("Can't set debug window icon: {e}");
+    }
     let mut debug_canvas = debug_window.into_canvas().build()?;
     let debug_window_id = debug_canvas.window().id();
 
