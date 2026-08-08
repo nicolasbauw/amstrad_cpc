@@ -509,6 +509,14 @@ mêmes données, n'entraîne pas le même échec chez Caprice32.
 
 ## Cause racine trouvée : AMSDOS ne réinstalle son far-call qu'une fois chez nous
 
+**Correction ultérieure (voir « Chaîne d'appel jusqu'à l'unique
+installation » plus bas) : le mécanisme précis n'est pas « avant chaque
+ouverture »** — le jeu ne déclenche le réinstall qu'une fois, et AMSDOS
+ne se réinstalle pas non plus tout seul en fin d'opération réussie. Le
+fait établi ici (Caprice32 rappelle `0xCCA0` plusieurs fois, nous une
+seule) reste vrai et est la cause du symptôme ; seule l'explication
+initiale (« avant chaque ouverture ») était une simplification erronée.
+
 En contournant le piège clavier (voir plus bas : injection directe des
 bits de la matrice clavier plutôt que passage par la table `--autocmd`
 de Caprice32, avec NOTRE ROM AZERTY cette fois — donc adresses
@@ -567,52 +575,92 @@ prochaine fois, avec un traçage pas à pas entre la fermeture de
 instruction par instruction les DEUX émulateurs (désormais possible avec
 ROM identiques et frappe fiable — voir méthode ci-dessous).
 
-## Chaîne d'appel jusqu'à l'unique installation
+## Chaîne d'appel jusqu'à l'unique installation (corrigé)
 
-Remontée de pile complète au moment de la seule et unique exécution de
-`0xCCA0` chez nous (2,08 s), pour savoir qui déclenche l'installation et
-d'où repartir la prochaine fois :
+**Une première tentative de remontée de pile (repère `0xB99F CALL $B9B0`)
+s'est révélée être une fausse piste** : `0xB99F`/`0xB9B0` est en réalité
+une routine utilitaire générique (écriture d'un octet sur le port
+actuellement sélectionné, réutilisée à des dizaines d'endroits sans
+rapport), et l'adresse de retour trouvée sur la pile à ce moment précis
+était une coïncidence d'un appel antérieur, pas le vrai chemin. Piège
+classique : désassembler à un instant différent de celui où le code
+s'exécute réellement peut tomber sur une zone où le banking ROM a changé
+entre-temps (déjà rencontré avec `0x0330`, voir plus bas) — la seule
+façon fiable est de tracer les branchements réellement empruntés
+(`Tracer` en mode `Branches`), pas de désassembler « à froid » une
+adresse dont on suppose le rôle.
+
+**Le vrai chemin, confirmé par traçage réel des branchements :**
 
 ```
-0xB99F  CALL $B9B0   -> retour 0xB9A2
-0x0328  CALL $0330   -> retour 0x032B
-0x0346  CALL $C006   -> retour 0x0349
-0x003F  ...          -> retour 0x0040
-0xA6FE  ...          -> retour 0xA6FF
-                         (puis 0xC1C8-0xC1D8, qui appelle 0xCCA0 en 0xC1D3)
+0xAE0F  CALL $BCCB     ; DANS LE CODE DU JEU (juste après son point d'entrée 0xAE00)
+0xBCCB  RST $08        ; vecteur firmware standard
+0x0008  JP $B98A       ; désigne la routine de "back-scan" des ROM
+  ...
+0x0326  LD C,$0F       ; boucle sur les 16 emplacements ROM, de 15 à 0
+0x0328  CALL $0330     ; pour chaque emplacement...
+0x032B  DEC C
+0x032C  JP P,$0328
+0x032F  RET
+
+0x0330  LD A,($B8D9)   ; deja verifie pour cet emplacement ? saute si oui
+0x0333  CP C
+0x0334  RET Z
+0x0339  CALL $BA79     ; un ROM est-il present a cet emplacement ?
+0x033C  LD A,($C000)   ; octet 0 de son en-tete = type de ROM
+0x033F  AND $03
+0x0341  DEC A
+0x0342  JR NZ,$0366    ; type != 1 ("arriere-plan") : on saute
+0x0346  CALL $C006     ; sinon : appelle l'entree 0 du jumpblock de CE ROM
+                        ; (pour AMSDOS/ROM 7 : $C006 = JP $C1BC, qui mene
+                        ;  a 0xC1D0 puis a l'installation en 0xCCA0)
 ```
 
-Point notable : `0xB99F CALL $B9B0` est exactement l'adresse déjà croisée
-tout au début de cette enquête, dans la boucle d'attente qui scrute le
-clavier (section « Ce qui est confirmé sur la boucle figée » de l'époque,
-avant qu'on comprenne qu'il ne s'agissait pas d'une vraie attente
-clavier). `0xB9B0` ressemble donc à une routine utilitaire générique
-(scrutation clavier ou temporisation), pas spécifique aux disquettes, où
-la logique de réarmement d'AMSDOS semble greffée — cohérent avec le fait
-que Caprice32 la rappelle avant CHAQUE ouverture, pas seulement au
-premier accès disque.
+**`0x0326` est donc le balayage standard du firmware qui initialise
+toutes les ROM d'extension présentes** (celles dont l'octet 0 de l'en-tête
+vaut `1`, « ROM d'arrière-plan »), pas un mécanisme spécifique aux
+disquettes. Le jeu le déclenche explicitement, une seule fois, tout au
+début de `WEC.BIN` (`0xAE00`), avant même son premier `CAS IN OPEN`.
 
-Vérifié précisément : dans notre émulateur, `0xC1D3` (et donc `0xCCA0`)
-ne s'exécute qu'**une seule fois** sur toute la session (2,08 s),
-confirmé sur la fenêtre complète 0-40 s — jamais rappelé, y compris bien
-après l'ouverture de `WEC.BI2` (6,23 s).
+**Vérifications qui referment (en partie) la piste « réinstallation avant
+chaque ouverture » :**
+
+- `0xAE0F` (le déclencheur côté jeu) ne s'exécute **qu'une seule fois**
+  sur toute la session (confirmé) — le code du jeu ne redemande jamais ce
+  balayage lui-même, ni avant `WEC.BI1` ni avant `WEC.BI2` ;
+- sur la fenêtre complète du traitement **réussi** de `WEC.BI1`
+  (ouverture, lecture, fermeture — 2,2 s à 4,8 s), `0xCCA0` et la routine
+  qui l'appelle (`0xC1C8`-`0xC1D8`) ne sont **jamais revisités** : AMSDOS
+  ne se « réinstalle » pas lui-même à la fin d'une opération réussie, du
+  moins pas par ce chemin.
+
+**Ce qui reste énigmatique :** chez Caprice32 (même ROM), `0xCCA0` est
+pourtant rappelé deux fois de plus après le premier balayage — une fois
+avant l'ouverture de `WEC.BI1`, une fois avant celle de `WEC.BI2` (voir
+plus haut, section comparaison). Puisque ni le jeu (`0xAE0F`, une seule
+fois) ni AMSDOS lui-même en fin d'opération réussie (vérifié ci-dessus)
+n'expliquent ces rappels, il doit exister un troisième déclencheur — le
+plus probable étant une routine périodique du firmware (gestionnaire
+d'interruption VSYNC, ou vérification faite à un autre moment du cycle
+clavier/curseur) qui, sur le vrai matériel/Caprice32, revalide
+périodiquement les ROM d'arrière-plan installées. Reste à l'identifier.
 
 ## Ce qui reste à faire
 
-- **Priorité** : désassembler `0xB9B0` (et son appelant `0x0330`,
-  probablement le point d'entrée standard `KL FAR CALL`/RST correspondant
-  à `0x0030`) pour trouver la condition qui décide d'appeler la chaîne
-  menant à `0xCCA0`. Comparer avec la même zone chez Caprice32 (ROM
-  identiques désormais possibles, voir méthode ci-dessous : injection
-  clavier directe + `dumpScreen()`) pour voir quelle branche est prise
-  chez eux et pas chez nous ;
-- pistes pour cette condition : un drapeau ou compteur d'état (variable
-  système en RAM, ou registre du CPU) que ce code consulte pour savoir
-  s'il doit relancer l'installation — le comportement s'expliquerait par
-  une valeur initiale différente, ou par un effet de bord d'une
-  instruction Z80 mal émulée (registre `R`, drapeaux d'une instruction
-  spécifique...) qui fait pencher ce test dans le mauvais sens chez
-  nous ;
+- **Priorité** : identifier le troisième déclencheur de `0xCCA0` chez
+  Caprice32 (ni le jeu, ni la fin d'une opération AMSDOS réussie). Piste
+  la plus probable : un mécanisme périodique lié à l'interruption VSYNC
+  ou à la gestion du curseur/clavier du firmware. Tracer, chez
+  Caprice32 (ROM identiques, méthode d'injection clavier + `dumpScreen()`
+  déjà en place), TOUT ce qui touche `0xC1C8`-`0xC1D8` ou `0x0326` entre
+  6,12 s et 6,23 s (juste avant l'ouverture de `WEC.BI2`) pour remonter à
+  son propre appelant, puis chercher le même point chez nous — c'est très
+  probablement là que se situe le comportement manquant ;
+- pistes pour ce déclencheur : un gestionnaire d'interruption qui,
+  périodiquement (ou sur une condition liée au clavier/curseur),
+  revalide les ROM d'arrière-plan — vérifier notre émulation du
+  gestionnaire d'interruption `0x0038` et de ce qu'il appelle en aval sur
+  une fenêtre assez longue pour capturer une occurrence naturelle ;
 - l'entrée cassette n'étant jamais lue, la divergence n'est pas une
   question de périphérique sondé : c'est bien le chemin d'exécution.
 
