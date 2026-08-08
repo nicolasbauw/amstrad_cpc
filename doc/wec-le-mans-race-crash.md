@@ -1,14 +1,16 @@
-# WEC Le Mans (2e bug) : redémarrage ~1 s après le lancement de la course (cause probable identifiée, hors de notre émulateur)
+# WEC Le Mans (2e bug) : redémarrage ~1 s après le lancement de la course (ouvert — piste : timing FDC)
 
-Note d'enquête. **Le symptôme n'est plus reproduit dans notre
-émulateur** au sens où l'on comprend maintenant pourquoi il survient :
-tout indique un défaut de la donnée présente sur cette image disque
-elle-même (table de dispatch tronquée), reproduit à l'identique sur
-Caprice32 avec la même disquette — voir la section « Comparaison
-Caprice32 » plus bas. Contrairement au premier bug WEC Le Mans (écran de
-démarrage figé, voir `doc/wec-le-mans-frozen-splash.md`, résolu par un
-correctif dans `ZilogZ80`), celui-ci ne semble donc pas appeler de
-correctif dans ce dépôt.
+Note d'enquête. **Le symptôme n'est pas résolu.** L'enquête a suivi
+plusieurs pistes successives, dont deux ont été abandonnées après
+vérification (voir les sections « Ce qui a été écarté » et surtout
+« RETRACTATION » plus bas — une conclusion antérieure disant que le FDC
+était hors de cause était fausse).
+
+État actuel : l'octet qui provoque le crash est lu dans le **tampon de
+secteur d'AMSDOS**, alimenté en direct par le port de données du FDC, et
+recopié par un `LDIR` dans une fenêtre de 11 ms entre deux réécritures du
+tampon. La piste sérieuse est donc le **timing de notre émulation FDC**,
+pas le contenu du disque.
 
 ## Le symptôme
 
@@ -262,16 +264,96 @@ un vrai CPU 6128 avec cette même disquette** — ce ne serait alors pas un
 bug d'émulation à corriger dans ce dépôt, mais une caractéristique (bug)
 de cette copie particulière de WEC Le Mans.
 
+## RETRACTATION : le FDC est au contraire au cœur du chemin de données
+
+**Une version précédente de cette note concluait que le FDC était hors de
+cause. C'était faux, et l'erreur mérite d'être expliquée** — elle vient
+d'un raisonnement qui s'est arrêté une étape trop tôt.
+
+Le raisonnement erroné était : l'octet fautif est écrit en `0x4374` par
+un `LDIR` en `0xC8CF` (source `0xAB50`, destination `0x4360`, 96 octets)
+à t=12,78 s ; or le dernier `CAS_IN_OPEN` (`WEC.BI2`) date de t=10,03 s ;
+donc « aucune lecture disque entre les deux », donc « copie RAM→RAM
+ordinaire », donc FDC hors de cause. **L'étape manquante : d'où vient le
+contenu de `0xAB50` ?**
+
+En traçant les écritures dans `0xAB50`-`0xAB7F`, la réponse est sans
+ambiguïté : **3707 écritures sur la session**, toutes venant de
+`PC=0xC6E2`, avec la ROM haute n° 7 (AMSDOS) active. Le désassemblage
+autour de ce point ne laisse aucun doute — c'est la boucle interne de
+lecture de secteur du FDC :
+
+```
+C6DE  LD B,$0C
+C6E0  IN A,(C)      ; lit le registre de donnees du FDC
+C6E2  LD (HL),A     ; <-- ecrit l'octet lu dans le tampon (0xAB50+)
+C6E3  DEC C
+C6E4  INC HL
+C6E5  IN A,(C)      ; relit le statut
+C6E7  JP P,$C6E5    ; attend que le FDC soit pret
+C6EA  AND $20
+C6EC  JR NZ,$C6DF   ; octet suivant
+C6EE  RET
+```
+
+`0xAB50` **est le tampon de secteur d'AMSDOS**, alimenté directement par
+le port de données du FDC. Et le `LDIR` de `0xC8CF` (lui aussi en ROM
+AMSDOS) n'est pas une copie RAM→RAM arbitraire : c'est l'étape qui livre
+un enregistrement du fichier depuis ce tampon vers la mémoire du
+programme. Les lectures disque **continuent bien au-delà de t=10,03 s** :
+un `CAS_IN_OPEN` ouvre le fichier, mais les enregistrements sont ensuite
+tirés secteur par secteur pendant plusieurs secondes. Compter les
+`CAS_IN_OPEN` ne dit rien de l'activité disque réelle.
+
+Plus frappant encore, la chronologie fine autour de l'octet fautif
+(`0xAB64`, celui qui devient le type d'objet 15 après `SUB $10` /
+`AND $0F`) :
+
+```
+t=12,7659 s   0xAB64 <- 0x10   (ecrit par le FDC, C6E2)
+t=12,7768 s   LDIR lit le tampon  <-- fenetre de 11 ms
+t=12,7890 s   0xAB64 <- 0x00   (ecrase par le secteur suivant)
+```
+
+Le `LDIR` lit ce tampon dans une fenêtre de **11 ms**, entre deux
+réécritures espacées d'environ 23 ms. Décaler le timing d'une fraction de
+trame suffit à faire recopier un octet différent. Ce n'est donc pas une
+donnée statique gravée sur le disque : **c'est un tampon volatile, et
+l'octet retenu dépend de la position relative de la lecture FDC et de la
+copie — exactement le genre de course que des timings d'émulation
+différents résolvent différemment.**
+
+Ceci ne contredit pas la comparaison Caprice32 de la section précédente :
+la table `0x43DC` y était bien identique, mais elle a été relevée au
+niveau du **menu**, avant cette phase de chargement continu. Les deux
+observations portent sur des instants différents.
+
 ## Prochaine étape recommandée
 
-Confirmer si le crash est reproductible sur un CPC réel ou sur une autre
-copie/version de la disquette (une image "originale" non crackée,
-si disponible, ou un journal de bug connu pour cette version). Si ce
-n'est pas possible à vérifier facilement, considérer cette piste comme
-la conclusion la plus probable de l'enquête : **la table de dispatch
-`0x43DC` de cette image disque est authentiquement incomplète, sur les
-deux émulateurs testés** — ce n'est vraisemblablement pas un bug de
-`amstrad_cpc` à corriger, mais un défaut préexistant du support d'origine.
+La piste est maintenant le **timing de notre FDC** (cadence de livraison
+des octets, délais entre secteurs, moment où l'interruption de fin de
+secteur tombe), pas le contenu du disque. Pistes concrètes :
+
+1. instrumenter les deux émulateurs sur la même fenêtre (t≈12,7 s) pour
+   comparer *le contenu du tampon `0xAB50` au moment précis du `LDIR`* —
+   c'est la valeur qui décide de tout, et c'est elle qu'il faut voir
+   diverger ;
+2. comparer la cadence de notre FDC à celle de Caprice32 : nombre de
+   cycles Z80 entre deux octets livrés, entre deux secteurs, et position
+   des interruptions vis-à-vis de ces transferts ;
+3. vérifier si notre `LDIR` (non interruptible d'un bloc chez nous ? il
+   l'est — voir `repeating_instructions_are_interruptible` dans
+   `ZilogZ80`) et la boucle d'attente `JP P` du FDC s'entrelacent comme
+   sur le matériel réel.
+
+Note : l'audit demandé sur `LDIR` lui-même n'a rien donné — les
+drapeaux documentés (H, N, P/V) sont correctement posés par les
+gestionnaires `0xEDB0`/`0xEDA8`/`0xEDB8` (et non dans `ldi`/`ldd`, ce qui
+peut tromper à la lecture), l'interruptibilité, les cycles et le cas
+`BC=0` (64 Ko) sont couverts par des tests. Seuls les deux bits **non
+documentés** (3 et 5, dérivés de `A + octet transféré`) ne sont pas
+posés — écart réel mais sans effet plausible ici, aucun code ne les
+observant hors `PUSH AF`.
 
 ## Harnais de diagnostic
 
