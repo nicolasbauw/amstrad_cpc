@@ -148,40 +148,90 @@ fait consulter un index d'objet/entité hors de portée dans cette table
 de dispatch, et selon la table concernée, l'atterrissage est plus ou
 moins destructeur.
 
-## Hypothèses à trancher
+## Origine de l'index confirmée : ce n'est pas `A'` mais un octet lu en RAM dynamique
 
-1. **Table de données incomplète ou mal chargée** — cohérent avec le
-   thème général de cette disquette (le premier bug WEC portait déjà sur
-   des données de course mal repositionnées en mémoire après
-   décompression). La table à `0x43DC` (et une sœur à `0x43F8` vue plus
-   haut dans le désassemblage, utilisée par un dispatcher similaire) est
-   peut-être sensée être entièrement peuplée après le chargement de
-   `WEC.BI2`/`TRACK0F.BIN`, et l'entrée 60 (ou une entrée voisine) ne
-   l'est pas ;
-2. **Index d'objet/entité qui dérive au-delà des bornes prévues** — le
-   registre alternatif `A'` d'où vient l'index (avant les deux `RLCA`)
-   est whatever une AUTRE partie du jeu y a placé ; remonter à cet
-   endroit pour voir s'il s'agit d'un compteur d'objets actifs qui monte
-   trop haut (un bug de logique de jeu qu'un vrai 6128 n'atteindrait
-   simplement jamais, pour une raison de timing ou d'ordre d'exécution
-   qui nous échappe encore) ;
-3. Vérifier si Caprice32 (même ROM, disquette identique) passe par la
-   MÊME table avec le MÊME index à ce moment précis, et ce qu'il y trouve
-   — la comparaison directe déjà rodée pour le premier bug est le plus
-   sûr moyen de trancher entre « donnée manquante chez nous » et « bug de
-   logique de jeu qui ne se déclenche jamais sur le vrai timing ».
+En remontant depuis `0x1EE9`, l'index utilisé n'est PAS directement le
+registre alternatif `A'` (celui-ci n'est qu'un relais temporaire entre
+deux appels successifs à ce dispatcher, sans rapport avec la donnée
+elle-même). La vraie source, tracée instruction par instruction :
+
+```
+1ED0  LD A,L / ADD A,$20 / LD L,A   ; avance HL de $20 (page) si besoin
+1ED4  LD A,(IX+1)                    ; drapeau "objet actif" ?
+1EDD  AND A                          ; teste ce drapeau (Z)
+1EDE  LD A,(HL)                      ; charge le TYPE d'objet depuis la RAM
+1EDF  JP Z,$1EE6                     ; si drapeau inactif, saute le dispatch
+1EE2  CP $05 / JR NZ,$1F05           ; (branche secondaire, type 5 à part)
+1EE6  OR A / JR Z,$1F05              ; type 0 = rien à faire
+1EE9  EX AF,AF' ... (dispatch avec le type comme index)
+```
+
+`HL` parcourt une table d'état d'objets dynamique en RAM, à
+`0x86xx`-`0x87xx` (pas la table de saut statique `0x43DC` elle-même) :
+chaque emplacement contient le **type courant de l'objet** occupant ce
+slot. C'est cet octet, lu directement depuis la RAM de jeu, qui sert
+d'index (après ×4) dans la table de dispatch `0x43DC`.
+
+Avec un point d'arrêt en écriture sur `0x8600`-`0x867F` : toute la zone
+est mise à zéro au moment où l'écran de course s'initialise (`PC=0x04CA`,
+juste après le lancement), **puis, presque immédiatement après**, le
+code en `0x2661` écrit `0x0F` (15) dans l'emplacement `0x8662` — un seul
+octet, une seule fois, très tôt dans l'initialisation de la course (bien
+avant que quoi que ce soit dépende du timing de la partie). D'autres
+emplacements reçoivent ensuite `0x04` à intervalles réguliers (objets
+de type 4 créés périodiquement, ex. voitures adverses). **La création de
+l'objet de type 15 est donc déterministe et systématique au lancement de
+la course, pas un effet de bord du timing.**
+
+## La table de dispatch confirmée incomplète
+
+Dump complet de la table à `0x43DC` (32 entrées de 4 octets, `E D A H`
+→ cible `HA`) :
+
+```
+type  0 → 0020    type  8 → 2546    type 16 → 0000 (garbage)
+type  1 → 252D    type  9 → 1F80    type 17 → 0A01 (garbage)
+type  2 → 1F15    type 10 → 1F80    type 18 → 0000 (garbage)
+type  3 → 1F15    type 11 → 2240    type 19 → 0110 (garbage)
+type  4 → 2219    type 12 → 0000    type 20 → 00C6 (garbage)
+type  5 → 2302    type 13 → 2240    ...
+type  6 → 2219    type 14 → 23EF
+type  7 → 241F    type 15 → EF06  ← INVALIDE
+```
+
+Les cibles des types 0 à 14 (sauf le 12, à `0x0000`, sans doute un type
+jamais instancié) sont toutes des adresses plausibles dans la zone de
+code du jeu (`0x1F00`-`0x2600`). À partir du type 15, les valeurs
+deviennent incohérentes (`EF06`, puis des motifs qui ressemblent à des
+octets de code voisins mal alignés plutôt qu'à de vraies adresses cibles)
+— la table **s'arrête réellement après 15 entrées valides (types 0-14)**.
+Ce n'est pas une entrée isolée corrompue : c'est la table qui est courte
+d'au moins une entrée face à un type d'objet (15) que le jeu instancie
+pourtant systématiquement et immédiatement au lancement de la course.
+
+## Conclusion (provisoire, à confirmer face à Caprice32)
+
+Le tableau ci-dessus penche fortement pour l'hypothèse 1 (donnée
+manquante) plutôt que 2 (index qui dérive) : la création de l'objet de
+type 15 est déterministe, immédiate, et ne dépend d'aucun état de jeu
+variable observé jusqu'ici. Reste à vérifier si Caprice32, avec la même
+disquette, a bien une entrée 15 valide dans sa copie de la table (ce qui
+confirmerait un problème de chargement/décompression chez nous,
+peut-être un ricochet du même mécanisme que le premier bug WEC) ou si
+lui aussi ne l'a pas mais ne la sollicite jamais à cause d'un détail de
+timing qui nous échappe encore (ce qui semble moins probable vu le
+caractère déterministe de la création de l'objet).
 
 ## Prochaine étape recommandée
 
-Remonter à la source du registre `A'` juste avant `0x1EE9` (qui donne
-l'index d'objet) : quel code le positionne, et sur quelle base ? Puis
-comparer avec Caprice32 (ROM identiques, injection clavier directe dans
-`keyboard_matrix`, voir `doc/wec-le-mans-frozen-splash.md` section
-« Harnais de diagnostic ») sur la table à `0x43DC` au même instant, pour
-voir si l'entrée 60 y est valide (donnée manquante chez nous) ou si
-l'index lui-même n'est simplement jamais calculé à 60 sur le vrai
-timing (bug de logique de jeu exposé par un écart de timing plus
-général, pas un chargement incomplet).
+Comparer directement avec Caprice32 (ROM identiques, injection clavier
+directe dans `keyboard_matrix`, voir `doc/wec-le-mans-frozen-splash.md`
+section « Harnais de diagnostic ») : dumper la même table à `0x43DC` au
+même instant (juste après le lancement de la course) pour voir si
+l'entrée 15 y est valide. Si oui, comparer ensuite la mémoire chargée
+depuis le disque (avant toute exécution du code de jeu) entre les deux
+émulateurs pour localiser où la divergence apparaît — probablement dans
+la zone source dont `0x43DC` est recopiée/décompressée.
 
 ## Harnais de diagnostic
 
