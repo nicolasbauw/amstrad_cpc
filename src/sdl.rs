@@ -161,9 +161,9 @@ pub fn run(
 
     // Titre dynamique de la fenêtre en fonction du mode configuré
     let window_title = if machine.diagnostic_mode {
-        "Amstrad CPC 6128 - Diag ROM"
+        "ByteBox - Amstrad CPC 6128 - BASIC 1.1 AZERTY + Diag ROM"
     } else {
-        "Amstrad CPC 6128 - BASIC 1.1 AZERTY"
+        "ByteBox - Amstrad CPC 6128 - BASIC 1.1 AZERTY"
     };
 
     let mut window = video_subsystem
