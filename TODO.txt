@@ -10,4 +10,4 @@
 
 - question de la license ? peut-on utiliser MIT sur un projet vibe-codé ?
 
-- j'aimerais évaluer à nouveau le mieux pour un shader CRT : opengl ? vulkan ? ce choix fait, se lancer dans la réalisation de cette modification structurelle, sur une branche à part.
+- j'aimerais adapter le code pour avoir la possibilité d'un shader CRT en utilisant vulkan. On va se lancer dans la réalisation de cette modification structurelle, sur une branche à part.
