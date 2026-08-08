@@ -8,4 +8,6 @@
 
 - j'ai changé l'icône d'application, c'est maintenant bytebox.png (présent dans les assets). C'est déjà modifié pour les fenêtres SDL, j'aimerais que tu le changes pour le .desktop
 
+- question de la license ? peut-on utiliser MIT sur un projet vibe-codé ?
+
 - j'aimerais évaluer à nouveau le mieux pour un shader CRT : opengl ? vulkan ? ce choix fait, se lancer dans la réalisation de cette modification structurelle, sur une branche à part.
