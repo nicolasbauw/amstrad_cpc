@@ -4,6 +4,8 @@
 
 - packaging (PKGBUILD AUR ?) : quand on s'y met, mettre à jour packaging/bytebox.desktop en conséquence (chemins actuellement en dur pour un usage personnel, Exec/Path pointent vers ~/Dev/amstrad_cpc).
 
+- peut-on rendre la détection de la manette dynamique ?
+
 - quand l'émulateur est lancé via le raccourci desktop, il se lance donc sans terminal, et donc sans commandes à lancer depuis notre "console". Mais j'ai remarque que dans ce cas, le CPU du host s'emballe un peu. L'idée est donc : dans ce cas, on ne lance pas la console. (qui se fait via le crate::console::launch(m.cmd_channel.0.clone()).unwrap(); de machine.rs). Plus tard, (au moment du passage en vulkan, voir plus bas) on va implémenter une fenêtre SDL pour faire les choses de base (comme insérer/retirer une disquette, par exemple). On peut aussi réfléchir à la faisabilité / pertinence / effort pour créer notre propre fenêtre de commandes, via par exemple lighostty (https://github.com/Uzaaft/libghostty-rs), affichable par la touche F11 (pour être cohérent avec la fenêtre de state via F12).
 
 - j'ai changé l'icône d'application, c'est maintenant bytebox.png (présent dans les assets). C'est déjà modifié pour les fenêtres SDL, j'aimerais que tu le changes pour le .desktop
