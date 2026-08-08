@@ -4,6 +4,7 @@ use crate::gate_array::GateArray;
 use crate::memory::Memory;
 use crate::ppi::Ppi;
 use crate::psg::Psg;
+use crate::tape::Tape;
 use zilog_z80::bus::Bus;
 
 use std::cell::RefCell;
@@ -25,6 +26,7 @@ pub struct CpcBus {
     pub psg: Psg,
     pub ppi: Ppi,
     pub fdc: RefCell<Fdc>,
+    pub tape: RefCell<Tape>,
     pub watchpoints: HashSet<u16>,
     pub watchpoint_hit: Option<u16>,
 }
@@ -39,6 +41,7 @@ impl CpcBus {
             psg: Psg::new(),
             ppi: Ppi::new(),
             fdc: RefCell::new(Fdc::new()),
+            tape: RefCell::new(Tape::new()),
             watchpoints: HashSet::new(),
             watchpoint_hit: None,
         }
@@ -63,7 +66,9 @@ impl Bus for CpcBus {
     fn read_io(&self, port: u16) -> u8 {
         // 1. Décodage du PPI (Bit 11 = 0, soit port & 0x0800 == 0)
         if (port & 0x0800) == 0 {
-            return self.ppi.read_register(port, &self.psg);
+            return self
+                .ppi
+                .read_register(port, &self.psg, self.tape.borrow().read_bit());
         }
 
         // 2. Décodage du CRTC (Bit 14 = 0, soit port & 0x4000 == 0)
@@ -137,6 +142,19 @@ impl Bus for CpcBus {
         // 3. Décodage du PPI (Bit 11 = 0, soit port & 0x0800 == 0)
         if (port & 0x0800) == 0 {
             self.ppi.write_register(port, value, &mut self.psg);
+            // Bit 4 du port C : contrôle du moteur cassette. Confirmé par
+            // désassemblage de la routine cassette du firmware (ROM basse,
+            // ~0x29D2-0x2A0A) : elle établit ce bit tôt et le maintient à
+            // travers une reconfiguration complète du PPI, jusqu'à l'état
+            // observé à l'écran "Press PLAY then any key" (port C = 0x58,
+            // soit bit 6 = mode PSG, bit 4 = 1, bits 3-0 = ligne clavier —
+            // bit 4 est le seul bit qui n'a pas d'autre explication).
+            // Répercuté après coup plutôt que testé sur `value`, pour rester
+            // correct que le port C ait été écrit directement ou via le
+            // mode "Bit Set/Reset" (voir `Ppi::write_register`, qui gère les
+            // deux) — même principe que la synchronisation du moteur FDC
+            // ci-dessous.
+            self.tape.borrow_mut().motor_on = (self.ppi.port_c & 0x10) != 0;
         }
 
         // 4. Sélection de la ROM haute (Bit 13 = 0, soit port & 0x2000 == 0)
@@ -166,6 +184,28 @@ impl Bus for CpcBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Le bit du port C qui pilote le moteur cassette a d'abord été mal
+    /// identifié (bit 5 au lieu du bit 4) — confirmé faux par une capture
+    /// d'écran réelle où le firmware maintenait le port C à 0x58 (bit 4
+    /// posé, bit 5 non posé) à l'écran "Press PLAY then any key", alors que
+    /// le code affichait pourtant "Motor On: false". Ce test verrouille le
+    /// bon bit pour ne pas régresser.
+    #[test]
+    fn writing_port_c_bit_4_turns_the_tape_motor_on() {
+        let mut bus = CpcBus::new(Memory::new(0));
+        assert!(!bus.tape.borrow().motor_on);
+
+        // &F658, exactement la valeur observée en usage réel.
+        bus.write_io(0xF600, 0x58);
+        assert!(
+            bus.tape.borrow().motor_on,
+            "port C = 0x58 (bit 4 pose) doit activer le moteur cassette"
+        );
+
+        bus.write_io(0xF600, 0x48); // bit 4 retire (garde bit 6, ligne clavier 8)
+        assert!(!bus.tape.borrow().motor_on);
+    }
 
     /// Le trait `Bus` fournit des `read_io`/`write_io` par défaut qui ne font
     /// rien : si l'une de nos implémentations sort par mégarde du bloc

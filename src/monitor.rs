@@ -20,6 +20,7 @@ pub enum MonitorCmd {
     RemoveWatchpoint,
     Disk,
     Blank,
+    Tape,
     PowerCycle,
     Trace,
     ReadRam,

@@ -14,6 +14,7 @@ mod ppi;
 mod psg;
 mod sdl;
 mod sound;
+mod tape;
 mod trace;
 mod video;
 
@@ -74,6 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // habituelle, pour rester proche de la syntaxe Caprice32.
     let disk = cli_value(&args, &["--disk", "-d"]);
 
+    // Chargement direct d'une image cassette dans le lecteur, même principe
+    // que --disk.
+    let tape = cli_value(&args, &["--tape", "-t"]);
+
     // 2. Initialisation de la Machine
     let mut machine = Machine::new();
     machine.diagnostic_mode = diag_mode;
@@ -88,6 +93,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // `Machine::console_handle`), ce message s'affiche ici avant même
         // que le fil console ait fini son propre prompt initial : sans ce
         // réaffichage, il resterait sans prompt visible en dessous.
+        print!("> ");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+
+    if let Some(path) = &tape {
+        if let Err(e) = machine.load_tape(path) {
+            println!("Can't load tape '{path}': {e}");
+        }
         print!("> ");
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }

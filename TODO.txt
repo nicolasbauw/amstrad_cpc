@@ -4,8 +4,6 @@
 
 - packaging (PKGBUILD AUR ?) : quand on s'y met, mettre à jour packaging/bytebox.desktop en conséquence (chemins actuellement en dur pour un usage personnel, Exec/Path pointent vers ~/Dev/amstrad_cpc).
 
-- gérer le port lecteur de cassettes et la lecture des fichiers .cdt
-
 - rendre le chemin et le nom de la font utilisée pour l'écran "machine status" paramétrable dans le fichier de conf. Une fois fait, retirer du code ce qui est hardcodé concernant ceci.
 
 - peut-on rendre la détection de la manette dynamique ?

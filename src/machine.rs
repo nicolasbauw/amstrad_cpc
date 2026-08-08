@@ -62,6 +62,8 @@ Emulator commands:
     disk eject b        Ejects the disk image from drive B
     blank d.dsk         Creates a blank formatted disk image and inserts it in drive A
     blank d.dsk b       Creates a blank formatted disk image and inserts it in drive B
+    tape f.cdt          Loads the f.cdt tape image into the tape reader
+    tape eject          Ejects the tape image
     pc                  Performs a power cycle
     vol                 Displays the audio output volume
     vol 30              Sets the audio output volume to 30 %
@@ -384,6 +386,21 @@ impl Machine {
         self.bus.fdc.borrow_mut().load_disk_b(&path)
     }
 
+    /// Charge un fichier .cdt dans le lecteur de cassettes, en résolvant le
+    /// nom donné via `[file] dsk_path` (partagé avec les disquettes)
+    /// s'il ne désigne pas déjà un fichier existant. Utilisée aussi bien par
+    /// la commande console `tape` que par l'option de ligne de commande
+    /// `--tape`.
+    pub fn load_tape(&mut self, filename: &str) -> Result<(), String> {
+        let path = self.config.resolve_disk_path(filename);
+        self.bus.tape.borrow_mut().load_tape(&path)
+    }
+
+    /// Éjecte la cassette.
+    pub fn eject_tape(&mut self) {
+        self.bus.tape.borrow_mut().eject_tape();
+    }
+
     /// Crée une disquette vierge formatée (voir [`crate::fdc::Fdc::blank_dsk_image`])
     /// au nom donné, résolu via `[file] dsk_path` s'il ne contient pas déjà
     /// un chemin explicite, puis l'insère dans le lecteur A ou B.
@@ -544,6 +561,10 @@ impl Machine {
         // ici, et pas une fois par trame, sinon les changements de registres
         // en cours de trame (toutes les musiques en font) seraient perdus.
         self.bus.psg.tick(elapsed_ticks);
+
+        // La cassette aussi : un pulse dure souvent moins d'une trame, une
+        // cadence plus grossière ferait rater des fronts.
+        self.bus.tape.borrow_mut().tick(elapsed_ticks);
 
         // Gestion HSYNC / Interruptions (période 256 ticks = 64µs)
         self.hsync_accumulator += elapsed_ticks;
@@ -913,6 +934,18 @@ impl Machine {
             }
         }
 
+        // --- LECTEUR DE CASSETTES ---
+        {
+            let tape = self.bus.tape.borrow();
+            let _ = writeln!(s, "\n[TAPE]");
+            let _ = writeln!(s, "  Motor On           : {:<5}", tape.motor_on);
+            let _ = writeln!(
+                s,
+                "  Tape               : {}",
+                tape.current_filename.as_deref().unwrap_or("None")
+            );
+        }
+
         // --- KEYBOARD MATRIX ---
         if show_kb {
             let _ = writeln!(
@@ -1216,6 +1249,15 @@ impl Machine {
                 match self.create_blank_disk(&arg, target_drive_b) {
                     Ok(()) => println!("Blank disk created and inserted: {}", arg),
                     Err(e) => println!("Error creating blank disk: {}", e),
+                }
+            }
+            MonitorCmd::Tape => {
+                // "tape eject" ejecte ; "tape fichier.cdt" charge et insere.
+                // Un seul lecteur de cassette, pas de variante "b".
+                if arg == "eject" {
+                    self.eject_tape();
+                } else if let Err(e) = self.load_tape(&arg) {
+                    println!("Error loading tape: {}", e);
                 }
             }
             MonitorCmd::PowerCycle => {

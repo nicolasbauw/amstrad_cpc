@@ -23,7 +23,13 @@ impl Ppi {
 
     /// Lecture du PPI (port & 0x0800 == 0)
     /// L'adresse du PPI est déterminée par les bits 9 et 8 du port d'I/O.
-    pub fn read_register(&self, port: u16, psg: &Psg) -> u8 {
+    ///
+    /// `tape_bit` est le niveau courant du signal cassette (bit 6 du port
+    /// B) : contrairement à VSYNC/joystick (mis à jour une fois par
+    /// scanline, voir `set_system_port_b`), il doit refléter l'état au
+    /// moment exact de la lecture — un pulse de cassette dure souvent moins
+    /// d'une scanline.
+    pub fn read_register(&self, port: u16, psg: &Psg, tape_bit: bool) -> u8 {
         match (port >> 8) & 0x03 {
             0 => {
                 // Port A ($F4xx) : Lire les données du PSG si configuré en entrée
@@ -35,8 +41,13 @@ impl Ppi {
                 }
             }
             1 => {
-                // Port B ($F5xx) : Lecture seule de l'état du système
-                self.port_b_input
+                // Port B ($F5xx) : Lecture seule de l'état du système, avec
+                // le bit 6 (cassette) recalé en temps réel.
+                if tape_bit {
+                    self.port_b_input | 0x40
+                } else {
+                    self.port_b_input & !0x40
+                }
             }
             2 => {
                 // Port C ($F6xx) : Lecture des sorties de contrôle
@@ -237,12 +248,12 @@ mod tests {
         for line in 0..10u8 {
             ppi.write_register(0xF700, 0x82, &mut psg); // port A en sortie
             ppi.write_register(PORT_A, 14, &mut psg); // registre clavier
-            let port_c = ppi.read_register(PORT_C, &psg);
+            let port_c = ppi.read_register(PORT_C, &psg, false);
             ppi.write_register(PORT_C, port_c | 0xC0 | line, &mut psg); // selection
             ppi.write_register(PORT_C, (port_c | 0xC0 | line) & 0x3F, &mut psg);
             ppi.write_register(0xF700, 0x92, &mut psg); // port A en entree
             ppi.write_register(PORT_C, line | 0x40, &mut psg); // lecture
-            let value = ppi.read_register(PORT_A, &psg);
+            let value = ppi.read_register(PORT_A, &psg, false);
 
             assert_eq!(
                 psg.selected_keyboard_line, line,

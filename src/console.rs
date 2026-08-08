@@ -67,6 +67,7 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
                     "s" => MonitorCmd::SearchMem,
                     "disk" => MonitorCmd::Disk,
                     "blank" => MonitorCmd::Blank,
+                    "tape" => MonitorCmd::Tape,
                     "pc" => MonitorCmd::PowerCycle,
                     "t" => MonitorCmd::Trace,
                     "mr" => MonitorCmd::ReadRam,
