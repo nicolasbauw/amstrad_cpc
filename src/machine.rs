@@ -218,6 +218,7 @@ impl Machine {
                 file: config::FileConfig::default(),
                 display: config::DisplayConfig::default(),
                 memory: config::MemoryConfig::default(),
+                rom: config::RomConfig::default(),
             }
         });
 
@@ -407,30 +408,61 @@ impl Machine {
         }
     }
 
-    /// Charge les ROMs appropriées en fonction du mode (Diagnostic ou Officiel)
+    /// Charge les ROMs appropriées en fonction du mode (Diagnostic ou Officiel).
+    /// Les chemins viennent de `config.toml` (section `[rom]`), avec les
+    /// fichiers du dépôt en secours si une entrée est absente.
     pub fn load_roms(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // ROM Basse : OS 6128
-        let mut f = File::open("bin/OS6128-AZERTY.rom")?;
+        // ROM Basse : OS 6128 (ou fichier combiné OS+BASIC de 32 Ko, voir
+        // config::RomConfig::system)
+        let system_path = self
+            .config
+            .rom
+            .system
+            .clone()
+            .unwrap_or_else(|| "bin/OS6128-AZERTY.rom".to_string());
+        let mut f = File::open(&system_path)?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
-        self.bus.memory.load_low_rom(&buf);
+        if buf.len() >= 32 * 1024 {
+            self.bus.memory.load_low_rom(&buf[..16 * 1024]);
+            self.bus.memory.load_high_rom(0, &buf[16 * 1024..32 * 1024]);
+        } else {
+            self.bus.memory.load_low_rom(&buf);
 
-        // ROM Haute 0 : BASIC 1.1
-        let mut f = File::open("bin/BASIC1-1-AZERTY.ROM")?;
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf)?;
-        self.bus.memory.load_high_rom(0, &buf);
+            // ROM Haute 0 : BASIC 1.1
+            let basic_path = self
+                .config
+                .rom
+                .basic
+                .clone()
+                .unwrap_or_else(|| "bin/BASIC1-1-AZERTY.ROM".to_string());
+            let mut f = File::open(&basic_path)?;
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf)?;
+            self.bus.memory.load_high_rom(0, &buf);
+        }
 
         // ROM Haute 7 : AMSDOS (Système de disquettes)
-
-        let mut f = File::open("bin/AMSDOS.ROM")?;
+        let amsdos_path = self
+            .config
+            .rom
+            .amsdos
+            .clone()
+            .unwrap_or_else(|| "bin/AMSDOS.ROM".to_string());
+        let mut f = File::open(&amsdos_path)?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
         self.bus.memory.load_high_rom(7, &buf);
 
         if self.diagnostic_mode {
             // ROM Haute 15 (Diagnostic Upper)
-            let mut f = File::open("bin/AmstradDiagUpper.rom")?;
+            let diag_path = self
+                .config
+                .rom
+                .diagnostic_upper
+                .clone()
+                .unwrap_or_else(|| "bin/AmstradDiagUpper.rom".to_string());
+            let mut f = File::open(&diag_path)?;
             let mut buf = Vec::new();
             f.read_to_end(&mut buf)?;
             self.bus.memory.load_high_rom(15, &buf);

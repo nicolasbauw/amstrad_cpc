@@ -29,3 +29,13 @@ default_zoom = "x1"
 # 0 by default (standard 128KB, unchanged behaviour). Capped at 56 (= 3.5MB
 # of extra RAM, the maximum the expansion protocol can address).
 extra_ram_banks = 0
+
+[rom]
+# ROM file paths. All optional: missing entries fall back to the files
+# shipped in bin/. `system` may point to a combined 32KB OS+BASIC dump
+# (e.g. Caprice32's rom/cpc6128.rom) instead of a bare 16KB OS ROM; in that
+# case it is split in half automatically and `basic` is ignored.
+# system = "bin/OS6128-AZERTY.rom"
+# basic = "bin/BASIC1-1-AZERTY.ROM"
+# amsdos = "bin/AMSDOS.ROM"
+# diagnostic_upper = "bin/AmstradDiagUpper.rom"

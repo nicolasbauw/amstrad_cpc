@@ -18,6 +18,8 @@ pub struct Config {
     pub display: DisplayConfig,
     #[serde(default)]
     pub memory: MemoryConfig,
+    #[serde(default)]
+    pub rom: RomConfig,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -39,6 +41,28 @@ pub struct DisplayConfig {
     /// reconnue plutôt que d'échouer au démarrage.
     #[serde(default)]
     pub default_zoom: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct RomConfig {
+    /// ROM basse (système/OS, 16 Ko). Certains dumps (ex. Caprice32,
+    /// rom/cpc6128.rom) empaquettent le système et le BASIC en un seul
+    /// fichier de 32 Ko (système dans la première moitié, BASIC dans la
+    /// seconde) : dans ce cas, un fichier de 32 Ko ou plus donné ici est
+    /// automatiquement découpé en deux, et `basic` ci-dessous est ignoré.
+    #[serde(default)]
+    pub system: Option<String>,
+    /// ROM haute 0 (BASIC 1.1, 16 Ko). Ignoré si `system` désigne un
+    /// fichier combiné de 32 Ko.
+    #[serde(default)]
+    pub basic: Option<String>,
+    /// ROM haute 7 (AMSDOS, 16 Ko).
+    #[serde(default)]
+    pub amsdos: Option<String>,
+    /// ROM haute 15 (Diagnostics Amstrad, 16 Ko), utilisée uniquement en
+    /// mode diagnostic (`Machine::diagnostic_mode`).
+    #[serde(default)]
+    pub diagnostic_upper: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -156,6 +180,23 @@ mod tests {
             config.memory.extra_ram_banks, 0,
             "sans section [memory], aucune banque supplementaire ne doit etre supposee"
         );
+        assert!(
+            config.rom.system.is_none(),
+            "sans section [rom], les chemins doivent rester absents (secours code en dur)"
+        );
+    }
+
+    #[test]
+    fn rom_paths_are_read_when_present() {
+        let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n\n[rom]\nsystem = \"custom/os.rom\"\nbasic = \"custom/basic.rom\"\namsdos = \"custom/amsdos.rom\"\ndiagnostic_upper = \"custom/diag.rom\"\n";
+        let config: Config = toml::from_str(file).expect("fichier refuse");
+        assert_eq!(config.rom.system.as_deref(), Some("custom/os.rom"));
+        assert_eq!(config.rom.basic.as_deref(), Some("custom/basic.rom"));
+        assert_eq!(config.rom.amsdos.as_deref(), Some("custom/amsdos.rom"));
+        assert_eq!(
+            config.rom.diagnostic_upper.as_deref(),
+            Some("custom/diag.rom")
+        );
     }
 
     #[test]
@@ -185,6 +226,7 @@ mod tests {
             },
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),
+            rom: RomConfig::default(),
         };
         assert_eq!(config.resolve_new_disk_path("d.dsk"), "bin/d.dsk");
 
