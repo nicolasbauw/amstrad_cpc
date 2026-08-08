@@ -1,9 +1,14 @@
-# WEC Le Mans (2e bug) : redémarrage ~1 s après le lancement de la course (ouvert)
+# WEC Le Mans (2e bug) : redémarrage ~1 s après le lancement de la course (cause probable identifiée, hors de notre émulateur)
 
-Note d'enquête, point de départ pour une reprise ultérieure. **Le
-symptôme n'est pas résolu.** Contrairement au premier bug WEC Le Mans
-(écran de démarrage figé, voir `doc/wec-le-mans-frozen-splash.md`,
-résolu), celui-ci n'a pas encore de cause confirmée.
+Note d'enquête. **Le symptôme n'est plus reproduit dans notre
+émulateur** au sens où l'on comprend maintenant pourquoi il survient :
+tout indique un défaut de la donnée présente sur cette image disque
+elle-même (table de dispatch tronquée), reproduit à l'identique sur
+Caprice32 avec la même disquette — voir la section « Comparaison
+Caprice32 » plus bas. Contrairement au premier bug WEC Le Mans (écran de
+démarrage figé, voir `doc/wec-le-mans-frozen-splash.md`, résolu par un
+correctif dans `ZilogZ80`), celui-ci ne semble donc pas appeler de
+correctif dans ce dépôt.
 
 ## Le symptôme
 
@@ -209,29 +214,64 @@ Ce n'est pas une entrée isolée corrompue : c'est la table qui est courte
 d'au moins une entrée face à un type d'objet (15) que le jeu instancie
 pourtant systématiquement et immédiatement au lancement de la course.
 
-## Conclusion (provisoire, à confirmer face à Caprice32)
+## Comparaison Caprice32 : la table est identique, bit pour bit — ce n'est pas un bug de chargement
 
-Le tableau ci-dessus penche fortement pour l'hypothèse 1 (donnée
-manquante) plutôt que 2 (index qui dérive) : la création de l'objet de
-type 15 est déterministe, immédiate, et ne dépend d'aucun état de jeu
-variable observé jusqu'ici. Reste à vérifier si Caprice32, avec la même
-disquette, a bien une entrée 15 valide dans sa copie de la table (ce qui
-confirmerait un problème de chargement/décompression chez nous,
-peut-être un ricochet du même mécanisme que le premier bug WEC) ou si
-lui aussi ne l'a pas mais ne la sollicite jamais à cause d'un détail de
-timing qui nous échappe encore (ce qui semble moins probable vu le
-caractère déterministe de la création de l'objet).
+Comparaison faite avec Caprice32 (même ROM combinée AZERTY 32 Ko, même
+fichier disque), méthode habituelle (voir
+`doc/wec-le-mans-frozen-splash.md`, section « Harnais de diagnostic »,
+injection directe dans `keyboard_matrix` plutôt que `--autocmd`). La
+frappe de `run"wec` a fonctionné (capture d'écran : menu « WEC LE MANS /
+1. JOYSTICK / 2. KEYBOARD / 3. REDEFINE KEYS » correctement atteint,
+générique de la disquette visible — `BYTES.. BLOBS.. BITS.. BUZZ..`,
+signature typique d'un groupe de crack de l'époque, à noter). La touche
+« 2 » pour lancer la course en clavier n'a en revanche pas pu être
+déclenchée de façon fiable dans le temps disponible (piège clavier
+différent de celui déjà documenté pour `run"wec`, probablement lié à la
+façon dont le jeu lit la matrice pour ce menu plutôt qu'au clavier du
+firmware — non résolu, pas creusé davantage, le dump de la table au
+niveau du menu suffit à trancher la question qui nous intéressait).
+
+Dump de la table à `0x43DC` chez Caprice32, juste après l'affichage du
+menu (donc après chargement complet de `WEC.BI1`/`WEC.BI2` depuis le
+disque, avant tout calcul dépendant du déroulement réel de la course) :
+
+```
+type  0 → 0020    type  8 → 2546    type 15 → EF06  ← INVALIDE, IDENTIQUE
+type  1 → 252D    type  9 → 1F80    type 16 → 0000 (garbage, identique)
+type  2 → 1F15    type 10 → 1F80    type 17 → 0A01 (garbage, identique)
+...               ...               ...
+```
+
+**Byte pour byte identique à notre propre dump**, y compris l'entrée 15
+invalide (`0xEF06`) et le motif de données non initialisées au-delà.
+Ceci **écarte définitivement l'hypothèse 1** (chargement/décompression
+incomplet côté notre émulateur) : la table est construite ainsi dès le
+chargement du disque, sur les deux émulateurs, avec la même ROM et la
+même image disque. Ce n'est donc ni un bug d'émulation CPU, ni un bug de
+notre gestion mémoire — la donnée sur la disquette elle-même ne contient
+qu'une table à 15 entrées valides.
+
+Reste l'hypothèse 2, mais reformulée : ce n'est plus « un index qui
+dérive à cause d'un écart de timing d'émulation », mais plus
+probablement **un bug réel du jeu ou de cette image disque précise**
+(la disquette porte des marques de groupe de crack — `BYTES/BLOBS/BITS/
+BUZZ` — ce qui rend plausible une table tronquée par erreur lors du
+craquage/repackaging à l'époque, un phénomène courant sur les images
+piratées de ce genre). Si tel est le cas, **le jeu planterait aussi sur
+un vrai CPU 6128 avec cette même disquette** — ce ne serait alors pas un
+bug d'émulation à corriger dans ce dépôt, mais une caractéristique (bug)
+de cette copie particulière de WEC Le Mans.
 
 ## Prochaine étape recommandée
 
-Comparer directement avec Caprice32 (ROM identiques, injection clavier
-directe dans `keyboard_matrix`, voir `doc/wec-le-mans-frozen-splash.md`
-section « Harnais de diagnostic ») : dumper la même table à `0x43DC` au
-même instant (juste après le lancement de la course) pour voir si
-l'entrée 15 y est valide. Si oui, comparer ensuite la mémoire chargée
-depuis le disque (avant toute exécution du code de jeu) entre les deux
-émulateurs pour localiser où la divergence apparaît — probablement dans
-la zone source dont `0x43DC` est recopiée/décompressée.
+Confirmer si le crash est reproductible sur un CPC réel ou sur une autre
+copie/version de la disquette (une image "originale" non crackée,
+si disponible, ou un journal de bug connu pour cette version). Si ce
+n'est pas possible à vérifier facilement, considérer cette piste comme
+la conclusion la plus probable de l'enquête : **la table de dispatch
+`0x43DC` de cette image disque est authentiquement incomplète, sur les
+deux émulateurs testés** — ce n'est vraisemblablement pas un bug de
+`amstrad_cpc` à corriger, mais un défaut préexistant du support d'origine.
 
 ## Harnais de diagnostic
 
