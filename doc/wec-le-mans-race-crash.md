@@ -73,60 +73,115 @@ déjà dérivé dans la zone `0x31xx` — la même zone que le code de la pile
 de secours elle-même — avant même l'appel `0x08FD → 0x3143` qui finit
 par produire le `RET` fatal.
 
-## Ce qui a été écarté
+## Ce qui a été écarté (mis à jour, définitivement cette fois)
 
-- **Pas une simple imbrication d'interruptions au sens Z80 du terme** :
-  à chaque entrée en `0x0038`, `IFF1` est bien à `false` (comme attendu,
-  une interruption acceptée masque les suivantes jusqu'au `EI` final du
-  gestionnaire). Une tentative de détecter une « interruption imbriquée »
-  en surveillant un retour à `0x3111` (fin du chemin long du
-  gestionnaire) a produit de nombreux faux positifs : le gestionnaire a
-  aussi un chemin de sortie COURT (`0x3090`-`0x309A`, simple
-  `POP`×4/`EI`/`RET`, sans bascule de pile), pas systématiquement
-  emprunté — un détecteur qui ne surveille que la sortie du chemin long
-  se dérègle dès que le chemin court est pris une seule fois. Cette piste
-  d'instrumentation est à refaire correctement (détecter les DEUX points
-  de sortie, ou mieux : surveiller `IFF1` directement plutôt que des
-  adresses PC précises) avant de conclure quoi que ce soit sur une
-  éventuelle vraie imbrication.
+- **Pas une imbrication d'interruptions.** Premier détecteur (surveiller
+  un retour à `0x3111`) invalidé par un vrai piège méthodologique : le
+  gestionnaire a DEUX chemins de sortie (un chemin court,
+  `0x3090`-`0x309A`, sans bascule de pile ; un chemin long,
+  `0x309B`-`0x3111`, avec la pile de secours), et un détecteur qui ne
+  surveille que la sortie du chemin long se dérègle dès que le chemin
+  court est emprunté une seule fois — ce qui explique les dizaines de
+  « fausses imbrications » vues au premier essai. **Détecteur refait
+  correctement** (en ne comptant comme entrée que les cas où
+  `has_pending_int()` passe de vrai à faux — donc une vraie acceptation
+  matérielle, pas un appel explicite du jeu vers `0x0038` comme
+  sous-routine ordinaire, ce qui arrive aussi et fausse le comptage) :
+  **1795 interruptions matérielles réelles observées sur la fenêtre,
+  zéro imbrication.** Cette piste est refermée pour de bon.
 - Le tout premier bug WEC (RST qui saute l'incrément du PC) est déjà
   corrigé et vérifié sans effet secondaire sur ce nouveau symptôme — ce
   n'est pas une résurgence du même bug, au moins pas directement (le
   mécanisme ici est un `RET` qui dépile une mauvaise adresse, pas un
   opérande de far-call mal aligné).
+- **Piste « corruption de HL par une interruption mal placée »,
+  explorée puis écartée après vérification directe.** Une trace pas à
+  pas semblait montrer un simple `INC HL` sauter de `441A` à `EF1B` —
+  ce qui aurait été un vrai bug de CPU si confirmé. Revérifié
+  instruction par instruction avec `has_pending_int()`/`iff1` à chaque
+  pas : **aucune interruption ne survient dans cette fenêtre, et
+  `INC HL` se comporte normalement** (`441A → 441B`). La première trace
+  était juste mal interprétée sous le coup de la précipitation (le `H`
+  affiché après l'instruction SUIVANTE, `LD H,(HL)`, avait été confondu
+  avec un HL corrompu par l'instruction en cours).
+
+## La vraie piste : une table de saut avec une entrée invalide
+
+En repartant de zéro sur l'écran de préparation, la toute première
+dérive dans de la mémoire vide (`PC=0xEF06`, à 0,96 s, avant même que
+`SP` ne soit affecté) vient d'un saut calculé parfaitement normal :
+
+```
+1EE9  EX AF,AF'        ; bascule vers le jeu de registres alternatif
+1EEA  LD A,C
+1EEB  EXX                ; HL/DE/BC alternatifs deviennent actifs
+1EEC  EX AF,AF'           ; A reprend sa valeur alternative (index d'objet)
+1EED  RLCA
+1EEE  RLCA                ; index ×4 (table de 4 octets par entrée)
+1EEF  LD C,A
+1EF0  LD B,$00
+1EF2  LD HL,$43DC          ; base de la table
+1EF5  ADD HL,BC             ; HL = &table[index]
+1EFA  LD E,(HL) / INC HL
+1EFC  LD D,(HL) / INC HL
+1EFE  LD A,(HL) / INC HL
+1F00  LD H,(HL)
+1F01  LD L,A                 ; HL = adresse cible lue dans la table
+1F03  JP (HL)                 ; saute — table de dispatch par objet/entité
+```
+
+Pour l'occurrence fautive, l'index calculé vaut `0x3C` (60 décimal),
+menant à `table[60]` en `0x4418`. Les 4 octets lus là (`E`, `D`, puis le
+couple `A`/`H` qui forme l'adresse cible) donnent une cible de
+**`0xEF06`** — de la mémoire vide, jamais chargée. Ce n'est pas une
+corruption en cours d'exécution : les octets à `0x4418`-`0x441B`
+contiennent authentiquement cette valeur invalide au moment de la
+lecture (vérifié directement, sans qu'aucune écriture n'intervienne
+entre-temps).
+
+Cette excursion-là se rétablit d'elle-même (retombe dans une petite
+boucle `RST $38` sans casser `SP`) ; c'est une excursion **suivante**,
+plus tard, qui finit par corrompre `SP` (voir plus haut, la pile de
+secours jamais restaurée) et provoque le vrai plantage vers `0x0000`.
+Les deux sont vraisemblablement liées à la même cause : quelque chose
+fait consulter un index d'objet/entité hors de portée dans cette table
+de dispatch, et selon la table concernée, l'atterrissage est plus ou
+moins destructeur.
 
 ## Hypothèses à trancher
 
-1. **Un vrai bug de timing d'interruption chez nous**, différent du
-   premier : par exemple si notre émulation autorise, dans une fenêtre
-   très précise, l'acceptation d'une interruption à un moment où le vrai
-   Z80 ne le ferait pas (pas nécessairement une « imbrication » classique
-   — pourrait être lié à `ei_instr_delay`, au moment exact où `iff1`
-   redevient vrai après le `EI` de `0x3110`, ou à un cas limite autour de
-   `RETI`/`RETN` si le gestionnaire les utilise ailleurs) ;
-2. **Un dépassement de pile légitime côté jeu** que le vrai matériel
-   évite uniquement parce que son timing (cycles Z80 exacts, longueur
-   réelle de chaque instruction) diffère suffisamment du nôtre pour que
-   la zone `0x3143` et la pile principale du jeu ne se télescopent
-   jamais — auquel cas le bug serait plus subtil (un écart cumulatif de
-   timing, pas une seule instruction fautive) ;
-3. **Une piste plus simple à vérifier d'abord** : le jeu utilise-t-il À
-   NOUVEAU le mécanisme de far-call (RST) étudié pour le premier bug
-   pendant cette séquence de préparation de course ? Si oui, revérifier
-   spécifiquement ce chemin avec le correctif déjà en place (peut-être
-   pas suffisant à lui seul, ou un cas apparenté non couvert par le
-   correctif).
+1. **Table de données incomplète ou mal chargée** — cohérent avec le
+   thème général de cette disquette (le premier bug WEC portait déjà sur
+   des données de course mal repositionnées en mémoire après
+   décompression). La table à `0x43DC` (et une sœur à `0x43F8` vue plus
+   haut dans le désassemblage, utilisée par un dispatcher similaire) est
+   peut-être sensée être entièrement peuplée après le chargement de
+   `WEC.BI2`/`TRACK0F.BIN`, et l'entrée 60 (ou une entrée voisine) ne
+   l'est pas ;
+2. **Index d'objet/entité qui dérive au-delà des bornes prévues** — le
+   registre alternatif `A'` d'où vient l'index (avant les deux `RLCA`)
+   est whatever une AUTRE partie du jeu y a placé ; remonter à cet
+   endroit pour voir s'il s'agit d'un compteur d'objets actifs qui monte
+   trop haut (un bug de logique de jeu qu'un vrai 6128 n'atteindrait
+   simplement jamais, pour une raison de timing ou d'ordre d'exécution
+   qui nous échappe encore) ;
+3. Vérifier si Caprice32 (même ROM, disquette identique) passe par la
+   MÊME table avec le MÊME index à ce moment précis, et ce qu'il y trouve
+   — la comparaison directe déjà rodée pour le premier bug est le plus
+   sûr moyen de trancher entre « donnée manquante chez nous » et « bug de
+   logique de jeu qui ne se déclenche jamais sur le vrai timing ».
 
 ## Prochaine étape recommandée
 
-Refaire un détecteur d'imbrication d'interruption fiable (suivre `IFF1`
-directement, pas des adresses PC de sortie), puis comparer avec
-Caprice32 (méthode déjà rodée : ROM identiques, injection clavier directe
-dans `keyboard_matrix`, voir `doc/wec-le-mans-frozen-splash.md` section
-« Harnais de diagnostic ») sur la même séquence (menu → « 2 » → écran de
-préparation) pour voir si `SP` y dérive aussi dans la zone `0x31xx`, ou
-si notre émulation diverge quelque part de précis dans cette fenêtre de
-~1,18 s.
+Remonter à la source du registre `A'` juste avant `0x1EE9` (qui donne
+l'index d'objet) : quel code le positionne, et sur quelle base ? Puis
+comparer avec Caprice32 (ROM identiques, injection clavier directe dans
+`keyboard_matrix`, voir `doc/wec-le-mans-frozen-splash.md` section
+« Harnais de diagnostic ») sur la table à `0x43DC` au même instant, pour
+voir si l'entrée 60 y est valide (donnée manquante chez nous) ou si
+l'index lui-même n'est simplement jamais calculé à 60 sur le vrai
+timing (bug de logique de jeu exposé par un écart de timing plus
+général, pas un chargement incomplet).
 
 ## Harnais de diagnostic
 
