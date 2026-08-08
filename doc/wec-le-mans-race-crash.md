@@ -383,26 +383,64 @@ mêmes octets en mémoire (`0x4375=0x1F`, `table[15]→0xEF06`) — et
 pourtant Caprice32 joue la course quand nous redémarrons. La divergence
 est donc dans **l'exécution**, et le bug est chez nous.
 
-## Piste suivante : le drapeau « objet actif », pas le type
+## Piste du drapeau « objet actif » : testée et ÉCARTÉE
 
-Le dispatcher ne saute *pas* systématiquement sur le type d'objet. Il
-teste d'abord un drapeau d'activité :
+Hypothèse testée : un objet de type 15 resterait **inactif** sur matériel
+réel, et serait actif à tort chez nous, d'où le saut vers `0xEF06`.
+**Fausse, sur deux plans.**
+
+D'abord un piège de désassemblage. À `0x1ED4` l'instruction n'est *pas*
+`LD A,(IX+1)` mais `LD A,IXL`, et `IX` est **décalé de −0x30 juste
+après** ; relever `IX` en `0x1ED4` donne donc une base d'objet fausse
+(et fait surveiller la mauvaise adresse en mémoire) :
 
 ```
-1ED4  LD A,(IX+1)     ; drapeau "objet actif"
-1EDD  AND A
-1EDE  LD A,(HL)       ; type de l'objet
-1EDF  JP Z,$1EE6      ; drapeau nul -> on saute le dispatch
+1ED4  DD 7D     LD A,IXL      <-- PAS le drapeau
+1ED6  D6 30     SUB $30
+1ED8  DD 6F     LD IXL,A      <-- IX ajuste ICI
+1EDA  DD 7E 01  LD A,(IX+1)   <-- le vrai relevé du drapeau
 ```
 
-Autrement dit, un objet de type 15 **inactif** ne provoque aucun saut, et
-l'entrée invalide `0xEF06` n'est jamais lue. L'hypothèse à tester devient
-donc : sur matériel réel, cet objet existe bien avec le type 15 mais
-reste **inactif** ; chez nous, quelque chose le rend actif à tort.
+Relevé correctement (`IX=0x8752`, drapeau en `0x8753`), le drapeau de
+l'objet fautif vaut **`0x00`** — il est donc bien *inactif*. Et pourtant
+le dispatch a lieu. La logique du branchement explique pourquoi :
 
-Concrètement : tracer la valeur de `(IX+1)` pour cet objet (quel `IX`,
-qui écrit ce drapeau, et quand) plutôt que de continuer à s'acharner sur
-le type lui-même, qui est confirmé identique partout.
+```
+1EDA  LD A,(IX+1)   ; drapeau = 0x00
+1EDD  AND A         ; Z=1
+1EDE  LD A,(HL)     ; A = type (LD n'affecte pas les flags : Z reste a 1)
+1EDF  JP Z,$1EE6    ; drapeau NUL -> saute en 1EE6
+1EE2  CP $05        ; (branche "drapeau non nul")
+1EE4  JR NZ,$1F05   ;   -> seul le type 5 y est traite
+1EE6  OR A          ; A = type ; non nul -> Z=0
+1EE7  JR Z,$1F05
+1EE9  EX AF,AF'     ; DISPATCH
+```
+
+Autrement dit, c'est l'inverse de ce que je supposais : **un drapeau nul
+est le chemin *normal* du dispatch par type** (n'importe quel type non
+nul y passe), tandis qu'un drapeau non nul restreint le traitement au
+seul type 5. Le jeu dispatche donc légitimement sur le type 15. Rien
+d'anormal du côté du drapeau.
+
+## Piste suivante : quand `0x4375` prend-il la valeur `0x1F` ?
+
+Un écart relevé au passage, **à vérifier avant d'en tirer quoi que ce
+soit** (les faux pas précédents invitent à la prudence) :
+
+- chez nous, `0x4375` vaut `0x50` au moment du menu, et ne devient `0x1F`
+  qu'après le `LDIR` de `0xC8CF` déclenché par le lancement de la course
+  (t=12,777 s, après la frappe du « 2 ») ;
+- sous Caprice32, le relevé fait **au menu**, sans qu'aucune touche n'ait
+  été pressée, donne déjà `0x4375 = 0x1F`.
+
+Si l'écart se confirme, deux lectures possibles : soit les bases de temps
+des deux relevés ne sont pas comparables (le « menu » de Caprice32 est
+pris à la trame 850, bien plus tard que nos 12 s — piège classique déjà
+rencontré deux fois ici), soit le contenu de cette zone diverge
+réellement à état de jeu équivalent, ce qui serait la première divergence
+mémoire observée entre les deux émulateurs. **À trancher en comparant à
+état de jeu identique, pas à temps écoulé identique.**
 
 Note : l'audit demandé sur `LDIR` lui-même n'a rien donné — les
 drapeaux documentés (H, N, P/V) sont correctement posés par les
