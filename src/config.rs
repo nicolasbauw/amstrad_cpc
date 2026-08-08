@@ -142,7 +142,7 @@ pub struct Debugger {
 pub fn load_config_file() -> Result<Config, MachineError> {
     let user_dirs = UserDirs::new().ok_or(MachineError::ConfigFile);
     let mut cfg = user_dirs?.home_dir().to_path_buf();
-    cfg.push(".config/dart/config.toml");
+    cfg.push(".config/bytebox/config.toml");
     // Absolute path fo release (production) build
     let config_path = if cfg!(debug_assertions) {
         "config/config.toml"

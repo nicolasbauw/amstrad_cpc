@@ -1,10 +1,10 @@
 # WEC Le Mans (2e bug) : redémarrage ~1 s après le lancement de la course (ouvert — piste : timing FDC)
 
 Note d'enquête. **Le symptôme n'est pas résolu.** L'enquête a suivi
-plusieurs pistes successives, dont deux ont été abandonnées après
-vérification (voir les sections « Ce qui a été écarté » et surtout
-« RETRACTATION » plus bas — une conclusion antérieure disant que le FDC
-était hors de cause était fausse).
+plusieurs pistes successives, dont plusieurs ont été abandonnées après
+vérification (voir les sections « Ce qui a été écarté » et « Le FDC est
+au cœur du chemin de données », cette dernière revenant sur une
+conclusion intermédiaire erronée qui écartait le FDC à tort).
 
 État actuel : l'octet qui provoque le crash est lu dans le **tampon de
 secteur d'AMSDOS**, alimenté en direct par le port de données du FDC, et
@@ -264,18 +264,22 @@ un vrai CPU 6128 avec cette même disquette** — ce ne serait alors pas un
 bug d'émulation à corriger dans ce dépôt, mais une caractéristique (bug)
 de cette copie particulière de WEC Le Mans.
 
-## RETRACTATION : le FDC est au contraire au cœur du chemin de données
+## Le FDC est au cœur du chemin de données (et le piège qui l'avait masqué)
 
-**Une version précédente de cette note concluait que le FDC était hors de
-cause. C'était faux, et l'erreur mérite d'être expliquée** — elle vient
-d'un raisonnement qui s'est arrêté une étape trop tôt.
+Cette piste a d'abord été écartée à tort, sur un raisonnement qui
+s'arrêtait une étape trop tôt. Le piège vaut d'être noté, car il est
+facile d'y retomber :
 
-Le raisonnement erroné était : l'octet fautif est écrit en `0x4374` par
-un `LDIR` en `0xC8CF` (source `0xAB50`, destination `0x4360`, 96 octets)
-à t=12,78 s ; or le dernier `CAS_IN_OPEN` (`WEC.BI2`) date de t=10,03 s ;
-donc « aucune lecture disque entre les deux », donc « copie RAM→RAM
-ordinaire », donc FDC hors de cause. **L'étape manquante : d'où vient le
-contenu de `0xAB50` ?**
+> l'octet fautif est écrit en `0x4374` par un `LDIR` en `0xC8CF`
+> (source `0xAB50`, destination `0x4360`, 96 octets) à t=12,78 s ; or le
+> dernier `CAS_IN_OPEN` (`WEC.BI2`) date de t=10,03 s ; donc « aucune
+> lecture disque entre les deux », donc « copie RAM→RAM ordinaire », donc
+> FDC hors de cause.
+
+**L'étape manquante : d'où vient le contenu de `0xAB50` ?** Et,
+corollaire : *compter les `CAS_IN_OPEN` ne dit rien de l'activité disque
+réelle* — une ouverture de fichier est suivie de plusieurs secondes de
+lectures secteur par secteur.
 
 En traçant les écritures dans `0xAB50`-`0xAB7F`, la réponse est sans
 ambiguïté : **3707 écritures sur la session**, toutes venant de

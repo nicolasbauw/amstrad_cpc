@@ -1434,7 +1434,7 @@ mod tests {
         // Chemin complet plutôt que le seul nom de fichier : ce test vérifie
         // que la frappe automatique fonctionne, pas la résolution de
         // `dsk_path`, qui dépend elle-même du fichier de config utilisé
-        // (`config/config.toml` en debug, `~/.config/dart/config.toml` en
+        // (`config/config.toml` en debug, `~/.config/bytebox/config.toml` en
         // release — voir `config::load_config_file`) et n'a donc pas de
         // comportement fiable identique dans les deux profils de build.
         if machine.load_disk("bin/Barbarian.dsk").is_err() {
