@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Amstrad CPC 6128
+Comment=Émulateur Amstrad CPC 6128
+Exec=/home/nicolasb/Dev/amstrad_cpc/target/release/amstrad_cpc
+Path=/home/nicolasb/Dev/amstrad_cpc
+Icon=amstrad-cpc
+Terminal=false
+Categories=Game;Emulator;
+StartupWMClass=amstrad_cpc

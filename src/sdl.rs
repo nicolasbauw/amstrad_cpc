@@ -8,6 +8,27 @@ use crate::machine::{self, Machine};
 use crate::video;
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
+use sdl2::surface::Surface;
+
+/// Pose `assets/croco.png` comme icône de la fenêtre donnée. Décodage en
+/// pur Rust via la crate `image` (plutôt que la feature `"image"` de
+/// `sdl2`, qui dépend de la bibliothèque système `libSDL2_image`) : pas de
+/// dépendance supplémentaire à installer sur la machine qui compile ou qui
+/// exécute l'émulateur. SDL copie les pixels de la surface dans la fenêtre
+/// dès `set_icon` : la surface elle-même n'a pas besoin de survivre à cet
+/// appel.
+fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
+    let img = image::open("assets/croco_red.png")
+        .map_err(|e| e.to_string())?
+        .into_rgba8();
+    let (width, height) = img.dimensions();
+    let mut pixels = img.into_raw();
+    let pitch = width * 4;
+    let surface = Surface::from_data(&mut pixels, width, height, pitch, PixelFormatEnum::RGBA32)
+        .map_err(|e| e.to_string())?;
+    window.set_icon(&surface);
+    Ok(())
+}
 
 /// Niveau de zoom de la fenêtre d'affichage (touches F1-F4, ou
 /// `default_zoom` dans config.toml).
@@ -145,7 +166,7 @@ pub fn run(
         "Amstrad CPC 6128 - BASIC 1.1 AZERTY"
     };
 
-    let window = video_subsystem
+    let mut window = video_subsystem
         .window(
             window_title,
             video::SCREEN_WIDTH as u32,
@@ -153,6 +174,12 @@ pub fn run(
         )
         .position_centered()
         .build()?;
+    // Non bloquant : une icône manquante ou illisible ne doit pas empêcher
+    // l'émulateur de démarrer, la fenêtre garde alors l'icône par défaut du
+    // système de fenêtrage.
+    if let Err(e) = set_window_icon(&mut window) {
+        println!("Can't set window icon: {e}");
+    }
     let mut canvas = window.into_canvas().build()?;
     // Taille logique fixe : quelle que soit la taille réelle de la fenêtre
     // (zoom x2/x3, plein écran...), SDL2 met alors automatiquement à
