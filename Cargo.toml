@@ -2,6 +2,7 @@
 name = "bytebox"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 zilog_z80 = { path = "../ZilogZ80" }
