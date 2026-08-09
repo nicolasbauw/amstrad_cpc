@@ -16,3 +16,15 @@ La résolution des bugs ci-dessus marquera -pour le moment- la fin de note campa
 3) ma vision : je souhaite un émulateur qui puisse à la fois satisfaire ceux qui souhaitent simplement jouer, mais aussi les power users. Donc : capable de se lancer simplement du desktop et charger des jeux avec une interface simple. ET aussi de continuer à proposer les fonctions avancées actuellement disponibles via la console (en se désolidarisant du terminal de lancement de l'émulateur) et l'écran "machine status". Et de proposer aussi un shader CRT : ça devient commun, presque une norme dans les émulateurs. Je souhaite que ByteBox se distingue des autres en réunissant tous ces points. C'est presque plus qu'un todo, ça devient un document d'architecture UX qui va dicter des choix techniques.
 
 - packaging (PKGBUILD AUR ?) : quand on s'y met, mettre à jour packaging/bytebox.desktop en conséquence (chemins actuellement en dur pour un usage personnel, Exec/Path pointent vers ~/Dev/amstrad_cpc).
+
+
+Prompt clavier (ne pas tenir compte):
+Voici une photo de mon clavier d'Amstrad CPC 6128. L'idée est d'en créer une image qui servira de base pour un clavier virtuel d'émulateur:
+
+changer l'orientation de l'image
+
+découper l'image pour avoir le clavier et le haut et bas du chassis
+
+nettoyer les touches qui doivent perdre cet aspect jaune (couleur grise d'origine visible en bordure des touches)
+
+le clavier doit être UN PEU stylisé pour ne plus ressembler à une photo, mais conserver néanmoins son aspect réaliste.
