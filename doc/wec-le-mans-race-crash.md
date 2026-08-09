@@ -423,24 +423,127 @@ nul y passe), tandis qu'un drapeau non nul restreint le traitement au
 seul type 5. Le jeu dispatche donc légitimement sur le type 15. Rien
 d'anormal du côté du drapeau.
 
-## Piste suivante : quand `0x4375` prend-il la valeur `0x1F` ?
+## Écart `0x4375` : TRANCHÉ, c'était un artefact de lecture (RAM bankée)
 
-Un écart relevé au passage, **à vérifier avant d'en tirer quoi que ce
-soit** (les faux pas précédents invitent à la prudence) :
+L'écart supposé (`0x50` chez nous au menu contre `0x1F` chez Caprice32)
+**n'existe pas**. Il venait de deux mesures qui ne lisaient pas la même
+chose : notre relevé passait par `Memory::read_byte`, donc par la **vue
+bankée du CPU**, alors que la zone `0x4000-0x7FFF` est justement
+commutable. En lisant la RAM **brute** (`memory.ram[0x4375]`), notre
+valeur est `0x1F` dès le menu — identique à Caprice32.
 
-- chez nous, `0x4375` vaut `0x50` au moment du menu, et ne devient `0x1F`
-  qu'après le `LDIR` de `0xC8CF` déclenché par le lancement de la course
-  (t=12,777 s, après la frappe du « 2 ») ;
-- sous Caprice32, le relevé fait **au menu**, sans qu'aucune touche n'ait
-  été pressée, donne déjà `0x4375 = 0x1F`.
+Leçon à retenir pour les prochaines comparaisons : dans `0x4000-0x7FFF`,
+toujours préciser si l'on compare la vue bankée ou la RAM brute, et
+comparer la même des deux côtés.
 
-Si l'écart se confirme, deux lectures possibles : soit les bases de temps
-des deux relevés ne sont pas comparables (le « menu » de Caprice32 est
-pris à la trame 850, bien plus tard que nos 12 s — piège classique déjà
-rencontré deux fois ici), soit le contenu de cette zone diverge
-réellement à état de jeu équivalent, ce qui serait la première divergence
-mémoire observée entre les deux émulateurs. **À trancher en comparant à
-état de jeu identique, pas à temps écoulé identique.**
+## Comparaison exhaustive de la RAM : 78 octets sur 65536
+
+Plutôt que de continuer par hypothèses successives, comparaison
+**systématique** des 64 Ko de RAM de base entre les deux émulateurs, au
+même état logique (menu affiché, avant toute frappe) :
+
+```
+octets différents : 78 / 65536  (0,1 %)
+plages : pile 0x021A-0x023A, puis variables de jeu
+         0x31BD-0x3237, 0x3284, 0x35AB, 0x35E0-0x35EA, 0x39A3-0x39A6
+```
+
+Et surtout, les quatre zones qui comptent pour cette enquête sont
+**identiques octet pour octet** :
+
+| zone | octets différents |
+|---|---|
+| données de dispatch `0x4360-0x438F` | 0 |
+| table de dispatch `0x43DC-0x445F` | 0 |
+| table d'objets `0x8600-0x87FF` | 0 |
+| contenu de `0xEF06-0xEF3F` | 0 |
+
+Le contenu de `0xEF06` est d'ailleurs le même des deux côtés
+(`FF FF FF FF FF FF FF EE 00 00...`) : l'hypothèse « du code y est chargé
+chez Caprice32, pas chez nous » est donc morte elle aussi. Idem pour
+l'initialisation de la RAM : les deux émulateurs la mettent à zéro
+(`vec![0u8; ram_size]` chez nous, `memset(pbRAM, 0, ...)` chez Caprice32),
+donc aucune divergence de motif d'allumage.
+
+Les 78 différences restantes sont de l'état d'exécution (pile, variables),
+attendu puisque les deux relevés sont pris à des temps écoulés différents.
+
+## Mécanisme du redémarrage : entièrement élucidé (et correction d'une note antérieure)
+
+Au moment du saut fautif, **les deux ROM sont désactivées** : `0xEF06` est
+donc de la RAM pure, et son contenu est `FF FF FF FF FF FF FF EE 00 00…`.
+D'où l'enchaînement, entièrement déterministe :
+
+1. 7 × `0xFF` = `RST $38` (chacun appelle le gestionnaire du jeu, qui
+   revient proprement) ;
+2. `0xEE 0x00` = `XOR $00` ;
+3. puis une **glissade de `NOP`** à travers la RAM zérotée, de `0xEF0F`
+   jusqu'à `0xFFFF` ;
+4. `PC` déborde de `0xFFFF` à `0x0000` → vecteur de reset → redémarrage.
+
+Le tout prend ~0,2 s, ce qui recolle exactement avec les mesures (saut à
+0,96 s, reboot à 1,18 s).
+
+**Correction d'une note antérieure de ce document :** il n'y a pas « deux
+excursions » dont une seconde qui corromprait `SP`. En traçant tous les
+changements brutaux de `SP` entre le saut et le reboot, les bascules de la
+pile de secours (`0x309F` ↔ `0x310D`) sont **toutes équilibrées** — 21
+paires, aucune bascule non restaurée. Le `SP` n'est pas corrompu : c'est
+le simple débordement de `PC` qui redémarre la machine.
+
+## Le vrai code : un décodeur de flux (et un désassemblage antérieur erroné)
+
+**Attention, piège :** le désassemblage linéaire autour de `0x2652`
+(`LD DE,$4374`) donné plus haut dans ce document **ne correspond pas au
+code réellement exécuté** — `PC` ne passe jamais par `0x2652` ni `0x2655`
+(vérifié). Le vrai chemin, relevé par capture des 60 instructions
+précédant l'écriture du type :
+
+```
+2642  LD A,($08C5)   ; "reste" courant = 0x00
+2645  SUB A,$10      ; emprunt -> il faut lire un nouvel octet de flux
+2647  JR NC,$265C    ; (non pris)
+2649  LD DE,($08C6)  ; DE = 0x4374  <- pointeur de flux, en RAM
+264D  INC DE         ; DE = 0x4375
+264E  LD A,(DE)      ; A = 0x1F     <- octet de flux
+264F  OR A / JR NZ
+2656  LD ($08C6),DE  ; pointeur avancé, réécrit en RAM
+265A  SUB A,$10      ; 0x1F - 0x10 = 0x0F
+265C  LD ($08C5),A   ; nouveau "reste"
+265F  AND $0F        ; = 0x0F
+2661  LD (HL),A      ; type 15 écrit en 0x8662
+```
+
+Autrement dit : **`type = (octet_de_flux − 0x10) & 0x0F`**, et le
+pointeur de flux n'est pas une constante mais une variable en RAM
+(`0x08C6`), avancée à chaque consommation. Le même schéma se retrouve
+juste avant pour deux autres champs de l'objet (`0x25DA` et suivants,
+`0x2609` et suivants), avec leurs propres compteurs en `0x08BC`/`0x08BF`.
+
+## Prochaine étape recommandée
+
+L'octet de flux `0x1F` est dans la donnée chargée, identique des deux
+côtés, et le décodeur est déterministe : à pointeur égal, les deux
+émulateurs calculent donc le même type 15. La question se resserre donc
+sur **le pointeur de flux `0x08C6` lui-même** :
+
+1. remonter à son initialisation au lancement de la course (qui l'écrit,
+   avec quelle valeur) — un décalage d'un seul octet suffirait à tout
+   expliquer, puisque `0x4374` vaut `0x10` (→ type 0, inoffensif) et
+   `0x4375` vaut `0x1F` (→ type 15, fatal) ;
+2. si le pointeur est correct, alors les deux émulateurs dispatchent bien
+   vers `0xEF06` et il faut comprendre ce que Caprice32 y fait de
+   différent — ce qui supposerait une divergence d'exécution *après* le
+   saut, et non avant.
+
+Note : l'audit demandé sur `LDIR` lui-même n'a rien donné — les
+drapeaux documentés (H, N, P/V) sont correctement posés par les
+gestionnaires `0xEDB0`/`0xEDA8`/`0xEDB8` (et non dans `ldi`/`ldd`, ce qui
+peut tromper à la lecture), l'interruptibilité, les cycles et le cas
+`BC=0` (64 Ko) sont couverts par des tests. Seuls les deux bits **non
+documentés** (3 et 5, dérivés de `A + octet transféré`) ne sont pas
+posés — écart réel mais sans effet plausible ici, aucun code ne les
+observant hors `PUSH AF`.
 
 Note : l'audit demandé sur `LDIR` lui-même n'a rien donné — les
 drapeaux documentés (H, N, P/V) sont correctement posés par les
