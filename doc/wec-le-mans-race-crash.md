@@ -555,27 +555,90 @@ inexistant (on avait relevé `selected_high_rom = 255` au moment du saut)
 est déjà correctement implémenté chez nous — voir
 `Memory::effective_high_rom`.
 
+## Preuve directe du mécanisme : un `RET` en `0xEF06` répare tout
+
+Le dispatcher empile une adresse de retour **avant** son saut :
+
+```
+1EF6  LD BC,$1F04
+1EF9  PUSH BC        ; adresse de retour
+...
+1F03  JP (HL)        ; saut (pas un appel)
+```
+
+La routine de type 15 est donc censée se terminer par un `RET` vers
+`0x1F04`. Test décisif : en réécrivant `0xEF06` avec `0xC9` (`RET`) à
+chaque pas (la zone étant réécrite en permanence par le jeu, un patch
+unique serait effacé aussitôt), **la course se déroule parfaitement** —
+écran de course complet, voiture, chronomètre, score, aucun redémarrage,
+et le saut vers `0xEF06` est bien emprunté 2 fois.
+
+Le mécanisme est donc confirmé de bout en bout, et le « correctif »
+minimal est connu. Reste que ce n'est évidemment pas la correction à
+apporter : il faut comprendre pourquoi le jeu saute là.
+
+## Écarté : aucun code n'est censé être chargé en `0xEF06`
+
+Hypothèse suivante testée : `0xEF06` contiendrait du code chargé pendant
+l'initialisation de la course (donc *après* le relevé au menu, seul point
+comparé jusqu'alors). **Faux** : en surveillant `0xEF00-0xEF3F` depuis le
+lancement de la course jusqu'au redémarrage, on compte **zéro écriture**.
+La zone garde son contenu, qui ressemble à des données graphiques
+(`… FF FF EE 00 00 … 89 E2 99 55 55 45 …`).
+
+## Deux artefacts de mesure supplémentaires, corrigés
+
+- **Le « banking » n'explique rien.** J'avais cru voir la vue bankée du
+  CPU (`0x50`) diverger de la RAM brute (`0x1F`) en `0x4375`, et j'en
+  avais déduit que le jeu utilisait le banking et que la comparaison des
+  64 Ko de base était insuffisante. Vérification faite : au menu,
+  `ram_config = 0` et **vue bankée = RAM brute = `0x1F`**. Aucune
+  subtilité de banking à cet instant, et la comparaison des 64 Ko était
+  donc bien valide.
+- **L'écart « `0x50` puis `0x1F` à t=12,777 s » était encore une base de
+  temps.** Cette trace-là comptait le temps depuis la création de la
+  machine, frappe automatique comprise, alors que le relevé au menu
+  comptait autrement. Troisième fois que ce piège frappe sur cette
+  enquête — d'où la règle désormais consignée : **toujours comparer à
+  état de jeu identique, jamais à temps écoulé identique**.
+
+## Où en est le raisonnement
+
+Tout ce qui est mesurable de notre côté concorde et ne montre aucune
+anomalie d'émulation :
+
+| élément | statut |
+|---|---|
+| données de dispatch, table `0x43DC`, table d'objets, `0xEF06` | identiques à Caprice32 |
+| pointeur et compteur de flux (`0x08C6`/`0x08C5`) | initialisation correcte, schéma régulier sur 4 flux |
+| encodage RLE, type 15 demandé par l'octet `0x1F` | légitime |
+| repli ROM 0 pour un numéro de ROM inexistant | correct |
+| initialisation de la RAM (zéros) | identique à Caprice32 |
+| chargement de code en `0xEF06` | aucun, des deux côtés |
+
+Autrement dit : avec les mêmes données et le même code, Caprice32
+*devrait* sauter lui aussi vers `0xEF06`. Or il ne plante pas.
+
 ## Prochaine étape recommandée
 
-Puisque le contenu de la RAM est identique, la seule chose qui puisse
-différer au moment du saut est **l'état de commutation mémoire**, qui
-n'est pas de la donnée et n'apparaît donc pas dans un diff de RAM. Chez
-nous, au moment du saut : **ROM basse désactivée, ROM haute désactivée**,
-d'où `0xEF06` = RAM = `FF FF … EE 00 00…` = glissade de `NOP` = reset.
+Il faut maintenant **observer Caprice32 pendant la course**, ce qui bute
+depuis le début sur l'injection de la touche « 2 » (quatre approches
+échouées). Deux pistes pour débloquer ça, par ordre de coût :
 
-Si Caprice32 a la ROM haute **activée** à cet instant, `0xEF06` y est du
-code ROM réel (BASIC, par repli de ROM 0), et le saut n'a rien de fatal —
-ce qui expliquerait tout, sans aucune divergence de donnée.
-
-À mesurer des deux côtés, au moment exact du `JP (HL)` vers `0xEF06` :
-
-1. `rom_low_enabled` / `rom_high_enabled` / numéro de ROM haute
-   sélectionné ;
-2. accessoirement, ce que le CPU lit réellement en `0xEF06` à cet instant
-   (et non au menu, seul point comparé jusqu'ici).
-
-C'est un relevé court et ciblé, qui ne demande pas de rejouer toute
-l'enquête.
+1. **Diagnostiquer l'échec plutôt que le contourner** : instrumenter
+   Caprice32 pour journaliser quelles lignes de la matrice clavier le jeu
+   interroge au menu. Si la ligne 8 n'est jamais lue, le choix de touche
+   est mauvais de ce côté ; si elle l'est, le problème est la durée ou le
+   front de l'appui. Vérifier au passage, dans notre émulateur, si
+   *n'importe quelle* touche lance la course (auquel cas le choix de la
+   touche n'est pas en cause du tout).
+2. **Contourner le clavier par un instantané `.sna`** : le format est
+   simple (en-tête de 256 octets + vidage RAM) et Caprice32 sait le
+   charger. Exporter un `.sna` depuis notre émulateur juste avant le saut
+   permettrait de transplanter notre état exact dans Caprice32 et de voir
+   ce qu'il en fait — ce qui bisecterait le problème proprement. C'est
+   aussi une fonctionnalité utile en soi (sauvegarde d'état), donc pas du
+   travail jetable.
 
 Note : l'audit demandé sur `LDIR` lui-même n'a rien donné — les
 drapeaux documentés (H, N, P/V) sont correctement posés par les
