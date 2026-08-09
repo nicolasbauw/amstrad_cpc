@@ -4,7 +4,7 @@
 2) On est alors sur le menu "Disquette" en surbrillance. Appuyer une fois sur entrée pour ouvrir ce menu, puis une fois flèche bas pour "copie intégrale".
 3) Appuyer sur "entrée" pour valider ce choix, le logiciel demande alors d'insérer la disquette à copier dans le drive A. On appuie une seconde fois sur "entrée" pour valider, la copie est censée commencer, mais se bloque sur "lecture piste 00".
 
-La résolution des bugs ci-dessus marquera -pour le moment- la fin de note campagne de chasse aux bugs : les logiciels du premier batch de tests seront 100% fonctionnels. D'autres tests sur d'autres logiciels auront lieu plus tard.
+La résolution des bugs ci-dessus marquera -pour le moment- la fin de note campagne de chasse aux bugs : les logiciels du premier batch de tests seront 100% fonctionnels. D'autres tests sur d'autres logiciels auront lieu plus tard. Ca marquera aussi notre v1, que je ne souhaite pas publier, mais ce sera la première version 100% fonctionnelle.
 
 - quand l'émulateur est lancé via le raccourci desktop, il se lance donc sans terminal, et donc sans commandes à lancer depuis notre "console". Mais j'ai remarque que dans ce cas, le CPU du host s'emballe un peu. L'idée est donc :
 1) dans ce cas, on ne lance pas la console (qui se fait via le crate::console::launch(m.cmd_channel.0.clone()).unwrap(); de machine.rs) (mais quid des prinln ?), car la majorité des gens, dans la majorité des cas, n'utiliseront pas la console et ses commandes plus réservées aux power users. De manière générale, dit autrement, il ne faut pas que notre émulateur dépende de cette console. A terme (TODO v2), on implémentera notre propre fenêtre qui remplacera le terminal d'ou est lancé l'émulateur, c'est une adhérence dont je souhaite me débarasser.
