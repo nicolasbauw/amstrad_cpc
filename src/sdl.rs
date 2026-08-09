@@ -110,21 +110,27 @@ pub fn run(
     let video_subsystem = sdl_context.video()?;
     let controller_subsystem = sdl_context.game_controller()?;
 
-    // Tentative d'ouverture de la première manette disponible
-    let num_joysticks = controller_subsystem.num_joysticks().unwrap_or(0);
-    let mut _active_controller = None;
-    for i in 0..num_joysticks {
-        if controller_subsystem.is_game_controller(i) {
-            match controller_subsystem.open(i) {
-                Ok(c) => {
-                    println!("Controller opened: {}", c.name());
-                    _active_controller = Some(c);
-                    break;
+    // Tentative d'ouverture de la première manette disponible. Réutilisée
+    // aussi bien ici, au démarrage, que dans la boucle d'événements sur
+    // branchement à chaud (voir `Event::ControllerDeviceAdded` plus bas) :
+    // une seule manette active à la fois, comme au démarrage.
+    let open_first_controller =
+        |subsystem: &sdl2::GameControllerSubsystem| -> Option<sdl2::controller::GameController> {
+            let num_joysticks = subsystem.num_joysticks().unwrap_or(0);
+            for i in 0..num_joysticks {
+                if subsystem.is_game_controller(i) {
+                    match subsystem.open(i) {
+                        Ok(c) => {
+                            println!("Controller opened: {}", c.name());
+                            return Some(c);
+                        }
+                        Err(e) => println!("Failed to open controller {}: {}", i, e),
+                    }
                 }
-                Err(e) => println!("Failed to open controller {}: {}", i, e),
             }
-        }
-    }
+            None
+        };
+    let mut active_controller = open_first_controller(&controller_subsystem);
 
     // 4. Ouverture de la sortie audio. Une machine sans carte son utilisable
     // ne doit pas empêcher l'émulateur de démarrer : on continue en silence.
@@ -401,6 +407,39 @@ pub fn run(
                             }
                         }
                         _ => {}
+                    }
+                }
+                // Branchement/débranchement à chaud : ces événements sont
+                // générés nativement par SDL (relayés depuis udev/le pilote
+                // système), pas par une scrutation active de notre part —
+                // aucun coût CPU supplémentaire au repos, juste deux cas de
+                // plus dans la boucle d'événements qui tourne déjà.
+                Event::ControllerDeviceAdded { which, .. } => {
+                    // Ne remplace pas une manette déjà active : la première
+                    // branchée garde la main, comme au démarrage.
+                    if active_controller.is_none() {
+                        match controller_subsystem.open(which) {
+                            Ok(c) => {
+                                println!("Controller opened: {}", c.name());
+                                active_controller = Some(c);
+                            }
+                            Err(e) => println!("Failed to open controller {which}: {e}"),
+                        }
+                    }
+                }
+                Event::ControllerDeviceRemoved { which, .. } => {
+                    let was_active = active_controller
+                        .as_ref()
+                        .is_some_and(|c| c.instance_id() == which);
+                    if was_active {
+                        println!("Controller disconnected");
+                        active_controller = None;
+                        // Une direction ou un tir resté "enfoncé" au moment
+                        // du débranchement resterait sinon bloqué indéfiniment
+                        // dans la matrice clavier émulée.
+                        for button in 0..7 {
+                            machine.bus.psg.set_controller_button(button, false);
+                        }
                     }
                 }
                 _ => {}
