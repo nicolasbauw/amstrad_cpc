@@ -138,11 +138,16 @@ pub fn run(
 
     // 5. Initialisation de SDL_ttf pour le debugger
     let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
-    let home_dir = std::env::var("HOME")?;
-    let font_path = if cfg!(target_os = "macos") {
-        home_dir + "/Library/Fonts/NotoSansMono-Regular.ttf"
-    } else {
-        "/usr/share/fonts/noto/NotoSansMono-Regular.ttf".to_string()
+    // Chemin configurable (config.toml, [debugger] font_path) : utile pour
+    // développer sous Linux tout en testant occasionnellement sur un Mac,
+    // dont le chemin de police standard diffère. Sans configuration, retombe
+    // sur le chemin standard du système en cours.
+    let font_path = match machine.font_path() {
+        Some(path) => path.to_string(),
+        None if cfg!(target_os = "macos") => {
+            std::env::var("HOME")? + "/Library/Fonts/NotoSansMono-Regular.ttf"
+        }
+        None => "/usr/share/fonts/noto/NotoSansMono-Regular.ttf".to_string(),
     };
 
     let font = ttf_context

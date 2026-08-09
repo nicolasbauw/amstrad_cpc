@@ -8,6 +8,11 @@ keyboard = false
 # because it was too far behind). Both stretch or skip the sound, so they
 # are worth knowing about when chasing a timing problem.
 audio = false
+# Full path to the TrueType font used by the "Machine Status" window.
+# Optional: falls back to the standard path for the current OS (Linux vs
+# macOS) if absent. Useful when developing on one machine but occasionally
+# testing on another with a different font layout.
+# font_path = "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"
 
 [file]
 # Directory searched for a disk image given by its bare filename (console
