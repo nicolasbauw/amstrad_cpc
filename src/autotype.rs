@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 /// empiriquement sur cet émulateur : `PRINT 1` sans SHIFT tape `PRINT &`,
 /// une erreur de syntaxe ; avec SHIFT, `PRINT 0123456789` affiche bien
 /// `123456789`.
-fn key_for_char(c: char) -> Option<((usize, u8), bool)> {
+pub(crate) fn key_for_char(c: char) -> Option<((usize, u8), bool)> {
     let (position, shift) = match c.to_ascii_uppercase() {
         'A' => ((8, 3), false),
         'B' => ((6, 6), false),
@@ -64,6 +64,10 @@ fn key_for_char(c: char) -> Option<((usize, u8), bool)> {
         ':' => ((3, 7), false),
         ',' => ((4, 6), false),
         '-' => ((3, 0), false),
+        // Préfixe RSX sur cette ROM AZERTY ("ùtape", pas "|tape" —
+        // confirmé sur clavier réel). Même position que la vraie frappe
+        // clavier, voir `psg::Psg::set_key_state_scancode`.
+        'ù' | 'Ù' => ((3, 4), false),
         _ => return None,
     };
     Some((position, shift))
@@ -297,5 +301,14 @@ mod tests {
     fn quote_and_digit_three_share_a_key_but_differ_by_shift() {
         assert_eq!(key_for_char('"'), Some(((7, 1), false)));
         assert_eq!(key_for_char('3'), Some(((7, 1), true)));
+    }
+
+    /// Le préfixe RSX sur cette ROM est "ù", pas "|" — confirmé sur clavier
+    /// réel par l'utilisateur ("ùtape" charge la cassette, "|tape" ne fait
+    /// rien). Testé bout en bout : vérifie qu'`AutoTyper` sait le taper.
+    #[test]
+    fn the_rsx_prefix_is_u_grave_not_pipe() {
+        assert_eq!(key_for_char('ù'), Some(((3, 4), false)));
+        assert_eq!(key_for_char('Ù'), Some(((3, 4), false)));
     }
 }

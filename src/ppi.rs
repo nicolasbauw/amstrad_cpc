@@ -24,11 +24,14 @@ impl Ppi {
     /// Lecture du PPI (port & 0x0800 == 0)
     /// L'adresse du PPI est déterminée par les bits 9 et 8 du port d'I/O.
     ///
-    /// `tape_bit` est le niveau courant du signal cassette (bit 6 du port
-    /// B) : contrairement à VSYNC/joystick (mis à jour une fois par
-    /// scanline, voir `set_system_port_b`), il doit refléter l'état au
-    /// moment exact de la lecture — un pulse de cassette dure souvent moins
-    /// d'une scanline.
+    /// `tape_bit` est le niveau courant du signal cassette (bit 7 du port
+    /// B — confirmé par lecture directe du firmware, ROM basse, boucle de
+    /// scrutation en 0x2B55 : `LD B,$F5 / IN A,(C) / XOR L / AND $80`,
+    /// donc bit 7, pas bit 6 comme le laissait supposer un commentaire
+    /// antérieur qui n'était lui-même pas sûr de son fait) : contrairement
+    /// à VSYNC/joystick (mis à jour une fois par scanline, voir
+    /// `set_system_port_b`), il doit refléter l'état au moment exact de la
+    /// lecture — un pulse de cassette dure souvent moins d'une scanline.
     pub fn read_register(&self, port: u16, psg: &Psg, tape_bit: bool) -> u8 {
         match (port >> 8) & 0x03 {
             0 => {
@@ -42,11 +45,11 @@ impl Ppi {
             }
             1 => {
                 // Port B ($F5xx) : Lecture seule de l'état du système, avec
-                // le bit 6 (cassette) recalé en temps réel.
+                // le bit 7 (cassette) recalé en temps réel.
                 if tape_bit {
-                    self.port_b_input | 0x40
+                    self.port_b_input | 0x80
                 } else {
-                    self.port_b_input & !0x40
+                    self.port_b_input & !0x80
                 }
             }
             2 => {
@@ -138,8 +141,10 @@ impl Ppi {
     /// - Bit 1 : Sélection manette (0=Joystick B, 1=Joystick A)
     /// - Bit 2-4 : Configuration des périphériques
     /// - Bit 5 : Port parallèle (prêt)
-    /// - Bit 6 : Cassette (données)
-    /// - Bit 7 : ?
+    /// - Bit 6 : ?
+    /// - Bit 7 : Cassette (données) — confirmé par lecture directe du
+    ///   firmware (ROM basse, 0x2B55), pas géré ici mais dans
+    ///   `read_register` (recalé au moment exact de la lecture).
     pub fn set_system_port_b(&mut self, vsync: bool, joystick_sel: bool) {
         // Bit 0: VSYNC (1 si actif, 0 sinon)
         if vsync {

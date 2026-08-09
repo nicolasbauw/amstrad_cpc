@@ -1520,6 +1520,97 @@ mod tests {
         );
     }
 
+    /// Bout en bout du lecteur de cassettes : bascule le périphérique
+    /// courant sur la cassette (`ùtape` — pas `|tape`, voir
+    /// `autotype::key_for_char`), lance `RUN"`, attend l'écran "Press PLAY
+    /// then any key", presse une touche, et vérifie que le firmware
+    /// décode réellement les impulsions (pas seulement que la cassette en
+    /// émet — `Tape::read_bit()` ferait ça même avec le mauvais bit côté
+    /// PPI, puisqu'il ne passe pas par lui).
+    ///
+    /// Cette séquence a longtemps semblé ne rien faire à cause de TROIS
+    /// bugs indépendants, tous corrigés : le mauvais bit du port C pour le
+    /// moteur (bit 5 au lieu du bit 4), l'absence de "ù" dans la table de
+    /// frappe automatique (qui faisait taper "tape" tout court, une
+    /// commande BASIC invalide plutôt qu'un appel RSX), et le mauvais bit
+    /// du port B pour la lecture cassette (bit 6 au lieu du bit 7 —
+    /// confirmé par lecture directe du firmware, ROM basse 0x2B55). Avec
+    /// le mauvais bit de lecture, le moteur tournait et le signal changeait
+    /// bien, mais le firmware restait bloqué indéfiniment dans sa boucle
+    /// d'attente ("Press PLAY then any key" ne progresse jamais) : c'est
+    /// ce que ce test vérifie maintenant, en observant que l'exécution
+    /// visite un grand nombre d'adresses distinctes (décodage actif) au
+    /// lieu de rester coincée dans une poignée d'adresses (boucle
+    /// d'attente). Vérifié en plus par une vraie capture d'écran montrant
+    /// "Loading DIAG.BIN block 1" pendant la mise au point.
+    #[test]
+    fn tape_firmware_actually_decodes_the_pulses_after_cas_in_open() {
+        use std::collections::HashSet;
+
+        let mut machine = Machine::new();
+        if machine.load_roms().is_err() {
+            println!("ROMs absentes : test ignore");
+            return;
+        }
+        if machine.load_tape("bin/AmstradDiag.cdt").is_err() {
+            println!("Cassette absente : test ignore");
+            return;
+        }
+
+        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("ùtape\nrun\""));
+        let mut ticks = 0u64;
+        while !typer.is_done() {
+            let elapsed = machine.step();
+            typer.advance(&mut machine.bus.psg, elapsed);
+            ticks += elapsed as u64;
+            assert!(
+                ticks < 10 * 4_000_000,
+                "la frappe automatique ne se termine pas"
+            );
+        }
+
+        // Laisse le firmware atteindre l'écran "Press PLAY then any key".
+        let mut ticks2 = 0u64;
+        while ticks2 < 4 * 4_000_000 {
+            ticks2 += machine.step() as u64;
+        }
+
+        // Presse une touche quelconque (ESPACE) pour lancer la lecture.
+        machine.bus.psg.keyboard_matrix[5] &= !(1 << 7);
+        let mut hold = 0u64;
+        while hold < 160_000 {
+            hold += machine.step() as u64;
+        }
+        machine.bus.psg.keyboard_matrix[5] |= 1 << 7;
+
+        // Laisse largement le temps au pilote/sync d'etre detectes et au
+        // premier bloc de commencer a se decoder (verifie manuellement :
+        // "Loading DIAG.BIN block 1" apparait bien avant 15s).
+        let mut ticks3 = 0u64;
+        while ticks3 < 12 * 4_000_000 {
+            ticks3 += machine.step() as u64;
+        }
+
+        // Sur la derniere seconde, un firmware qui decode activement visite
+        // beaucoup d'adresses (routines de reception, ecriture memoire,
+        // affichage) ; un firmware coince dans "Press PLAY then any key"
+        // ne visite qu'une poignee d'adresses (boucle d'attente).
+        let mut visited: HashSet<u16> = HashSet::new();
+        let mut ticks4 = 0u64;
+        while ticks4 < 4_000_000 {
+            visited.insert(machine.cpu.reg.pc);
+            ticks4 += machine.step() as u64;
+        }
+
+        assert!(
+            visited.len() > 200,
+            "le firmware semble bloque dans une boucle d'attente : \
+             seulement {} adresses distinctes visitees sur 1s, la lecture \
+             cassette ne progresse pas",
+            visited.len()
+        );
+    }
+
     /// La commande `blank` doit écrire un .dsk formaté à l'emplacement
     /// résolu puis l'insérer immédiatement dans le lecteur visé, comme si
     /// l'utilisateur venait d'y glisser une disquette vierge fraîchement
