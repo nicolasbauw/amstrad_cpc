@@ -21,6 +21,7 @@ pub enum MonitorCmd {
     Disk,
     Blank,
     Tape,
+    Snapshot,
     PowerCycle,
     Trace,
     ReadRam,

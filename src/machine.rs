@@ -64,6 +64,7 @@ Emulator commands:
     blank d.dsk b       Creates a blank formatted disk image and inserts it in drive B
     tape f.cdt          Loads the f.cdt tape image into the tape reader
     tape eject          Ejects the tape image
+    sna f.sna           Saves a .SNA snapshot (readable by other CPC emulators)
     pc                  Performs a power cycle
     vol                 Displays the audio output volume
     vol 30              Sets the audio output volume to 30 %
@@ -1267,6 +1268,14 @@ impl Machine {
                     self.eject_tape();
                 } else if let Err(e) = self.load_tape(&arg) {
                     println!("Error loading tape: {}", e);
+                }
+            }
+            MonitorCmd::Snapshot => {
+                // "sna f.sna" ecrit un instantane relisible par les autres
+                // emulateurs CPC (Caprice32 notamment).
+                let name = if arg.is_empty() { "snapshot.sna" } else { &arg };
+                if let Err(e) = crate::snapshot::save(self, name) {
+                    println!("Error saving snapshot: {}", e);
                 }
             }
             MonitorCmd::PowerCycle => {

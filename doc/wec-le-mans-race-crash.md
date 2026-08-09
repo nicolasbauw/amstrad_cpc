@@ -1,23 +1,68 @@
-# WEC Le Mans (2e bug) : redémarrage ~1 s après le lancement de la course (ouvert — piste : timing FDC)
+# WEC Le Mans (2e bug) : redémarrage ~1 s après le lancement de la course — RÉSOLU
 
-Note d'enquête. **Le symptôme n'est pas résolu.** L'enquête a suivi
-plusieurs pistes successives, dont plusieurs ont été abandonnées après
-vérification (voir les sections « Ce qui a été écarté » et « Le FDC est
-au cœur du chemin de données », cette dernière revenant sur une
-conclusion intermédiaire erronée qui écartait le FDC à tort).
+## La cause : `INC/DEC IYH/IYL` absents du décodeur Z80
 
-**Le fait central : Caprice32 lance la course normalement avec la même
-disquette et les mêmes ROM, alors que nous redémarrons.** Les octets en
-mémoire sont pourtant identiques des deux côtés (`0x4375=0x1F`,
-`table[15]→0xEF06`, vérifiés). La divergence est donc dans l'exécution,
-et **le bug est bien chez nous** — ce n'est ni un défaut de la disquette,
-ni un problème de chargement, ni une question de timing FDC (les trois
-ont été testés et écartés, voir plus bas).
+Quatre instructions non documentées manquaient purement et simplement
+dans `ZilogZ80` : `0xFD24`, `0xFD25`, `0xFD2C`, `0xFD2D`
+(`INC IYH`, `DEC IYH`, `INC IYL`, `DEC IYL`). Leurs équivalents sur IX
+(`0xDD24/25/2C/2D`) étaient bien là — c'était la **seule** asymétrie
+DD/FD du décodeur.
 
-Piste courante : le dispatcher ne saute sur la table que si un **drapeau
-« objet actif »** (`IX+1`) est non nul. L'hypothèse à tester est que cet
-objet de type 15 devrait rester inactif, et qu'il est actif à tort chez
-nous.
+Conséquence : le préfixe `0xFD` n'était pas consommé, `PC` n'avançait que
+d'un octet, et le CPU exécutait ensuite l'octet `0x2C` tout seul, soit
+`INC L` — une instruction différente, sur un autre registre. À partir de
+là le programme déraillait, aboutissant ~1,2 s plus tard au saut vers
+`0xEF06` puis au redémarrage.
+
+Le désassembleur, lui, décodait correctement `FD 2C` sur 2 octets : seule
+l'exécution était fautive. C'est ce qui rendait le bug si difficile à
+voir — le code affiché était juste, le code exécuté ne l'était pas.
+
+Correctif dans `ZilogZ80` (`src/cpu.rs`), avec test de non-régression
+couvrant les quatre opcodes (avancement de `PC` **et** valeurs). Vérifié
+de bout en bout : la course démarre et se déroule normalement (ligne de
+départ, portique, voitures adverses, chronomètre).
+
+## Comment elle a été trouvée : transplantation d'état et diff de traces
+
+La méthode qui a débloqué l'enquête, après de nombreuses fausses pistes :
+
+1. **Export `.SNA`** (nouveau module `src/snapshot.rs`) : un instantané
+   pris chez nous 0,5 s après le lancement de la course, donc avant le
+   plantage. Cela contourne définitivement le problème d'injection
+   clavier sous Caprice32, qui bloquait la comparaison depuis cinq
+   tentatives.
+2. **Rechargement dans Caprice32**, avec vérification que l'état est
+   réellement repris (`PC=0x2ED2`, `SP=0x3137`, `ROM_config` identiques,
+   puis progression dans le code du jeu) — sans cette validation, le
+   relevé n'aurait rien valu, erreur déjà commise deux fois ici.
+   Résultat : depuis **notre état exact**, Caprice32 tourne stablement
+   8 s sans planter, là où nous redémarrons en 0,68 s.
+3. **Trace binaire des `PC`** des deux côtés (2 millions d'instructions,
+   2 octets chacune) depuis ce même état, puis recherche de la première
+   divergence : instruction **#622**, `PC=0x2BEF`, où nous allons en
+   `0x2BF0` (+1) et Caprice32 en `0x2BF1` (+2). Les octets à cette
+   adresse sont `FD 2C`.
+
+Cette approche — partir d'un état rigoureusement identique, puis diffuser
+les traces jusqu'à la première divergence — est de loin la plus efficace
+des méthodes essayées sur cette enquête, et mérite d'être reprise pour
+les prochains écarts d'émulation.
+
+## Portée du correctif
+
+Toute instruction utilisant les moitiés de `IY` était concernée, pas
+seulement WEC Le Mans. Les jeux qui s'en servent (assez courant en code
+optimisé, `IYH`/`IYL` servant de registres 8 bits supplémentaires)
+pouvaient dérailler de façon arbitraire. À retester dans cet esprit :
+le résidu de clignotement de BMX Simulator, toujours ouvert.
+
+---
+
+*Ce qui suit est le journal de l'enquête, conservé pour la méthode et
+pour les pièges rencontrés. Plusieurs conclusions intermédiaires y sont
+explicitement rétractées : elles sont gardées telles quelles, avec leur
+correction, plutôt que réécrites après coup.*
 
 ## Le symptôme
 

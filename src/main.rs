@@ -13,6 +13,7 @@ mod monitor;
 mod ppi;
 mod psg;
 mod sdl;
+mod snapshot;
 mod sound;
 mod tape;
 mod trace;
