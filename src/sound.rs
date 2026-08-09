@@ -31,6 +31,16 @@ const MAX_BUFFERED_SAMPLES: usize = SAMPLE_RATE as usize;
 /// Amplitude de chacun des 16 niveaux de volume du PSG. L'échelle est
 /// logarithmique (environ -3 dB par pas), et non linéaire : une rampe
 /// linéaire donnerait des enveloppes au son nettement faux.
+/// Amplitude du signal cassette réinjecté dans la sortie audio.
+///
+/// Sur un vrai CPC, on entend le magnétophone parce que sa sortie audio est
+/// renvoyée au haut-parleur : d'où le sifflement caractéristique du
+/// chargement. Volontairement discret par rapport au PSG (dont un canal
+/// saturé vaut 1.0 avant division par 3) : assez présent pour être
+/// reconnaissable, assez bas pour ne pas couvrir la musique d'un jeu qui
+/// chargerait en fond.
+const TAPE_AMPLITUDE: f32 = 0.10;
+
 pub const VOLUME_TABLE: [f32; 16] = [
     0.0000, 0.0137, 0.0205, 0.0291, 0.0423, 0.0618, 0.0847, 0.1369, 0.1691, 0.2647, 0.3527, 0.4499,
     0.5704, 0.6873, 0.8482, 1.0000,
@@ -74,6 +84,10 @@ pub struct Sound {
     /// parasites très audibles.
     sample_sum: f32,
     sample_len: u32,
+    /// Niveau courant du signal cassette (0.0 hors lecture). Alimenté par
+    /// `Machine::step` a partir du lecteur, et melange tel quel a la sortie
+    /// du PSG.
+    tape_level: f32,
     samples: VecDeque<f32>,
 }
 
@@ -130,6 +144,7 @@ impl Sound {
             sample_phase: 0,
             sample_sum: 0.0,
             sample_len: 0,
+            tape_level: 0.0,
             samples: VecDeque::new(),
         }
     }
@@ -163,7 +178,7 @@ impl Sound {
                 level = self.mix(&p);
             }
 
-            self.sample_sum += level;
+            self.sample_sum += level + self.tape_level;
             self.sample_len += 1;
 
             self.sample_phase += SAMPLE_RATE;
@@ -293,6 +308,14 @@ impl Sound {
 
     /// Retire et renvoie tous les échantillons produits depuis le dernier
     /// appel.
+    /// Renseigne le niveau courant du signal cassette. Appelé à chaque
+    /// instruction par `Machine::step` : un pulse de cassette dure au bas mot
+    /// plusieurs centaines de cycles, cette résolution est donc largement
+    /// suffisante.
+    pub fn set_tape_level(&mut self, playing_high: bool) {
+        self.tape_level = if playing_high { TAPE_AMPLITUDE } else { 0.0 };
+    }
+
     pub fn take_samples(&mut self) -> Vec<f32> {
         self.samples.drain(..).collect()
     }
@@ -776,5 +799,45 @@ mod tests {
         }
         // Échelle logarithmique : le pas 7 est loin de la moitié du maximum.
         assert!(VOLUME_TABLE[7] < 0.25, "l'echelle doit etre logarithmique");
+    }
+
+    /// Le signal cassette doit s'entendre : c'est le sifflement
+    /// caractéristique du chargement sur un vrai CPC, dont la sortie du
+    /// magnétophone est renvoyée au haut-parleur. Et il doit se taire dès
+    /// que la bande ne défile plus — sinon un niveau figé laisserait une
+    /// composante continue permanente dans la sortie.
+    #[test]
+    fn the_tape_signal_is_audible_and_falls_silent_when_the_tape_stops() {
+        // PSG entierement muet : tout ce qu'on entendra viendra de la bande.
+        let silent = [0u8; 16];
+
+        let mut sound = Sound::new();
+        // Alterne le niveau comme le ferait une bande qui defile.
+        for _ in 0..200 {
+            sound.set_tape_level(true);
+            sound.run(&silent, 40);
+            sound.set_tape_level(false);
+            sound.run(&silent, 40);
+        }
+        let with_tape = sound.take_samples();
+        assert!(
+            !with_tape.is_empty(),
+            "la simulation doit produire des echantillons"
+        );
+        let loud = with_tape.iter().cloned().fold(0.0f32, f32::max);
+        assert!(
+            loud > 0.0,
+            "le signal cassette doit s'entendre, maximum observe {loud}"
+        );
+
+        // Bande a l'arret : plus aucun son, malgre le meme nombre de cycles.
+        let mut sound = Sound::new();
+        sound.set_tape_level(false);
+        sound.run(&silent, 16_000);
+        let silence = sound.take_samples();
+        assert!(
+            silence.iter().all(|s| *s == 0.0),
+            "moteur a l'arret et PSG muet : la sortie doit etre silencieuse"
+        );
     }
 }

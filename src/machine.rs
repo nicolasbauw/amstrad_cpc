@@ -567,14 +567,22 @@ impl Machine {
         let elapsed_ticks = cpc_instruction_time(if ticks == 0 { 4 } else { ticks });
         self.total_ticks += elapsed_ticks as u64;
 
+        // La cassette avance en premier : un pulse dure souvent moins d'une
+        // trame, une cadence plus grossière ferait rater des fronts. Son
+        // niveau alimente ensuite le mélange audio du même intervalle, ce
+        // qui reproduit le sifflement caractéristique du chargement — sur un
+        // vrai CPC, la sortie du magnétophone est renvoyée au haut-parleur.
+        let tape_level = {
+            let mut tape = self.bus.tape.borrow_mut();
+            tape.tick(elapsed_ticks);
+            tape.motor_on && tape.read_bit()
+        };
+        self.bus.psg.sound.set_tape_level(tape_level);
+
         // Le PSG est cadencé par le même temps que le CPU : il doit avancer
         // ici, et pas une fois par trame, sinon les changements de registres
         // en cours de trame (toutes les musiques en font) seraient perdus.
         self.bus.psg.tick(elapsed_ticks);
-
-        // La cassette aussi : un pulse dure souvent moins d'une trame, une
-        // cadence plus grossière ferait rater des fronts.
-        self.bus.tape.borrow_mut().tick(elapsed_ticks);
 
         // Gestion HSYNC / Interruptions (période 256 ticks = 64µs)
         self.hsync_accumulator += elapsed_ticks;
