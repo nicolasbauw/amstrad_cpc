@@ -520,21 +520,62 @@ pointeur de flux n'est pas une constante mais une variable en RAM
 juste avant pour deux autres champs de l'objet (`0x25DA` et suivants,
 `0x2609` et suivants), avec leurs propres compteurs en `0x08BC`/`0x08BF`.
 
+## Le pointeur de flux est CORRECT : la divergence est *après* le saut
+
+L'hypothèse du décalage d'un octet est **écartée**. L'initialisation, au
+lancement de la course, suit un schéma parfaitement régulier pour
+**quatre** flux — pointeur = base, compteur = premier octet de la base :
+
+```
+04CC  LD HL,$41C6 / LD ($08BD),HL / LD A,(HL) / LD ($08BC),A   ; flux 1
+04D6  LD HL,$424D / LD ($08C0),HL / LD A,(HL) / LD ($08BF),A   ; flux 2
+04E0  LD HL,$42D3 / LD ($08C3),HL / LD A,(HL) / LD ($08C2),A   ; flux 3
+04EA  LD HL,$4374 / LD ($08C6),HL / LD A,(HL) / LD ($08C5),A   ; flux 4
+```
+
+L'octet `0x10` en `0x4374` n'est donc pas « sauté » : il sert de
+**compteur initial**, et `0x1F` en `0x4375` est bien le premier octet de
+flux. L'encodage est du RLE : un octet `0xNM` donne `N` objets de type
+`M` (le décodeur soustrait `0x10` tant qu'il n'y a pas d'emprunt). `0x1F`
+demande donc **un objet de type 15**, ce qui est légitime au regard de
+l'encodage.
+
+Et l'adresse de base `0x4374` est une **constante immédiate** dans le code
+(`21 74 43` en `0x04EA`), dans une zone de RAM que le diff exhaustif a
+montrée identique à Caprice32.
+
+**Conséquence logique, qui retourne la conclusion :** avec la même RAM, le
+même code et un décodeur déterministe, Caprice32 calcule forcément lui
+aussi le type 15 et saute lui aussi vers `0xEF06`. La divergence n'est
+donc **pas** dans le calcul de l'index — elle est dans ce qui se passe
+**après** le saut.
+
+Écarté au passage : le repli sur la ROM 0 pour un numéro de ROM haute
+inexistant (on avait relevé `selected_high_rom = 255` au moment du saut)
+est déjà correctement implémenté chez nous — voir
+`Memory::effective_high_rom`.
+
 ## Prochaine étape recommandée
 
-L'octet de flux `0x1F` est dans la donnée chargée, identique des deux
-côtés, et le décodeur est déterministe : à pointeur égal, les deux
-émulateurs calculent donc le même type 15. La question se resserre donc
-sur **le pointeur de flux `0x08C6` lui-même** :
+Puisque le contenu de la RAM est identique, la seule chose qui puisse
+différer au moment du saut est **l'état de commutation mémoire**, qui
+n'est pas de la donnée et n'apparaît donc pas dans un diff de RAM. Chez
+nous, au moment du saut : **ROM basse désactivée, ROM haute désactivée**,
+d'où `0xEF06` = RAM = `FF FF … EE 00 00…` = glissade de `NOP` = reset.
 
-1. remonter à son initialisation au lancement de la course (qui l'écrit,
-   avec quelle valeur) — un décalage d'un seul octet suffirait à tout
-   expliquer, puisque `0x4374` vaut `0x10` (→ type 0, inoffensif) et
-   `0x4375` vaut `0x1F` (→ type 15, fatal) ;
-2. si le pointeur est correct, alors les deux émulateurs dispatchent bien
-   vers `0xEF06` et il faut comprendre ce que Caprice32 y fait de
-   différent — ce qui supposerait une divergence d'exécution *après* le
-   saut, et non avant.
+Si Caprice32 a la ROM haute **activée** à cet instant, `0xEF06` y est du
+code ROM réel (BASIC, par repli de ROM 0), et le saut n'a rien de fatal —
+ce qui expliquerait tout, sans aucune divergence de donnée.
+
+À mesurer des deux côtés, au moment exact du `JP (HL)` vers `0xEF06` :
+
+1. `rom_low_enabled` / `rom_high_enabled` / numéro de ROM haute
+   sélectionné ;
+2. accessoirement, ce que le CPU lit réellement en `0xEF06` à cet instant
+   (et non au menu, seul point comparé jusqu'ici).
+
+C'est un relevé court et ciblé, qui ne demande pas de rejouer toute
+l'enquête.
 
 Note : l'audit demandé sur `LDIR` lui-même n'a rien donné — les
 drapeaux documentés (H, N, P/V) sont correctement posés par les
