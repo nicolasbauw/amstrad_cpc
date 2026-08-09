@@ -619,11 +619,63 @@ anomalie d'émulation :
 Autrement dit : avec les mêmes données et le même code, Caprice32
 *devrait* sauter lui aussi vers `0xEF06`. Or il ne plante pas.
 
+## Écarté : le plantage ne dépend pas de la ROM
+
+Piste ouverte par une remarque de l'utilisateur (« sous Caprice32, en ROM
+QWERTY, la touche 2 fonctionne ») : et si le plantage venait de la ROM
+AZERTY, et non de l'émulation ? La référence « ça marche sous Caprice32 »
+étant vraisemblablement obtenue avec la ROM anglaise, la comparaison
+n'aurait jamais été à ROM égale.
+
+Test fait en rejouant toute la séquence chez nous avec la **ROM anglaise
+de Caprice32** (`rom/cpc6128.rom`, 32 Ko combinée, chargée à la main pour
+court-circuiter la config) : le jeu charge normalement, le menu s'affiche
+correctement, et **le redémarrage survient à t=1,1907 s** — soit
+exactement le même instant qu'en AZERTY (1,18 s).
+
+**Le plantage est donc indépendant de la ROM système.** C'est bien notre
+émulation.
+
+Détail utile pour les prochains essais : la position matricielle d'une
+touche est **matérielle**, pas liée à la ROM (« 2 » = ligne 8 bit 1 sur
+tout CPC). En revanche notre table de frappe (`autotype::key_for_char`)
+est calée AZERTY, donc pour piloter une ROM anglaise il faut permuter
+A/Q et W/Z : `W` est en `(7,3)` et non `(8,7)` (qui est `Z`), et le
+guillemet est `SHIFT`+`(8,1)` et non la touche du 3.
+
+## La touche « 2 » sous Caprice32 : le problème n'est PAS l'injection
+
+Cinquième tentative, cette fois avec la **ROM anglaise par défaut** de
+Caprice32 et `--autocmd 'run"wec'` : le menu s'affiche correctement, mais
+la course ne démarre toujours pas (le relevé « 0 dispatch vers `0xEF06` »
+obtenu au passage est donc **sans valeur** — le jeu n'était jamais entré
+en course).
+
+Diagnostic enfin fait, au lieu d'essayer une sixième variante : en
+journalisant les lignes de matrice réellement interrogées au menu, on
+obtient
+
+```
+ligne clavier interrogee : 0 (matrix[8]=FD)
+ligne clavier interrogee : 1 (matrix[8]=FD)
+...
+ligne clavier interrogee : 8 (matrix[8]=FD)
+ligne clavier interrogee : 9 (matrix[8]=FD)
+```
+
+Le jeu **scrute bien les dix lignes**, et `matrix[8] = 0xFD` (bit 1 à
+zéro) : la touche « 2 » est donc **effectivement injectée et
+effectivement lue**. Le problème n'est pas l'injection clavier — le jeu
+voit la touche et l'ignore.
+
+C'est un fait neuf et utile : les cinq échecs précédents étaient
+diagnostiqués à tort comme un problème de harnais. Il faut donc chercher
+ce que le menu attend d'autre (état interne, fin de chargement disque,
+lecture manette…), ou contourner définitivement.
+
 ## Prochaine étape recommandée
 
-Il faut maintenant **observer Caprice32 pendant la course**, ce qui bute
-depuis le début sur l'injection de la touche « 2 » (quatre approches
-échouées). Deux pistes pour débloquer ça, par ordre de coût :
+Le contournement propre, qui rend le clavier hors sujet :
 
 1. **Diagnostiquer l'échec plutôt que le contourner** : instrumenter
    Caprice32 pour journaliser quelles lignes de la matrice clavier le jeu
