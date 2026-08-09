@@ -6,7 +6,7 @@
 
 - Cerise sur le gâteau :
 1) reproduire le son caractéristique tu chargement des cassettes (fichiers cdt), comme sur une vraie cassette de l'époque. (étudier faisabilité)
-2) Sur le 6128, je pense que SHIFT + la grande touche entrée permettait, en mode ùtape, de saisir automatiquement RUN" (+entrée ?), afin d'avoir l'invite d'appuyer sur play sur le lecteur de cassettes, et d'attendre un appui sur entrée de l'utilisateur. Confirmer ce point, et, s'il est confirmé, l'implémenter.
+2) Sur le 6128, je pense que SHIFT + la grande touche entrée permettait, en mode ùtape, de saisir automatiquement RUN" (+entrée ?), afin d'avoir l'invite d'appuyer sur play sur le lecteur de cassettes, et d'attendre un appui sur entrée de l'utilisateur. Confirmer ce point, et, s'il est confirmé, l'implémenter. J'ai vu cela sur internet, mais sous caprice32 ça ne fonctionne pas, ou c'est non implémenté.
 
 La résolution des bugs ci-dessus marquera -pour le moment- la fin de note campagne de chasse aux bugs : les logiciels du premier batch de tests seront 100% fonctionnels. D'autres tests sur d'autres logiciels auront lieu plus tard. Ces deux dernières featurettes + la fin des bugs marqueront aussi notre v1, que je ne souhaite pas publier, mais ce sera la première version 100% fonctionnelle. Ce qui figure ci-dessous sera pour la V2, qui, elle, sera publiée, car considérée comme la cible.
 
