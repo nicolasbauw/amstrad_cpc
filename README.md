@@ -18,9 +18,27 @@
     disk d.dsk b      Loads the d.dsk disk image on drive B (if enabled in config.toml)
     disk eject        Ejects the disk image from drive A
     disk eject b      Ejects the disk image from drive B
+    tape f.cdt        Loads the f.cdt tape image on the (single) tape drive
+    tape eject        Ejects the tape image
     pc                Performs a power cycle
     vol               Displays the audio output volume
     vol 30            Sets the audio output volume to 30 %
+
+## Tape drive
+
+The emulator reproduces a real datacorder: loading `.cdt` images (see the
+`tape` console command above, or `Machine::load_tape`), turning the motor on
+and off from the PPI exactly as the firmware does, and even reinjecting the
+tape signal into the audio mix while the motor runs, for the familiar
+loading whistle. A power cycle (`pc`) keeps the tape inserted, rewound to
+its start, just like switching a real CPC off and on again with a cassette
+still in the deck.
+
+At the BASIC prompt, **`CTRL` + the numeric keypad's `Enter`** (not the main
+Enter key) types `RUN"` and validates it automatically — this is a keyboard
+expansion token built into the firmware itself, not an emulator feature.
+Once a tape is inserted, this is normally followed by "Press PLAY then any
+key", after which the emulated datacorder starts feeding the firmware.
   
 ## Emulator monitor commands:
   
