@@ -5,6 +5,9 @@
 1) quand le logiciel est lancé, faire flèche droit une fois (pour poitionner le curseur sur "copieur") attendre deux secondes puis valider avec "entrée"
 2) On est alors sur le menu "Disquette" en surbrillance. Appuyer une fois sur entrée pour ouvrir ce menu, puis une fois flèche bas pour "copie intégrale".
 3) Appuyer sur "entrée" pour valider ce choix, le logiciel demande alors d'insérer la disquette à copier dans le drive A. On appuie une seconde fois sur "entrée" pour valider, la copie est censée commencer, mais se bloque sur "lecture piste 00".
+4) il semble bloquer au PC 0x11CA - 0x11CC:
+11CA    ED78          IN A,(C)
+11CC    87            ADD A,A
 
 - Cerise sur le gâteau :
 1) [FAIT] son caractéristique du chargement cassette : le niveau du signal du lecteur est réinjecté dans le mélange audio (sound.rs, TAPE_AMPLITUDE = 0.10, volontairement discret pour ne pas couvrir une musique de jeu). Mesuré sur un vrai chargement : ~3442 alternances/s, soit un fondamental vers 1,7 kHz — la bande du sifflement CPC. Se tait dès que le moteur s'arrête. Reste éventuellement à rendre l'amplitude paramétrable dans config.toml si on veut pouvoir le couper.
