@@ -579,6 +579,10 @@ impl Machine {
         };
         self.bus.psg.sound.set_tape_level(tape_level);
 
+        // Le contrôleur de disquette a lui aussi une horloge : ses délais
+        // de rotation ne s'écoulent que si on les fait avancer ici.
+        self.bus.fdc.borrow_mut().tick(elapsed_ticks);
+
         // Le PSG est cadencé par le même temps que le CPU : il doit avancer
         // ici, et pas une fois par trame, sinon les changements de registres
         // en cours de trame (toutes les musiques en font) seraient perdus.
@@ -1539,10 +1543,27 @@ mod tests {
         // sous 0x4000 ou dans les ROMs hautes. S'y retrouver prouve que la
         // commande tapée a bien été reçue et exécutée par le firmware, pas
         // seulement posée sans effet sur un clavier qui ne répondrait pas.
+        //
+        // On échantillonne sur une trame entière plutôt qu'à un instant
+        // précis : le jeu passe régulièrement par les vecteurs RST du bas
+        // de la mémoire (les appels firmware du CPC en sont truffés), et un
+        // relevé unique tombait dessus dès que le tempo d'exécution
+        // changeait un peu — un test qui échouait pour une raison sans
+        // rapport avec ce qu'il vérifie.
+        let mut dans_le_jeu = 0u32;
+        let mut releves = 0u32;
+        let mut ticks = 0u64;
+        while ticks < 80_000 {
+            if (0x7000..0xA000).contains(&machine.cpu.reg.pc) {
+                dans_le_jeu += 1;
+            }
+            releves += 1;
+            ticks += machine.step() as u64;
+        }
         assert!(
-            (0x7000..0xA000).contains(&machine.cpu.reg.pc),
-            "le jeu ne semble pas avoir demarre, PC={:#06X}",
-            machine.cpu.reg.pc
+            dans_le_jeu * 2 > releves,
+            "le jeu ne semble pas avoir demarre : seulement {dans_le_jeu} relevés \
+             sur {releves} dans la zone du jeu"
         );
     }
 
@@ -1635,6 +1656,127 @@ mod tests {
              cassette ne progresse pas",
             visited.len()
         );
+    }
+
+    /// Bout en bout du copieur de Discology : lance le logiciel, navigue
+    /// jusqu'à "Copie Intégrale", lit la disquette source piste par piste,
+    /// glisse une disquette vierge quand le copieur réclame la
+    /// DESTINATION, et vérifie que ce qui a été écrit correspond bien à la
+    /// source.
+    ///
+    /// Ce test tient à deux comportements du contrôleur sans lesquels la
+    /// copie ne démarre même pas (voir doc/discology-copie.md) : Read ID
+    /// renvoie les secteurs à tour de rôle, et il met le temps qu'il faut à
+    /// la disquette pour amener l'identifiant suivant sous la tête.
+    ///
+    /// Ignoré par défaut : il émule près de trois minutes de CPC.
+    /// Le lancer avec `cargo test --release discology_copies -- --ignored`.
+    #[test]
+    #[ignore]
+    fn discology_copies_a_disk_track_by_track() {
+        let mut machine = Machine::new();
+        if machine.load_roms().is_err() {
+            println!("ROMs absentes : test ignore");
+            return;
+        }
+        if machine.load_disk("bin/Discology.dsk").is_err() {
+            println!("Disquette absente : test ignore");
+            return;
+        }
+
+        fn run(machine: &mut Machine, ticks: u64) {
+            let mut t = 0u64;
+            while t < ticks {
+                t += machine.step() as u64;
+            }
+        }
+        // Discology ne retient une touche que si elle reste enfoncée un
+        // temps "humain" : quelques dizaines de millisecondes passent
+        // inaperçues. Trop longtemps, en revanche, et la répétition
+        // automatique fait sauter deux lignes de menu d'un coup.
+        fn press(machine: &mut Machine, (line, bit): (usize, u8), hold_ms: u64) {
+            machine.bus.psg.keyboard_matrix[line] &= !(1 << bit);
+            run(machine, hold_ms * 4_000);
+            machine.bus.psg.keyboard_matrix[line] |= 1 << bit;
+            run(machine, 3 * 4_000_000);
+        }
+        const DROITE: (usize, u8) = (0, 1);
+        const BAS: (usize, u8) = (0, 2);
+        const COPY: (usize, u8) = (1, 1);
+        const ENTREE: (usize, u8) = (2, 2);
+
+        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("RUN\"DISCO"));
+        let mut ticks = 0u64;
+        while !typer.is_done() {
+            let elapsed = machine.step();
+            typer.advance(&mut machine.bus.psg, elapsed);
+            ticks += elapsed as u64;
+            assert!(ticks < 15 * 4_000_000, "la frappe automatique ne finit pas");
+        }
+        run(&mut machine, 45 * 4_000_000); // chargement du logiciel
+
+        press(&mut machine, DROITE, 1000); // module "Copieur"
+        press(&mut machine, COPY, 1000);
+        press(&mut machine, BAS, 300); // menu Disquette : "Copie Intégrale"
+        press(&mut machine, ENTREE, 1000);
+        press(&mut machine, ENTREE, 1000); // source déjà en place
+
+        // Lecture des 40 pistes, puis insertion de la disquette vierge que
+        // réclame le copieur, puis écriture.
+        run(&mut machine, 25 * 4_000_000);
+        let destination = std::env::temp_dir().join("amstrad_cpc_test_discology_copie.dsk");
+        let destination = destination.to_str().unwrap();
+        machine
+            .create_blank_disk(destination, false)
+            .expect("creation de la disquette destination");
+        press(&mut machine, ENTREE, 300);
+        run(&mut machine, 60 * 4_000_000);
+
+        // Ce que le copieur a réellement écrit sur la disquette destination.
+        let fdc = machine.bus.fdc.borrow();
+        let copie = fdc.drive_a.dsk.as_ref().expect("image destination");
+        let source = {
+            let raw = std::fs::read("bin/Discology.dsk").expect("lecture de la source");
+            crate::fdc::DskImage::parse(&raw).expect("source illisible")
+        };
+
+        for piste in source.tracks.iter() {
+            let ecrite = copie
+                .tracks
+                .iter()
+                .find(|t| t.number == piste.number && t.side == piste.side)
+                .unwrap_or_else(|| panic!("piste {} absente de la copie", piste.number));
+
+            // Le relevé de piste peut ramener un identifiant de plus que le
+            // tour complet (le copieur s'arrête au temps, pas au compte) :
+            // ce qui compte est qu'aucun secteur ne MANQUE.
+            for secteur in piste.sectors.iter().filter(|s| !s.deleted) {
+                let copie_secteur = ecrite
+                    .sectors
+                    .iter()
+                    .find(|s| s.id == secteur.id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "secteur {:#04X} manquant sur la piste {} de la copie \
+                             ({} secteurs copies sur {})",
+                            secteur.id,
+                            piste.number,
+                            ecrite.sectors.len(),
+                            piste.sectors.len()
+                        )
+                    });
+                let commun = secteur.data.len().min(copie_secteur.data.len());
+                assert_eq!(
+                    secteur.data[..commun],
+                    copie_secteur.data[..commun],
+                    "contenu different pour le secteur {:#04X} de la piste {}",
+                    secteur.id,
+                    piste.number
+                );
+            }
+        }
+
+        std::fs::remove_file(destination).ok();
     }
 
     /// La commande `blank` doit écrire un .dsk formaté à l'emplacement

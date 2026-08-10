@@ -186,6 +186,23 @@ impl DskImage {
     }
 }
 
+/// Durée d'un tour de disquette, en cycles Z80 : les lecteurs 3" du CPC
+/// tournent à 300 tr/min, soit 200 ms, soit 800 000 cycles à 4 MHz. C'est
+/// l'unité de temps de tout ce qui dépend de la rotation (attente d'un
+/// identifiant de secteur sous la tête).
+pub const REVOLUTION_TICKS: u32 = 800_000;
+
+/// Durée d'un octet sur la piste, en cycles Z80 : 250 kbit/s en MFM, soit
+/// 32 µs par octet, soit 128 cycles à 4 MHz. Un tour de piste vaut donc
+/// environ 6250 octets bruts.
+const BYTE_TICKS: u64 = 128;
+
+/// Octets "de service" écrits autour des données de chaque secteur :
+/// synchronisation, en-tête d'identification et son CRC, marque de données,
+/// CRC des données et intervalle jusqu'au secteur suivant. Une soixantaine
+/// d'octets avec les valeurs d'intervalle habituelles du CPC.
+const SECTOR_OVERHEAD_BYTES: u64 = 62;
+
 /// État propre à un lecteur de disquette physique : position de la tête,
 /// disque chargé, image `.dsk` en mémoire. Le CPC 6128 peut piloter jusqu'à
 /// deux lecteurs (A et B), partageant le même contrôleur FDC (voir `Fdc`
@@ -257,6 +274,18 @@ pub struct Fdc {
     /// cette commande sans interruption en attente renvoie "invalid command").
     pub seek_interrupt_pending: bool,
 
+    /// Cycles Z80 restants avant que le contrôleur ne rende la main. Tant
+    /// qu'ils ne sont pas écoulés, le MSR annonce "occupé, rien à
+    /// transférer" (RQM=0, CB=1), comme un vrai FDC qui attend que le
+    /// secteur voulu se présente sous la tête.
+    pub busy_ticks: u32,
+
+    /// Temps écoulé depuis la mise sous tension, en cycles Z80. Sert
+    /// d'horloge de rotation : la position angulaire de la disquette est
+    /// `time % REVOLUTION_TICKS`, ce qui suffit à savoir quel identifiant
+    /// de secteur se présentera ensuite sous la tête.
+    pub time: u64,
+
     // --- État de la commande Format Track (0x0D) ---
     pub formatting: bool,
     pub format_n: u8,
@@ -281,6 +310,8 @@ impl Fdc {
             execution_index: 0,
             st0: 0,
             seek_interrupt_pending: false,
+            busy_ticks: 0,
+            time: 0,
             formatting: false,
             format_n: 0,
             format_sc: 0,
@@ -341,6 +372,7 @@ impl Fdc {
         self.seek_interrupt_pending = false;
         self.formatting = false;
         self.st0 = 0;
+        self.busy_ticks = 0;
     }
 
     fn load_disk_into(drive: &mut Drive, filename: &str) -> Result<(), String> {
@@ -516,8 +548,66 @@ impl Fdc {
         Ok(())
     }
 
+    /// Fait avancer le temps du contrôleur de `cpu_ticks` cycles Z80.
+    pub fn tick(&mut self, cpu_ticks: u32) {
+        self.time = self.time.wrapping_add(cpu_ticks as u64);
+        self.busy_ticks = self.busy_ticks.saturating_sub(cpu_ticks);
+    }
+
+    /// Temps qui sépare deux identifiants de secteur consécutifs sur une
+    /// piste, en cycles Z80.
+    ///
+    /// Ce n'est PAS un tour divisé par le nombre de secteurs : les secteurs
+    /// n'occupent qu'une partie du tour (environ 85 % au format CPC
+    /// habituel), le reste étant l'intervalle final qui précède le trou
+    /// d'index. On calcule donc l'espacement réel à partir de la taille des
+    /// secteurs, plafonné à un tour complet pour une piste anormalement
+    /// chargée.
+    fn sector_pitch_ticks(&self, track: u8, side: u8) -> u64 {
+        let drv = self.drive();
+        let (count, bytes) = drv
+            .dsk
+            .as_ref()
+            .and_then(|dsk| {
+                dsk.tracks
+                    .iter()
+                    .find(|t| t.number == track && t.side == side)
+            })
+            .map_or((0, 0), |t| {
+                (
+                    t.sectors.len() as u64,
+                    t.sectors
+                        .iter()
+                        .map(|s| s.size as u64 + SECTOR_OVERHEAD_BYTES)
+                        .sum::<u64>(),
+                )
+            });
+
+        if count == 0 {
+            return REVOLUTION_TICKS as u64;
+        }
+        let used = (bytes * BYTE_TICKS).min(REVOLUTION_TICKS as u64);
+        (used / count).max(1)
+    }
+
+    /// Arme un délai avant la phase de résultat, en cycles Z80.
+    fn set_busy(&mut self, ticks: u32) {
+        self.busy_ticks = ticks;
+    }
+
     /// Lecture du registre de statut (MSR) sur le port &FB7E
     pub fn read_msr(&self) -> u8 {
+        // Commande en cours d'exécution : le contrôleur est occupé et n'a
+        // rien à transférer. Sans cet état, toute commande semble aboutir
+        // instantanément — ce qui casse les logiciels qui MESURENT le temps
+        // de réponse du FDC pour en déduire la géométrie d'une piste (le
+        // copieur de Discology compte ses interrogations du MSR jusqu'à
+        // avoir couvert un tour de disquette, voir
+        // doc/discology-copie.md).
+        if self.busy_ticks > 0 {
+            return 0x10; // CB seul : occupé, RQM=0
+        }
+
         let mut msr = 0x00;
 
         // Bit 7: RQM (Request for Master) - toujours prêt à communiquer
@@ -740,16 +830,53 @@ impl Fdc {
                     let track = self.drive().current_track;
                     let side = self.drive().current_side;
 
-                    // On va chercher le premier secteur réellement présent sur la
-                    // piste courante de l'image chargée sur le lecteur sélectionné.
+                    // Quel identifiant se présentera sous la tête, et quand ?
+                    // Les secteurs sont répartis sur le tour de piste : on
+                    // cherche le prochain à passer et on fait patienter le
+                    // contrôleur jusque-là. Renvoyer toujours le premier
+                    // secteur, instantanément, bloquait net tout logiciel qui
+                    // relève la carte d'une piste en enchaînant les Read ID
+                    // (voir doc/discology-copie.md). Modéliser la POSITION
+                    // plutôt qu'un simple délai fixe rend le temps de n
+                    // commandes successives égal à un tour exactement, quel
+                    // que soit le temps de traitement du logiciel entre deux
+                    // commandes — c'est précisément ce que mesure le
+                    // copieur de Discology pour décider qu'il a fait le tour.
+                    let sector_count = {
+                        let drv = self.drive();
+                        drv.dsk
+                            .as_ref()
+                            .and_then(|dsk| {
+                                dsk.tracks
+                                    .iter()
+                                    .find(|t| t.number == track && t.side == side)
+                            })
+                            .map_or(0, |t| t.sectors.len())
+                    };
+
+                    let index = if sector_count == 0 {
+                        // Piste non formatée : le vrai FDC abandonne après
+                        // deux tours sans trouver le moindre identifiant.
+                        self.set_busy(2 * REVOLUTION_TICKS);
+                        0
+                    } else {
+                        let pitch = self.sector_pitch_ticks(track, side);
+                        let next = self.time / pitch + 1;
+                        self.set_busy((next * pitch - self.time) as u32);
+                        (next % sector_count as u64) as usize
+                    };
+
                     let found = {
                         let drv = self.drive();
                         drv.dsk.as_ref().and_then(|dsk| {
                             dsk.tracks
                                 .iter()
                                 .find(|t| t.number == track && t.side == side)
-                                .and_then(|t| t.sectors.first())
-                                .map(|s| (s.id, s.size))
+                                .filter(|t| !t.sectors.is_empty())
+                                .map(|t| {
+                                    let s = &t.sectors[index % t.sectors.len()];
+                                    (s.id, s.size)
+                                })
                         })
                     };
 
@@ -1174,6 +1301,117 @@ mod tests {
             fdc.result_buffer[1] & 0x04,
             0x04,
             "ST1 doit signaler No Data"
+        );
+    }
+
+    /// La disquette tourne : deux Read ID consécutifs tombent sur des
+    /// secteurs différents, dans l'ordre physique de la piste, et on
+    /// retombe sur le premier après un tour complet. Renvoyer toujours le
+    /// premier secteur (ce que faisait cette émulation) fige net tout
+    /// logiciel qui relève la carte d'une piste, à commencer par le
+    /// copieur de Discology (voir doc/discology-copie.md).
+    #[test]
+    fn successive_read_ids_walk_the_whole_track() {
+        let mut fdc = fdc_with_track(
+            [0xC1u8, 0xC6, 0xC2]
+                .iter()
+                .map(|&id| Sector {
+                    id,
+                    size: 512,
+                    data: vec![0; 512],
+                    deleted: false,
+                })
+                .collect(),
+        );
+        fdc.drive_a.current_track = 1;
+
+        let mut lus = Vec::new();
+        for _ in 0..6 {
+            send_command(&mut fdc, &[0x0A, 0x00]);
+            assert_eq!(fdc.phase, FdcPhase::Result);
+            lus.push(fdc.result_buffer[5]);
+            // La tête doit atteindre l'identifiant suivant avant que le
+            // contrôleur ne réponde.
+            assert!(fdc.busy_ticks > 0, "Read ID doit demander du temps");
+            let attente = fdc.busy_ticks;
+            fdc.tick(attente);
+            // Consomme la phase de résultat.
+            for _ in 0..7 {
+                fdc.read_data();
+            }
+        }
+
+        assert_eq!(
+            lus,
+            vec![0xC6, 0xC2, 0xC1, 0xC6, 0xC2, 0xC1],
+            "les identifiants doivent défiler dans l'ordre de la piste, en boucle"
+        );
+    }
+
+    /// Tant que le secteur voulu n'est pas passé sous la tête, le MSR
+    /// annonce "occupé" : c'est ce temps que mesurent les copieurs pour
+    /// déduire la géométrie d'une piste.
+    #[test]
+    fn the_status_register_says_busy_until_the_sector_comes_round() {
+        let mut fdc = fdc_with_track(vec![Sector {
+            id: 0xC1,
+            size: 512,
+            data: vec![0; 512],
+            deleted: false,
+        }]);
+        fdc.drive_a.current_track = 1;
+
+        send_command(&mut fdc, &[0x0A, 0x00]);
+        assert_eq!(fdc.read_msr() & 0x80, 0x00, "RQM doit rester à 0");
+        assert_eq!(fdc.read_msr() & 0x10, 0x10, "le FDC doit se dire occupé");
+
+        let attente = fdc.busy_ticks;
+        fdc.tick(attente - 1);
+        assert_eq!(fdc.read_msr() & 0x80, 0x00);
+        fdc.tick(1);
+        assert_eq!(
+            fdc.read_msr() & 0xC0,
+            0xC0,
+            "le résultat doit être disponible une fois le secteur arrivé"
+        );
+    }
+
+    /// Un tour de piste dure un tour, pas plus : la somme des attentes de
+    /// tous les secteurs d'une piste ne doit pas dépasser une révolution,
+    /// sinon les logiciels qui chronomètrent un tour concluent que la piste
+    /// contient moins de secteurs qu'en réalité.
+    #[test]
+    fn a_full_turn_of_read_ids_fits_in_one_revolution() {
+        let mut fdc = fdc_with_track(
+            (0..9)
+                .map(|i| Sector {
+                    id: 0xC1 + i,
+                    size: 512,
+                    data: vec![0; 512],
+                    deleted: false,
+                })
+                .collect(),
+        );
+        fdc.drive_a.current_track = 1;
+
+        let mut total = 0u64;
+        for _ in 0..9 {
+            send_command(&mut fdc, &[0x0A, 0x00]);
+            let attente = fdc.busy_ticks;
+            total += attente as u64;
+            fdc.tick(attente);
+            for _ in 0..7 {
+                fdc.read_data();
+            }
+        }
+
+        assert!(
+            total <= REVOLUTION_TICKS as u64,
+            "un tour de 9 secteurs prend {total} cycles, plus qu'une révolution"
+        );
+        assert!(
+            total * 10 > REVOLUTION_TICKS as u64 * 7,
+            "un tour de 9 secteurs ne prend que {total} cycles : bien trop rapide"
         );
     }
 
