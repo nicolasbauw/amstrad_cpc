@@ -334,9 +334,10 @@ impl Machine {
 
     /// Rallume la machine : réinitialise le CPU, la RAM et les périphériques
     /// comme lors d'un vrai démarrage à froid, recharge les ROMs, puis
-    /// reprend l'exécution. Les disquettes actuellement insérées ainsi que
-    /// les breakpoints/watchpoints sont conservés (comme sur le matériel
-    /// réel, une disquette reste dans le lecteur pendant un power cycle).
+    /// reprend l'exécution. Les disquettes et la cassette actuellement
+    /// insérées, ainsi que les breakpoints/watchpoints, sont conservées
+    /// (comme sur le matériel réel : couper le courant ne fait pas sortir
+    /// un média de son lecteur).
     pub fn power_on(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let (disk_a, disk_b, drive_b_enabled) = {
             let fdc = self.bus.fdc.borrow();
@@ -350,6 +351,9 @@ impl Machine {
                 fdc.drive_b_enabled,
             )
         };
+        // La bande, elle, revient à son début : le lecteur du CPC n'a pas de
+        // mémoire de position, et sur un vrai magnétophone on rembobine.
+        let tape = self.bus.tape.borrow().current_filename.clone();
 
         self.bus = CpcBus::new(Memory::new(self.config.memory.extra_ram_banks));
         self.cpu = CPU::new();
@@ -373,6 +377,12 @@ impl Machine {
             if let Some(filename) = disk_b {
                 let _ = fdc.load_disk_b(&filename);
             }
+        }
+
+        if let Some(filename) = tape {
+            // Le chemin conservé est déjà résolu : on repasse par le lecteur
+            // et non par Machine::load_tape, qui le résoudrait une seconde fois.
+            let _ = self.bus.tape.borrow_mut().load_tape(&filename);
         }
 
         self.load_roms()?;
@@ -1800,5 +1810,63 @@ mod tests {
         );
         assert!(std::path::Path::new(path).is_file());
         std::fs::remove_file(path).ok();
+    }
+
+    /// Couper puis rétablir le courant ne fait sortir aucun média de son
+    /// lecteur : la disquette ET la cassette restent en place, comme sur le
+    /// matériel réel. La cassette, elle, est rembobinée.
+    #[test]
+    fn a_power_cycle_leaves_the_disk_and_the_tape_in_place() {
+        let mut machine = Machine::new();
+        if machine.load_roms().is_err() {
+            println!("ROMs absentes : test ignore");
+            return;
+        }
+        if machine.load_tape("bin/AmstradDiag.cdt").is_err() {
+            println!("Cassette absente : test ignore");
+            return;
+        }
+        let disk = machine.load_disk("bin/Barbarian.dsk").is_ok();
+        let cassette = machine
+            .bus
+            .tape
+            .borrow()
+            .current_filename
+            .clone()
+            .expect("cassette inseree");
+
+        machine.power_cycle();
+
+        assert_eq!(
+            machine.bus.tape.borrow().current_filename.as_deref(),
+            Some(cassette.as_str()),
+            "la cassette doit rester dans le lecteur apres un power cycle"
+        );
+        // Pas seulement le nom : la bande doit être réellement jouable,
+        // c'est-à-dire produire un signal dès que le moteur tourne. Il faut
+        // lui laisser du temps, cette cassette commençant par trois
+        // secondes de silence, comme presque toutes.
+        {
+            let mut tape = machine.bus.tape.borrow_mut();
+            tape.motor_on = true;
+            let depart = tape.read_bit();
+            let mut ticks = 0u64;
+            while ticks < 40_000_000 && tape.read_bit() == depart {
+                tape.tick(64);
+                ticks += 64;
+            }
+            assert_ne!(
+                tape.read_bit(),
+                depart,
+                "la bande ne produit plus de signal apres un power cycle"
+            );
+            tape.motor_on = false;
+        }
+        if disk {
+            assert!(
+                machine.bus.fdc.borrow().drive_a.disk_loaded,
+                "la disquette doit rester dans le lecteur apres un power cycle"
+            );
+        }
     }
 }
