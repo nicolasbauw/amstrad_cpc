@@ -157,9 +157,13 @@ impl Audio {
 
     /// Envoie une trame d'échantillons du PSG vers la carte son.
     pub fn push(&mut self, samples: &[f32]) {
-        if samples.is_empty() {
+        // Le dernier échantillon est relevé ici, dans la garde même qui
+        // écarte les trames vides : garde et usage restent ainsi solidaires,
+        // là où un `last().unwrap()` plus bas dépendait, à distance, d'un
+        // `is_empty()` qu'un remaniement pouvait déplacer.
+        let Some(&last_sample) = samples.last() else {
             return;
-        }
+        };
 
         let padding = match regulate(self.queued_samples(), self.primed) {
             // Trop de retard accumulé : on saute cette trame plutôt que de
@@ -168,7 +172,7 @@ impl Audio {
             // à la normale.
             Regulation::Drop => {
                 self.dropped_frames += 1;
-                self.last_input = *samples.last().unwrap();
+                self.last_input = last_sample;
                 return;
             }
             Regulation::Prime { padding } => {

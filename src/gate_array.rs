@@ -175,13 +175,12 @@ impl GateArray {
                     self.interrupt_requested = false;
                 }
             }
-            3 => {
-                // Bit 7=1, Bit 6=1 : Ce n'est PAS une fonction du Gate Array.
-                // Sur les modèles 128 Ko, cette plage est interceptée par le MMU
-                // séparé qui gère le banking RAM étendu (voir bus.rs).
-                // Le Gate Array lui-même n'a rien à faire ici.
-            }
-            _ => unreachable!(),
+            // Bit 7=1, Bit 6=1 (valeur 3, seul cas restant puisque `val >> 6`
+            // tient sur deux bits) : ce n'est PAS une fonction du Gate Array.
+            // Sur les modèles 128 Ko, cette plage est interceptée par le MMU
+            // séparé qui gère le banking RAM étendu (voir bus.rs).
+            // Le Gate Array lui-même n'a rien à faire ici.
+            _ => {}
         }
     }
 

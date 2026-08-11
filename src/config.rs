@@ -1,7 +1,7 @@
 use directories::UserDirs;
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::machine::MachineError;
 
@@ -151,11 +151,15 @@ pub fn load_config_file() -> Result<Config, MachineError> {
     let user_dirs = UserDirs::new().ok_or(MachineError::ConfigFile);
     let mut cfg = user_dirs?.home_dir().to_path_buf();
     cfg.push(".config/bytebox/config.toml");
-    // Absolute path fo release (production) build
+    // En release (production), le fichier vit dans le répertoire personnel ;
+    // en debug, on prend celui du dépôt. On garde un `PathBuf` de bout en
+    // bout plutôt que de repasser par une chaîne : `to_str()` échoue sur un
+    // chemin qui n'est pas de l'UTF-8 valide, ce qui faisait paniquer
+    // l'émulateur au démarrage pour un répertoire personnel exotique.
     let config_path = if cfg!(debug_assertions) {
-        "config/config.toml"
+        PathBuf::from("config/config.toml")
     } else {
-        cfg.to_str().unwrap()
+        cfg
     };
     let buf = fs::read_to_string(config_path)?;
     let config: Config = toml::from_str(&buf).map_err(|_e| MachineError::ConfigFileFmt)?;

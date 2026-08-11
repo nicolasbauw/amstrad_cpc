@@ -265,7 +265,14 @@ impl Machine {
             println!("Drive B enabled (config.toml)");
         }
 
-        crate::console::launch(m.cmd_channel.0.clone()).unwrap();
+        // L'émulateur ne dépend pas de sa console : si le fil ne démarre pas
+        // (limite système sur le nombre de fils, par exemple), on le signale
+        // et on continue sans elle plutôt que de refuser de démarrer. Les
+        // commandes ne seront simplement pas disponibles — comme c'est déjà
+        // le cas au lancement depuis le bureau, sans terminal attaché.
+        if let Err(e) = crate::console::launch(m.cmd_channel.0.clone()) {
+            println!("Console disabled: {e}");
+        }
         m
     }
 
@@ -655,26 +662,31 @@ impl Machine {
     // TODO déplacer cette foction dans memory.rs
     pub fn get_address_source_info(&self, addr: u16) -> String {
         if addr < 0x4000 && self.bus.memory.rom_low_enabled {
-            "ROM Low".to_string()
-        } else if addr >= 0xC000
-            && self.bus.memory.rom_high_enabled
-            && self.bus.memory.effective_high_rom().is_some()
-        {
-            // La ROM lue n'est pas forcément celle sélectionnée : un numéro
-            // inexistant retombe sur la ROM 0.
-            let selected = self.bus.memory.selected_high_rom;
-            match self.bus.memory.effective_high_rom() {
-                Some(rom) if rom as u8 != selected => {
-                    format!("ROM High {rom} (slot {selected} absent)")
-                }
-                Some(rom) => format!("ROM High {rom}"),
-                None => unreachable!(),
-            }
-        } else {
-            let phys_addr = self.bus.memory.get_ram_physical_address(addr);
-            let bank = phys_addr / 16384;
-            format!("RAM bank {}", bank)
+            return "ROM Low".to_string();
         }
+
+        // La ROM lue n'est pas forcément celle sélectionnée : un numéro
+        // inexistant retombe sur la ROM 0. Une seule interrogation de
+        // `effective_high_rom()`, dont le résultat sert directement : la
+        // version précédente le consultait deux fois (une fois pour tester
+        // sa présence, une fois pour le lire), ce qui obligeait à un
+        // `unreachable!()` pour un cas que le compilateur ne pouvait pas
+        // écarter.
+        if addr >= 0xC000
+            && self.bus.memory.rom_high_enabled
+            && let Some(rom) = self.bus.memory.effective_high_rom()
+        {
+            let selected = self.bus.memory.selected_high_rom;
+            return if rom as u8 == selected {
+                format!("ROM High {rom}")
+            } else {
+                format!("ROM High {rom} (slot {selected} absent)")
+            };
+        }
+
+        let phys_addr = self.bus.memory.get_ram_physical_address(addr);
+        let bank = phys_addr / 16384;
+        format!("RAM bank {}", bank)
     }
 
     pub fn get_registers_string(&mut self) -> String {
