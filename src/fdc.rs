@@ -739,10 +739,11 @@ impl Fdc {
         // des commandes, sélectionne le lecteur ciblé (0 = A, 1 = B). Specify (0x03)
         // et Sense Interrupt Status (0x08) n'ont pas ce champ et ne modifient donc
         // pas le lecteur sélectionné.
-        if cmd != 0x03 && cmd != 0x08 {
-            if let Some(&b1) = self.command_buffer.get(1) {
-                self.selected_drive = b1 & 0x01;
-            }
+        if cmd != 0x03
+            && cmd != 0x08
+            && let Some(&b1) = self.command_buffer.get(1)
+        {
+            self.selected_drive = b1 & 0x01;
         }
 
         match cmd {
@@ -1026,25 +1027,22 @@ impl Fdc {
             let mut last_id = start_sector;
             let mut found_any = false;
 
-            if let Some(ref dsk) = drv.dsk {
-                if let Some(t) = dsk
+            if let Some(ref dsk) = drv.dsk
+                && let Some(t) = dsk
                     .tracks
                     .iter()
                     .find(|t| t.number == track && t.side == side)
-                {
-                    let mut matched: Vec<&Sector> = t
-                        .sectors
-                        .iter()
-                        .filter(|s| {
-                            s.id >= start_sector && s.id <= eot && s.deleted == want_deleted
-                        })
-                        .collect();
-                    matched.sort_by_key(|s| s.id);
-                    for s in matched {
-                        combined.extend_from_slice(&s.data);
-                        last_id = s.id;
-                        found_any = true;
-                    }
+            {
+                let mut matched: Vec<&Sector> = t
+                    .sectors
+                    .iter()
+                    .filter(|s| s.id >= start_sector && s.id <= eot && s.deleted == want_deleted)
+                    .collect();
+                matched.sort_by_key(|s| s.id);
+                for s in matched {
+                    combined.extend_from_slice(&s.data);
+                    last_id = s.id;
+                    found_any = true;
                 }
             }
             (found_any, combined, last_id)

@@ -120,10 +120,10 @@ impl Memory {
         // (0x4000-0x7FFF) prime sur le config standard, exactement comme sur
         // le vrai matériel où c'est alors elle qui pilote le bus de données
         // pour cette page — voir `write_mmu_register`.
-        if page == 1 {
-            if let Some(extended) = self.extended_page1_bank {
-                return (STANDARD_RAM_BANKS * 16384) + extended * 16384 + offset;
-            }
+        if page == 1
+            && let Some(extended) = self.extended_page1_bank
+        {
+            return (STANDARD_RAM_BANKS * 16384) + extended * 16384 + offset;
         }
 
         let bank = match self.ram_config & 0x07 {

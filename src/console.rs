@@ -1,11 +1,11 @@
-use crate::monitor::MonitorCmd;
+use crate::monitor::{MonitorCmd, MonitorMessage};
 use std::{io::Write, io::stdin, io::stdout, sync::mpsc, thread, time::Duration};
 
 use crate::machine::MachineError;
 
-pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result<(), MachineError> {
+pub fn launch(cmd_channel: mpsc::Sender<MonitorMessage>) -> Result<(), MachineError> {
     thread::Builder::new().name(String::from("Console")).spawn(
-        move || -> Result<(), mpsc::SendError<(MonitorCmd, String, String)>> {
+        move || -> Result<(), mpsc::SendError<MonitorMessage>> {
             print!("> ");
             let _ = stdout().flush();
 

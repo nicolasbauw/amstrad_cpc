@@ -477,7 +477,7 @@ pub fn run(
         video::render(&machine, &mut frame_buffer);
 
         let _ = texture.update(None, &frame_buffer, video::SCREEN_WIDTH * 3);
-        let _ = canvas.clear();
+        canvas.clear();
         let _ = canvas.copy(&texture, None, None);
         canvas.present();
 
@@ -488,7 +488,7 @@ pub fn run(
 
             let mut debug_text = String::new();
             debug_text.push_str(&machine.get_registers_string());
-            debug_text.push_str("\n");
+            debug_text.push('\n');
             debug_text.push_str(&machine.get_hardware_string(machine.show_keyboard_matrix()));
 
             let texture_creator_debug = debug_canvas.texture_creator();

@@ -260,7 +260,7 @@ fn render_byte_mode2(
 ) {
     for i in 0..8 {
         let color_idx = (byte >> (7 - i)) & 1;
-        draw_pixel_run(state, frame_buffer, color_idx, x_byte + i as i32, 1, y);
+        draw_pixel_run(state, frame_buffer, color_idx, x_byte + i, 1, y);
     }
 }
 

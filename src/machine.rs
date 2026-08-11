@@ -3,7 +3,7 @@ use crate::config;
 use crate::gate_array::{GateArray, GateArrayState};
 use crate::hexconversion::HexStringToUnsigned;
 use crate::memory::Memory;
-use crate::monitor::MonitorCmd;
+use crate::monitor::{MonitorCmd, MonitorMessage};
 use crate::trace::{TraceMode, Tracer};
 use std::{
     collections::HashSet, error, error::Error, fmt, fs::File, io::Read, sync::mpsc,
@@ -138,7 +138,7 @@ impl From<SendError<(String, String, String)>> for MachineError {
 
 impl From<MachineError> for std::io::Error {
     fn from(e: MachineError) -> std::io::Error {
-        std::io::Error::new(std::io::ErrorKind::Other, e)
+        std::io::Error::other(e)
     }
 }
 
@@ -171,10 +171,7 @@ pub struct Machine {
     /// (bug des sprites qui clignotent dans Cauldron/BMX Simulator, TODO.txt).
     pub scanline_vram: Vec<Vec<u8>>,
     pub diagnostic_mode: bool, // true = ROM de Diagnostic, false = ROMs d'origine du CPC 6128
-    cmd_channel: (
-        mpsc::Sender<(MonitorCmd, String, String)>,
-        mpsc::Receiver<(MonitorCmd, String, String)>,
-    ),
+    cmd_channel: (mpsc::Sender<MonitorMessage>, mpsc::Receiver<MonitorMessage>),
     pub tracer: Tracer,
     breakpoints: HashSet<u16>,
     running: bool,
@@ -552,17 +549,17 @@ impl Machine {
         // inaperçue : elle ne fait rien, donc le programme dérive à partir de
         // là. On la nomme (le désassembleur sait tout décoder) sans pour
         // autant noyer la console si elle tombe dans une boucle.
-        if let Some(u) = self.cpu.take_unimplemented() {
-            if self.unimplemented_reported < 10 {
-                self.unimplemented_reported += 1;
-                let (text, _) = zilog_z80::dasm::dasm(&self.bus, u.address);
-                println!(
-                    "\nUnimplemented instruction at {:#06X}: {}",
-                    u.address, text
-                );
-                if self.unimplemented_reported == 10 {
-                    println!("(further occurrences silenced, see the hardware status)");
-                }
+        if let Some(u) = self.cpu.take_unimplemented()
+            && self.unimplemented_reported < 10
+        {
+            self.unimplemented_reported += 1;
+            let (text, _) = zilog_z80::dasm::dasm(&self.bus, u.address);
+            println!(
+                "\nUnimplemented instruction at {:#06X}: {}",
+                u.address, text
+            );
+            if self.unimplemented_reported == 10 {
+                println!("(further occurrences silenced, see the hardware status)");
             }
         }
         if int_pending_before && !self.cpu.has_pending_int() {
@@ -1187,13 +1184,16 @@ impl Machine {
             }
             MonitorCmd::SearchMem => {
                 let val = arg.to_u8()?;
-                println!("Searching for byte {:#02X} in memory...", val);
+                // Largeur 4 et non 2 : le préfixe "0x" ajouté par `#` compte
+                // dedans, donc `{:#02X}` n'alignait rien et affichait 0x5 là
+                // où le reste du moniteur écrit 0x05.
+                println!("Searching for byte {val:#04X} in memory...");
                 let mut found_count = 0;
                 for addr in 0..=0xFFFF {
                     let byte = self.bus.read_byte(addr);
                     if byte == val {
                         let source_str = self.get_address_source_info(addr);
-                        println!("  {:#06X} : {:#02X} ({})", addr, val, source_str);
+                        println!("  {addr:#06X} : {val:#04X} ({source_str})");
                         found_count += 1;
                     }
                 }
