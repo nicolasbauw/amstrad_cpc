@@ -75,6 +75,50 @@ couche de présentation (`sdl.rs` et les nouveaux modules qu'il décrit). Les
 118 tests existants, qui pilotent `Machine` directement sans passer par
 `sdl.rs`, ne sont pas concernés par ce chantier.
 
+## Trois catégories d'état, trois façons d'y accéder
+
+Cette distinction existe déjà dans le code, sans être documentée nulle
+part ; elle doit guider M1, M2 et M3 pour éviter que chaque nouveau panneau
+n'invente sa propre façon de parler à `Machine`.
+
+**Config statique (`config.toml`)** — lue une seule fois, à `Machine::new()`.
+Pas seulement "n'évolue pas en cours d'exécution" : elle n'est même jamais
+relue depuis le disque une fois l'émulateur démarré, il n'existe aucune
+commande de rechargement. Un `power_cycle()` réutilise la `Config` déjà
+chargée en mémoire, il ne retouche pas au fichier. C'est l'endroit pour tout
+ce qui façonne la construction des structures (chemins de ROM,
+`extra_ram_banks` qui dimensionne le `Vec` de `Memory`).
+
+**État machine dynamique, via `MonitorCmd`/mpsc** — disquettes, cassette,
+power cycle, breakpoints, trace, volume : déjà le canal unique aujourd'hui
+(fil `console.rs` → `Machine::console_handle`). **Toute future façade (F6,
+F11) doit pousser dans ce même canal**, plutôt que d'appeler les méthodes
+`Machine` directement — sinon deux implémentations de "insérer une
+disquette" (celle du texte, celle des boutons) finissent par diverger. Le
+fil `console.rs` disparaît ou change de forme (M2), mais le canal et
+l'énumération `MonitorCmd` restent l'unique point d'entrée.
+
+**État de présentation, jamais vu par `Machine`** — existe déjà aussi : F1-F4
+(zoom) agissent directement sur le `Canvas` SDL dans `sdl.rs`, sans passer
+par le canal, parce que le zoom n'est pas un état de la machine émulée mais
+de la fenêtre. F5 (shader CRT on/off) et la visibilité des panneaux
+F6/F7/F11/F12 sont du même ordre : état local du futur module de
+présentation, pas une `MonitorCmd`.
+
+Deux cas ne rentrent proprement dans aucune des trois catégories
+aujourd'hui, et devront être tranchés explicitement au moment de M3 :
+- **`extra_ram_banks`** dimensionne `Memory` à la construction ; le rendre
+  réglable depuis F6 ne peut pas être un effet instantané — la valeur
+  devra être mise en attente et appliquée au prochain power cycle.
+- **`font_path`** n'est consommé que par `sdl.rs` pour la police du
+  debugger, jamais vu par `Machine` : il reste "état de présentation", pas
+  une `MonitorCmd`.
+- À l'inverse, si l'amplitude du signal cassette dans le mixage audio
+  (`sound.rs`, `TAPE_AMPLITUDE`, citée dans le TODO v1 comme "à rendre
+  paramétrable") devient réglable depuis F6, elle mute un état réellement
+  possédé par `Machine`/`Sound` : elle doit suivre le même modèle que
+  `Volume`, donc devenir une `MonitorCmd`.
+
 ## Jalons
 
 Chaque jalon est utilisable indépendamment (rien ne casse si le suivant
