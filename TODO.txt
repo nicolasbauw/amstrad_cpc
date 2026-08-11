@@ -3,23 +3,4 @@
   RESTE : les secteurs à marque "Deleted Data" (la protection de cette disquette : pistes 9 à 17) ne sont pas reproduits. Il faudrait (1) que Read Data (0x06) lise quand même un secteur "deleted" quand le bit SK est à 0, en signalant la marque par le bit 6 de ST2 (Control Mark) et en s'arrêtant après ce secteur, comme le vrai µPD765A — le comportement actuel (secteur invisible) avait été retenu pour Teenage Mutant Hero Turtles, À RETESTER si on y touche ; et (2) implémenter Write Deleted Data (0x09), sans quoi ces secteurs seraient de toute façon réécrits avec une marque normale.
   À VÉRIFIER un jour, découvert en chemin : le circuit vidéo lit la RAM à travers la commutation de banques du Z80 (video.rs -> Memory::read_ram_byte). Sur un vrai 6128, la vidéo va toujours chercher l'image dans les 64 premiers Ko, quelle que soit la configuration &7Fxx : un logiciel qui bascule en &C2 pour se faire un tampon de 64 Ko continue d'afficher l'écran resté en banque 3. Correctif essayé puis retiré faute de logiciel pour le démontrer (Discology n'y est pas sensible) — à reprendre avec un cas de test réel.
 
-La résolution des bugs ci-dessus marquera -pour le moment- la fin de note campagne de chasse aux bugs : les logiciels du premier batch de tests seront 100% fonctionnels. D'autres tests sur d'autres logiciels auront lieu plus tard. Ces deux dernières featurettes + la fin des bugs marqueront aussi notre v1, que je ne souhaite pas publier, mais ce sera la première version 100% fonctionnelle. Ce qui figure ci-dessous sera pour la V2, qui, elle, sera publiée, car considérée comme la cible. Il faudra merger ces idées avec celles évoquées dans l'autre fichier todo v2.
-
-- quand l'émulateur est lancé via le raccourci desktop, il se lance donc sans terminal, et donc sans commandes à lancer depuis notre "console". Mais j'ai remarque que dans ce cas, le CPU du host s'emballe un peu. L'idée est donc :
-1) dans ce cas, on ne lance pas la console (qui se fait via le crate::console::launch(m.cmd_channel.0.clone()).unwrap(); de machine.rs) (mais quid des prinln ?), car la majorité des gens, dans la majorité des cas, n'utiliseront pas la console et ses commandes plus réservées aux power users. De manière générale, dit autrement, il ne faut pas que notre émulateur dépende de cette console. A terme (TODO v2), on implémentera notre propre fenêtre qui remplacera le terminal d'ou est lancé l'émulateur, c'est une adhérence dont je souhaite me débarasser.
-2) il nous faut donc (via la touche de fonction F6) pouvoir afficher une fenêtre SDL séparée, qui permet d'insérer des disquettes/cassettes, et paramétrer de façon visuelle ce qui est actuellement disponible dans le fichier de conf. Reprendre le code esthétique de la fenêtre de paramétrage de winuae/amiberry. Question subsidiaire : SDL permet-il d'ouvrir une fenêtre de sélection de fichier qui est agnostique au système (gnome, kde, windows, mac, etc...) ?
-3) ma vision : je souhaite un émulateur qui puisse à la fois satisfaire ceux qui souhaitent simplement jouer, mais aussi les power users. Donc : capable de se lancer simplement du desktop et charger des jeux avec une interface simple. ET aussi de continuer à proposer les fonctions avancées actuellement disponibles via la console (en se désolidarisant du terminal de lancement de l'émulateur) et l'écran "machine status". Et de proposer aussi un shader CRT : ça devient commun, presque une norme dans les émulateurs. Je souhaite que ByteBox se distingue des autres en réunissant tous ces points. C'est presque plus qu'un todo, ça devient un document d'architecture UX qui va dicter des choix techniques.
-
-- packaging (PKGBUILD AUR ?) : quand on s'y met, mettre à jour packaging/bytebox.desktop en conséquence (chemins actuellement en dur pour un usage personnel, Exec/Path pointent vers ~/Dev/amstrad_cpc).
-
-
-Prompt clavier (ne pas tenir compte):
-Voici une photo de mon clavier d'Amstrad CPC 6128. L'idée est d'en créer une image qui servira de base pour un clavier virtuel d'émulateur:
-
-changer l'orientation de l'image
-
-découper l'image pour avoir le clavier et le haut et bas du chassis
-
-nettoyer les touches qui doivent perdre cet aspect jaune (couleur grise d'origine visible en bordure des touches)
-
-le clavier doit être UN PEU stylisé pour ne plus ressembler à une photo, mais conserver néanmoins son aspect réaliste.
+La résolution des bugs et points ci-dessus marquera l'aboutissement de notre v1, que je ne souhaite pas publier, mais ce sera la première version 100% fonctionnelle.

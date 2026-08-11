@@ -11,3 +11,15 @@ Ma vision : je souhaite un émulateur qui puisse à la fois satisfaire ceux qui 
 - j'aimerais adapter le code pour avoir la possibilité d'un shader CRT en utilisant vulkan. Le shader doit pouvoir s'adapter aux différentes résolutions (X1; X2, X3, fullscreen) pour avoir un rendu identique. Les scanlines ne doivent pas être trop prononcées ! elles doivent être visibles mais réalistes (le rendu CRT n'était pas si mal après tout). Les pixels doivent avoir un rendu plus rond, comme à l'époque sur un CRT. Le shader CRT doit être activable/désactivable via la touche F5.
 
 - implémenter un clavier virtuel dans une fenêtre SDL/QT (affiché/masqué via la touche F7), qui reprend de façon stylisée l'esthétique d'un clavier de 6128 azerty (dont je peux fournir une photo de référence) : je ne veux pas tomber dans le délire des keymaps (j'avais connu un enfer en adaptant mon émulateur TRS-80 pour SDL3). Pour la plupart des cas d'usage, cela suffira, et le paramétrage actuele est 100% parfait pour mon clavier Mac sous Linux, je ne souhaite pas changer cela.
+
+- packaging (PKGBUILD AUR ?) : quand on s'y met, mettre à jour packaging/bytebox.desktop en conséquence (chemins actuellement en dur pour un usage personnel, Exec/Path pointent vers ~/Dev/amstrad_cpc).
+
+
+Prompt clavier (ne pas en tenir compte):
+Voici une photo de mon clavier d'Amstrad CPC 6128. L'idée est d'en créer une image qui servira de base pour un clavier virtuel d'émulateur:
+
+découper l'image pour avoir le clavier et le haut et bas du chassis
+
+nettoyer les touches qui doivent perdre cet aspect jaune (couleur grise d'origine visible en bordure des touches)
+
+le clavier doit être UN PEU stylisé pour ne plus ressembler à une photo, mais conserver néanmoins son aspect réaliste.
