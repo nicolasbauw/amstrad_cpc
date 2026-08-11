@@ -11,9 +11,18 @@ pub fn launch(cmd_channel: mpsc::Sender<(MonitorCmd, String, String)>) -> Result
 
             loop {
                 let mut input = String::new();
-                if stdin().read_line(&mut input).is_err() {
-                    continue;
-                };
+                match stdin().read_line(&mut input) {
+                    // Fin de flux : aucun terminal n'est attaché (lancement
+                    // depuis le raccourci desktop, stdin déjà fermée...).
+                    // read_line() renvoie Ok(0) dans ce cas, PAS une erreur —
+                    // sans ce test, la boucle ne bloquait jamais et tournait
+                    // à vide en continu, saturant un cœur du CPU hôte. Le
+                    // fil n'a plus rien à faire : mieux vaut s'arrêter
+                    // silencieusement que consommer du CPU pour rien.
+                    Ok(0) => return Ok(()),
+                    Err(_) => continue,
+                    Ok(_) => {}
+                }
 
                 let mut parts = input.split_whitespace();
                 let cmd_part = parts.next().unwrap_or_default().to_string();
