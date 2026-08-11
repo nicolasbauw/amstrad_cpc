@@ -217,6 +217,40 @@ PKGBUILD AUR, et correction des chemins en dur dans
 `~/Dev/amstrad_cpc`). Sans dépendance sur les jalons précédents ; peut être
 traité dès que souhaité, y compris avant eux.
 
+Un unique workflow GitHub Actions (`release.yml`, déclenché sur un tag),
+matrice par OS, peut produire tous les formats retenus — GitHub fournit de
+vrais runners Linux/Windows/macOS, donc pas de cross-compile nécessaire.
+
+**Formats retenus, par ordre de priorité (effort/bénéfice) :**
+
+1. **AUR** (`PKGBUILD`) — déjà acté.
+2. **`.deb`** via `cargo-deb` — lit directement `Cargo.toml`, effort faible.
+3. **AppImage** via `cargo-appimage` (ou `linuxdeploy` + `appimagetool` pour
+   plus de contrôle) — un seul fichier, tourne sur n'importe quelle distro
+   sans gestionnaire de paquets. Runner `ubuntu-22.04` minimum (une `glib`
+   trop ancienne sur 20.04 fait échouer `linuxdeploy`).
+4. **Windows `.msi`** via `cargo-wix` (WiX Toolset, déjà présent sur le
+   runner `windows-latest`) — il faudra embarquer `SDL2.dll` /
+   `SDL2_ttf.dll` à côté de l'exécutable dans l'installeur. Non signé :
+   déclenchera l'avertissement SmartScreen, assumé (pas de coût à engager
+   pour l'éviter).
+5. **macOS via Homebrew** (formule/tap `bytebox`, pas un `.dmg`) — Homebrew
+   gère la dépendance SDL2 nativement (`depends_on "sdl2"`), donc pas de
+   `.dylib` à embarquer, et pas de question de notarisation Apple (le
+   binaire est construit localement par `brew`, pas téléchargé puis
+   double-cliqué) : ni le coût du compte Developer (99 $/an), ni
+   l'avertissement Gatekeeper.
+
+**Écartés délibérément :**
+- **`.rpm`** — pas de cible Fedora/openSUSE visée, pas la peine d'ajouter
+  `cargo-generate-rpm` à la matrice pour l'instant.
+- **Flatpak** — build sandboxé sans réseau (vendoring de tout `Cargo.lock`
+  via `flatpak-cargo-generator`), et son intérêt réel (visibilité) suppose
+  une soumission à Flathub dans un dépôt séparé ; rapport effort/bénéfice
+  mauvais pour ce projet, et format non désiré de toute façon.
+- **`.dmg` autonome** — remplacé par la formule Homebrew ci-dessus, qui
+  évite tout le sujet de la notarisation.
+
 ## Risques identifiés
 
 - **M0** est le seul jalon à risque architectural réel (nouvelle dépendance
