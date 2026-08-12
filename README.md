@@ -30,7 +30,7 @@
 
 ## Tape drive
 
-The emulator reproduces a real datacorder: loading `.cdt` images (see the
+The 6128 uses floppy disks, but the emulator also reproduces a real datacorder: loading `.cdt` images (see the
 `tape` console command above, or `Machine::load_tape`), turning the motor on
 and off from the PPI exactly as the firmware does, and even reinjecting the
 tape signal into the audio mix while the motor runs, for the familiar
