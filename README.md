@@ -43,6 +43,8 @@ Enter key) types `RUN"` and validates it automatically — this is a keyboard
 expansion token built into the firmware itself, not an emulator feature.
 Once a tape is inserted, this is normally followed by "Press PLAY then any
 key", after which the emulated datacorder starts feeding the firmware.
+
+![Screenshot](assets/tape.png)
   
 ## Emulator monitor commands:
   
