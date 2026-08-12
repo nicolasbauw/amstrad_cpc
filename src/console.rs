@@ -77,7 +77,7 @@ pub fn launch(cmd_channel: mpsc::Sender<MonitorMessage>) -> Result<(), MachineEr
                     "disk" => MonitorCmd::Disk,
                     "blank" => MonitorCmd::Blank,
                     "tape" => MonitorCmd::Tape,
-                    "sna" => MonitorCmd::Snapshot,
+                    "snap" => MonitorCmd::Snapshot,
                     "pc" => MonitorCmd::PowerCycle,
                     "t" => MonitorCmd::Trace,
                     "mr" => MonitorCmd::ReadRam,
