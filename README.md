@@ -1,4 +1,4 @@
-# Byte Box - an Amstrad CPC 6128 Emulator
+# ByteBox - an Amstrad CPC 6128 Emulator
 
 ## Command-line options
 
