@@ -1,3 +1,5 @@
+# Byte Box - an Amstrad CPC 6128 Emulator
+
 ## Command-line options
 
 - `--diag` : additional diagnostics ROM (0F slot)
@@ -12,17 +14,19 @@
   cargo run -- --disk=Barbarian.dsk --autocmd='RUN"BARBA.I'
   ```
   
-## Emulator console commands:
-  
-    disk d.dsk        Loads the d.dsk disk image on drive A
-    disk d.dsk b      Loads the d.dsk disk image on drive B (if enabled in config.toml)
-    disk eject        Ejects the disk image from drive A
-    disk eject b      Ejects the disk image from drive B
-    tape f.cdt        Loads the f.cdt tape image on the (single) tape drive
-    tape eject        Ejects the tape image
-    pc                Performs a power cycle
-    vol               Displays the audio output volume
-    vol 30            Sets the audio output volume to 30 %
+## Emulator commands:
+    disk d.dsk          Loads the d.dsk disk image on drive A
+    disk d.dsk b        Loads the d.dsk disk image on drive B (if enabled in config.toml)
+    disk eject          Ejects the disk image from drive A
+    disk eject b        Ejects the disk image from drive B
+    blank d.dsk         Creates a blank formatted disk image and inserts it in drive A
+    blank d.dsk b       Creates a blank formatted disk image and inserts it in drive B
+    tape f.cdt          Loads the f.cdt tape image into the tape reader
+    tape eject          Ejects the tape image
+    sna f.sna           Saves a .SNA snapshot (readable by other CPC emulators)
+    pc                  Performs a power cycle
+    vol                 Displays the audio output volume
+    vol 30              Sets the audio output volume to 30 %
 
 ## Tape drive
 
@@ -71,13 +75,15 @@ key", after which the emulated datacorder starts feeding the firmware.
     t dump 100        displays the last 100 recorded instructions
     t save f.txt      writes the whole buffer to a file
     
-## Manual for the machine status window
+## Machine status window
 
 A concrete example of combined usage:
 
 1. You launch the emulator.
 2. You open the machine status window alongside it using **`F12`**.
 3. You enter a breakpoint command in the console (e.g., `b 0x0038` for the interrupt).
-4. As soon as the breakpoint is hit, the emulator freezes, and the debug window displays the full electronic state.
+4. As soon as the breakpoint is hit, the emulator freezes, and the debug window displays the full machine state.
 5. You press **`F10`** several times: you see the disassembly print out in the console, and all register values ​​(PC, SP, A, B, C...) update in the debug window.
 6. You press **`Shift + F10`**: the emulator skips ahead by one video line, and you watch the `HSYNC Counter` and `current_line` update in real-time on the debugger screen.
+
+![Screenshot](assets/machine_status.png)
