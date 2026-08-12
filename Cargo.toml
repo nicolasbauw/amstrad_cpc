@@ -11,3 +11,21 @@ toml = "1.1.4"
 serde = { version = "1.0.229", features = ["derive"] }
 directories = "6.0.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+panic = "abort"
+strip = true
+
+# Profil réservé aux binaires distribués (packaging, voir Plan V2.md M6) :
+# LTO et un seul codegen-unit gagnent en performance et en taille, mais
+# multiplient par ~5 le temps d'une recompilation incrémentale (mesuré :
+# 1,5 s -> 7,7 s pour un seul fichier modifié), à cause de la perte de
+# parallélisme entre unités de compilation. Inadapté au cycle
+# build/test quotidien (`cargo build --release` / `cargo test --release`,
+# utilisés des dizaines de fois par session de mise au point) : on ne
+# l'impose donc pas dans [profile.release]. Invocation :
+# `cargo build --profile dist`.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
