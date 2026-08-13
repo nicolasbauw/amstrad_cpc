@@ -5,6 +5,6 @@
 - Complétion du clavier : les touches < et > ainsi que @ figurent bel et bien sur un clavier de CPC azerty. Il faut compléter et corriger le clavier:
 "SHIFT+$" (clavier azerty mac) font "à" sur le CPC au lieu d'un "*"
 "SHIFT+@" (clavier azerty mac) font ">" sur le CPC au lieu d'un "#"
-
+"@" (clavier azerty mac) font "#" sur le CPC au lieu d'un "@"
 
 La résolution des bugs et points ci-dessus marquera l'aboutissement de notre v1, que je ne souhaite pas publier, mais ce sera la première version 100% fonctionnelle.
