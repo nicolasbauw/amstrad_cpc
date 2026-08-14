@@ -270,6 +270,38 @@ Pistes concrètes pour la suite, dans l'ordre :
   VSYNC : la grille de Caprice32 démarre à 1.9 ligne après le début du
   VSYNC, valeur à confronter à la nôtre.
 
+### Plan de reprise (instrumentation à faire des deux côtés)
+
+Comparaison de l'ordre des opérations, faite en lecture seule :
+
+| | Caprice32 (`z80_execute`) | ByteBox (`Machine::step`) |
+|---|---|---|
+| Avance du Gate Array | après l'instruction (`z80_wait_states` → `crtc_cycle`) | après l'instruction (boucle `hsync_accumulator`) |
+| Acceptation de l'interruption | **même itération**, juste après l'avance | itération suivante, dans `cpu.execute()` |
+| Acquittement (lecture du compteur) | après l'avance du GA | **avant** l'avance du GA pour l'instruction courante |
+
+Les écarts sont d'ordre « une instruction » (quelques microsecondes), pas 32
+lignes : l'explication est donc probablement ailleurs, et il ne sert à rien
+d'y passer du temps sans mesure. À noter tout de même que notre acquittement
+lit le compteur *avant* de l'avancer pour l'instruction en cours, ce qui le
+rend au plus une ligne trop petit — donc dans le sens opposé au symptôme.
+
+Ce qu'il faut mesurer côté ByteBox, à l'identique de ce qui a été fait côté
+Caprice32 (voir « Comparaison instrumentée » plus haut pour le code exact des
+sondes) :
+
+1. la position de chaque interruption dans la trame, en lignes après le début
+   du VSYNC — la référence à retrouver est `1.9, 53.9, 105.7, 156.1, 208.0,
+   261.2` ;
+2. la valeur du compteur du Gate Array à chaque acquittement, et le nombre de
+   fois où elle atteint 32 (Caprice32 : jamais, de toute la course) ;
+3. le nombre d'interruptions par trame (Caprice32 : 6, toujours).
+
+Comparer les trois relevés ligne à ligne sur la même scène (`--autocmd`,
+course démo, t ≈ 100-110 s) doit montrer où notre grille se décale. Prévoir
+de la marge : instrumenter, mesurer, analyser, corriger, nettoyer et
+commiter ne tient pas dans une fin de session.
+
 ### Audit des tables de cycles Z80 (`zilog_z80`)
 
 Pour vérifier que ce n'est pas *notre* imprécision cycle-à-cycle qui nous
