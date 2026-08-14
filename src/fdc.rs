@@ -1073,6 +1073,29 @@ impl Fdc {
         }
     }
 
+    /// Réécrit le fichier .dsk du lecteur sélectionné depuis l'image en
+    /// mémoire, pour que les écritures faites par le logiciel émulé
+    /// (SAVE BASIC, formatage...) survivent à un power cycle ou à une
+    /// fermeture de l'émulateur — jusqu'ici, seule l'image en RAM changeait,
+    /// jamais le fichier réellement sur disque. "None" signifie qu'aucun
+    /// fichier ne soutient l'image (ne devrait pas arriver ici : Format
+    /// Track sur un lecteur sans disquette insérée), et n'est donc pas
+    /// persisté.
+    fn persist_drive_dsk(&self) {
+        let drv = self.drive();
+        if drv.current_filename == "None" {
+            return;
+        }
+        if let Some(ref dsk) = drv.dsk
+            && let Err(e) = Self::write_dsk_file(dsk, &drv.current_filename)
+        {
+            println!(
+                "Erreur d'ecriture de '{}' : {e}",
+                drv.current_filename
+            );
+        }
+    }
+
     /// Clôture de l'écriture d'un secteur
     fn finish_write_command(&mut self) {
         let track = self.drive().current_track;
@@ -1099,6 +1122,10 @@ impl Fdc {
                     }
                 }
             }
+        }
+
+        if updated {
+            self.persist_drive_dsk();
         }
 
         self.result_buffer.clear();
@@ -1175,6 +1202,7 @@ impl Fdc {
             }
             drv.disk_loaded = true;
         }
+        self.persist_drive_dsk();
 
         self.result_buffer.clear();
         self.result_index = 0;
@@ -1439,5 +1467,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Une écriture de secteur (SAVE BASIC, par exemple) doit être reflétée
+    /// dans le fichier .dsk sur disque, pas seulement dans l'image en
+    /// mémoire — sans quoi elle ne survit pas à un power cycle ou à la
+    /// fermeture de l'émulateur, qui rechargent le fichier depuis le disque.
+    #[test]
+    fn writing_a_sector_persists_to_the_dsk_file_on_disk() {
+        let dsk = Fdc::blank_dsk_image();
+        let path = std::env::temp_dir().join("amstrad_cpc_test_write_persists.dsk");
+        let path = path.to_str().unwrap();
+        std::fs::remove_file(path).ok();
+        Fdc::write_dsk_file(&dsk, path).expect("ecriture du .dsk vierge");
+
+        let mut fdc = Fdc::new();
+        fdc.load_disk(path).expect("chargement du .dsk vierge");
+
+        // Write Data : Cmd, Drive/HD, C, H, R, N, EOT, GPL, DTL, puis les
+        // 512 octets du secteur (piste 0, secteur 0xC1, comme le formatage
+        // vierge standard).
+        send_command(
+            &mut fdc,
+            &[0x05, 0x00, 0x00, 0x00, 0xC1, 0x02, 0xC1, 0x2A, 0xFF],
+        );
+        for _ in 0..512 {
+            fdc.write_data(0xAA);
+        }
+        assert_eq!(
+            fdc.phase,
+            FdcPhase::Result,
+            "l'ecriture du secteur doit s'etre terminee"
+        );
+
+        let raw = std::fs::read(path).expect("relecture du .dsk depuis le disque");
+        std::fs::remove_file(path).ok();
+        let reread = DskImage::parse(&raw).expect(".dsk relu invalide");
+        let sector = reread
+            .tracks
+            .iter()
+            .find(|t| t.number == 0 && t.side == 0)
+            .and_then(|t| t.sectors.iter().find(|s| s.id == 0xC1))
+            .expect("secteur 0xC1 absent du fichier relu");
+
+        assert!(
+            sector.data.iter().all(|&b| b == 0xAA),
+            "le fichier sur disque doit refleter l'ecriture, pas rester au bourrage d'origine"
+        );
     }
 }
