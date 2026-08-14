@@ -1,11 +1,13 @@
 # Les "sprites" qui clignotaient (Cauldron, BMX Simulator)
 
-Note d'enquête. **Deux causes ont été trouvées et corrigées** : le rendu en
-instantané unique (voir plus bas), puis une règle d'interruption du Gate
-Array inversée par rapport à la documentation de référence (voir
-« L'alternance 5/6 interruptions : une règle du Gate Array inversée »). Un
-résidu subsiste malgré tout sous BMX Simulator, réduit d'environ 18 % mais
-pas éliminé.
+Note d'enquête. **Une cause corrigée** (le rendu en instantané unique, voir
+plus bas) et **un chantier ouvert** sous BMX Simulator.
+
+⚠️ **À faire en priorité : annuler le commit « Gate Array : la regle
+d'interruption du recalage VSYNC etait inversee ».** La comparaison avec
+Caprice32, faite après coup, montre que ce changement nous éloigne de
+l'émulateur de référence sans régler le clignotement. Détail dans
+« La règle du recalage VSYNC : documentation contre émulateur de référence ».
 
 ## Le symptôme
 
@@ -63,7 +65,7 @@ pixel en clignotement sur 118 trames (Cauldron) ; le résidu observé sous
 BMX Simulator (quelques pixels, zone du bandeau de score) s'est avéré être
 la mise à jour normale des chiffres du chronomètre, pas le bug signalé.
 
-## L'alternance 5/6 interruptions : une règle du Gate Array inversée
+## L'alternance 5/6 interruptions : la règle du recalage VSYNC
 
 Après le correctif ci-dessus, Cauldron n'affiche plus jamais aucun pixel en
 clignotement (118 trames capturées). BMX Simulator, en revanche, en
@@ -101,45 +103,74 @@ trame) dans sa routine de tracé principale (`PC` 0x9831 → 0x9D6D, parcourant
 lignes avant d'être acceptée — bien au-delà des 32 lignes qui déclenchent
 l'effacement du bit 5.
 
-### La règle inversée
+### La règle du recalage VSYNC : documentation contre émulateur de référence
 
 Reste à savoir pourquoi ce décalage n'était jamais rattrapé. Il aurait dû
 l'être : c'est précisément la fonction du recalage sur le VSYNC. La
 documentation de référence
-([cpctech.cpcwiki.de/docs/ints.html](https://cpctech.cpcwiki.de/docs/ints.html),
-reprise par CPCWiki) est explicite :
+([cpctech](https://cpctech.cpcwiki.de/docs/ints.html), reprise mot pour mot
+par [Grimware](https://www.grimware.org/doku.php/documentations/devices/gatearray)
+— ce n'est donc probablement qu'une seule source, recopiée) dit :
 
-> "If the top bit of the 6-bit counter is set to '1' (i.e. the counter >=32),
-> then there is no interrupt request, and the 6-bit counter is reset to '0'.
-> If the top bit of the 6-bit counter is set to '0' (i.e. the counter <32),
-> then a interrupt request is issued, and the 6-bit counter is reset to '0'."
+> "If the top bit of the 6-bit counter is set to "1" (i.e. the counter >=32),
+> then there is no interrupt request, and the 6-bit counter is reset to "0".
+> (If a interrupt was requested and acknowledged it would be closer than 32
+> HSYNCs compared to the position of the previous interrupt).
+> If the top bit of the 6-bit counter is set to "0" (i.e. the counter <32),
+> then a interrupt request is issued, and the 6-bit counter is reset to "0"."
 
-Autrement dit : à VSYNC + 2, une interruption est levée quand le bit 5 est à
-**zéro**. Notre code faisait exactement l'inverse (`!= 0` au lieu de `== 0`),
-et les deux tests unitaires qui couvraient ce point encodaient eux aussi la
-règle inversée — écrits pour correspondre à l'implémentation plutôt qu'à la
-spécification, le piège classique.
+Notre code faisait l'inverse : interruption quand le bit 5 est à 1. Il a
+été aligné sur cette lecture littérale (commit « Gate Array : la regle
+d'interruption du recalage VSYNC etait inversee »).
 
-Avec la règle corrigée, le recalage rattrape la dérive : le compte
-d'interruptions redevient **rigoureusement stable à 6 par trame** pendant
-toute la course démo (mesuré : plus aucune trame hors-6, alors que les
-décalages de phase, eux, continuent de se produire — c'est bien le recalage
-qui les compense).
+**Cette correction est très probablement une erreur, à annuler.** Trois
+éléments l'indiquent, découverts en comparant ensuite avec l'émulateur de
+référence :
 
-Effet de bord à connaître : la toute première trame après la mise sous
-tension n'a plus d'interruption pendant son VSYNC, le temps que le recalage
-aligne le compteur. Un vrai CPC a le même transitoire, et le firmware attend
-simplement une trame de plus avant son premier commit INK/BORDER. Le test
-`an_interrupt_lands_during_vsync_on_every_frame` (crtc.rs) exclut donc
-explicitement cette trame de chauffe.
+1. **Caprice32 fait l'inverse de la documentation**, et donc comme notre
+   code d'origine (`src/crtc.cpp`) :
 
-### Ce que ça règle, et ce que ça ne règle pas
+   ```c
+   if (GateArray.sl_count >= 32 && CRTC.interrupt_sl == 0) { // counter above save margin?
+      z80.int_pending = 1; // queue interrupt
+   }
+   GateArray.sl_count = 0; // clear counter
+   ```
 
-Le compte d'interruptions par trame est désormais rigoureusement stable à 6.
-Le clignotement visible, lui, subsiste. Un meilleur point de reproduction l'a
-rendu bien plus facile à étudier : **1 min 52 s après avoir validé
-`RUN"BMXSIM`**, le premier coureur franchit la ligne, s'arrête, et clignote
-alors en permanence (et non plus par intermittence).
+   Son commentaire — *"counter above save margin?"* — dit bien l'intention :
+   on ne lève l'interruption que si la précédente est assez loin.
+
+2. **La documentation se contredit elle-même.** Sa parenthèse justifie le
+   cas « pas d'interruption » par *"it would be closer than 32 HSYNCs
+   compared to the position of the previous interrupt"*. Or si le compteur
+   vaut ≥32, la précédente remise à zéro date de ≥32 lignes : lever une
+   interruption ne serait justement PAS trop proche. Cette justification
+   décrit le cas inverse de celui auquel elle est attachée — les deux
+   conditions semblent avoir été interverties à la rédaction.
+
+3. **Notre code d'origine avait été écrit pour corriger un vrai bug
+   observé** (INK/BORDER jamais committés, faute d'interruption pendant le
+   VSYNC — voir le commentaire du test `interrupt_fires_two_lines_after_vsync_start`).
+   Avec la règle « corrigée », la toute première trame après mise sous
+   tension perd son interruption pendant le VSYNC, ce qui a obligé à
+   assouplir le test `an_interrupt_lands_during_vsync_on_every_frame` : un
+   signal qui aurait dû alerter.
+
+Et surtout : **ce changement n'a pas réglé le clignotement** (18 % de
+réduction sur le phénomène intermittent, et aucune amélioration sur le
+clignotement permanent de fin de course, cf. plus bas). Il nous éloigne de
+l'émulateur de référence sans rien apporter.
+
+### Ce que ça change (et pourquoi ça ne suffit pas)
+
+Avec la règle littérale de la documentation, le compte d'interruptions par
+trame devient rigoureusement stable à 6 pendant la course démo (contre 17 à
+22 trames hors-6 par seconde avant). Mais le clignotement visible ne
+disparaît pas pour autant : 3112 → 2544 pixels oscillants sur 398 trames,
+soit 18 %, et rien du tout sur le clignotement permanent de fin de course
+décrit ci-dessous. Un compte stable n'est donc pas le bon critère — et vu
+que Caprice32 obtient un affichage correct **sans** cette stabilité, ce
+n'est vraisemblablement pas ce que fait le vrai matériel.
 
 ## Le clignotement de fin de course : le tracé qui court après le faisceau
 
