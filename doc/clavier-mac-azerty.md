@@ -174,3 +174,6 @@ imprimante ou le compare à `CHR$(64)` manipule bien un `@`. Seul son rendu
 au matériel. La touche Mac `#/@` reste routée vers le `#` du CPC, et
 `SHIFT+$` produit le code 64 (`@`), affiché `à` — exactement comme sur un
 vrai 6128 français.
+
+les indications trouvées sur ce site semblent claires et confirment un point:
+le "@" est un "à" en azerty. https://cpcrulez.fr/applications-a_la_decouverte_du_clavier.htm
