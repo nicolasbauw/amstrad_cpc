@@ -215,19 +215,60 @@ Retirer cet effacement supprimerait bien le symptôme (0 pixel oscillant,
 tracé verrouillé sur la scanline 163), mais masquerait un écart de phase
 dont la cause est ailleurs — c'est pourquoi ça n'a pas été fait.
 
-### Piste restante
+### Comparaison instrumentée avec Caprice32
 
-Ce qui reste à expliquer : pourquoi notre phase atterrit-elle sur 111/143
-alors que le matériel réel semble se stabiliser sur une position unique. La
-section DI du jeu dure **145 lignes** chez nous (routine de tracé,
-`PC` 0x9831 → 0x9D6D, parcourant 0x504F..0xA275) ; c'est cette durée qui
-détermine la valeur du compteur à l'acquittement, donc de quel côté du seuil
-de 32 lignes on tombe. Un écart de quelques pour cent sur la durée de cette
-routine suffirait à changer le résultat. Le comparer à une mesure de
-référence (vrai CPC, ou trace d'un émulateur réputé exact sur la même
-scène) serait le prochain pas utile — plus prometteur que de continuer à
-auditer les tables de cycles à l'aveugle, ce qui a déjà été fait sans rien
-trouver (section suivante).
+Caprice32 étant installé en local avec ses sources (`~/Dev/caprice32`), il a
+été instrumenté temporairement (compteur de microsecondes, relevé des
+sections DI, des interruptions par trame, des effacements du bit 5) puis
+**restauré à son état d'origine**. Les deux émulateurs ont joué la même
+scène (`--autocmd='RUN"BMXSIM'`, course démo, t ≈ 100-110 s).
+
+| Mesure | Caprice32 | ByteBox |
+|---|---|---|
+| Durée de la section DI de tracé | 138 à 151 lignes | ~145 lignes |
+| Départ du tracé (lignes après VSYNC) | 207 à 229 (bande de ~22) | 183 / 215 / 235 (3 positions, écart 52) |
+| Interruptions par trame | **6, toujours** | variable (17 à 22 trames hors-6 par seconde) |
+| Effacements du bit 5 à l'acquittement | **0** | des centaines |
+| Grille d'interruptions | 1.9, 53.9, 105.7, 156.1, 208.0, 261.2 lignes après VSYNC | même grille *quand* aucun décalage n'a lieu |
+
+Deux enseignements nets :
+
+1. **Notre timing CPU n'est pas en cause.** La durée de la section DI du jeu
+   — ~145 lignes chez nous — tombe en plein dans la fourchette mesurée chez
+   Caprice32 (138-151). L'hypothèse d'un CPU émulé trop lent ou trop rapide,
+   qui motivait l'audit des tables de cycles, est écartée.
+
+2. **Toute la différence tient aux effacements du bit 5.** Caprice32 n'en
+   fait **aucun** pendant toute la course : ses acquittements tombent
+   systématiquement à moins de 32 lignes de l'interruption qui les a
+   déclenchés, donc le compteur n'est jamais rogné, la phase ne dérive
+   jamais, la grille reste figée et le tracé démarre toujours dans la même
+   bande de ~22 lignes. Chez nous, des acquittements tombent régulièrement
+   au-delà de 32 lignes, chaque effacement recule le compteur de 32 lignes,
+   et le tracé se met à sauter entre trois positions distantes d'une période
+   d'interruption complète.
+
+La question à instruire n'est donc plus « la règle du bit 5 est-elle
+juste ? » (elle est identique des deux côtés) mais : **pourquoi nos
+acquittements arrivent-ils plus tard, relativement à l'interruption qui les
+provoque, que ceux de Caprice32 ?** Un décalage systématique d'une
+dizaine de lignes suffit à faire basculer d'un régime à l'autre — et une
+fois du bon côté, le système est stable (pas d'effacement, donc pas de
+dérive, donc toujours pas d'effacement).
+
+Pistes concrètes pour la suite, dans l'ordre :
+
+- instrumenter ByteBox exactement comme Caprice32 l'a été (position de
+  chaque interruption dans la trame, valeur du compteur à chaque
+  acquittement) et comparer les deux relevés ligne à ligne sur la même
+  scène ;
+- vérifier en particulier le délai entre la demande d'interruption par le
+  Gate Array et son acceptation par le CPU : c'est là que se logerait un
+  décalage systématique (moment exact où l'interruption est présentée, et
+  traitement du délai d'une instruction après `EI`) ;
+- vérifier aussi la position de la première interruption après le recalage
+  VSYNC : la grille de Caprice32 démarre à 1.9 ligne après le début du
+  VSYNC, valeur à confronter à la nôtre.
 
 ### Audit des tables de cycles Z80 (`zilog_z80`)
 
@@ -257,10 +298,11 @@ assertions portant sur des durées de cycles, dont une table de référence
 dédiée (`REFERENCE_TIMINGS`, 33 entrées) qui couvre précisément ces
 catégories à risque.
 
-**Aucune anomalie trouvée.** Cet audit n'a pas identifié d'instruction
-précise à corriger — et il regardait au mauvais endroit : la cause réelle de
-l'alternance 5/6 n'était pas une imprécision de cycles, mais la règle
-d'interruption inversée décrite plus haut. Cela ne prouve pas l'absence totale d'imprécision
+**Aucune anomalie trouvée** — et la comparaison instrumentée avec Caprice32
+(plus haut) a depuis confirmé que cet audit regardait au mauvais endroit :
+la durée de la section DI du jeu est la même des deux côtés (~145 lignes
+chez nous, 138-151 chez Caprice32). Notre précision cycle-à-cycle n'est
+donc pas en cause dans ce symptôme. Cela ne prouve pas l'absence totale d'imprécision
 (seules les catégories les plus suspectes ont été vérifiées, pas les 1024
 entrées une par une, et le CRTC n'a pas été réaudité), mais faute d'indice
 concret pointant vers une instruction particulière, creuser plus loin
