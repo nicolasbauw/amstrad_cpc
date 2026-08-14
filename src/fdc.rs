@@ -1077,10 +1077,15 @@ impl Fdc {
     /// mémoire, pour que les écritures faites par le logiciel émulé
     /// (SAVE BASIC, formatage...) survivent à un power cycle ou à une
     /// fermeture de l'émulateur — jusqu'ici, seule l'image en RAM changeait,
-    /// jamais le fichier réellement sur disque. "None" signifie qu'aucun
-    /// fichier ne soutient l'image (ne devrait pas arriver ici : Format
-    /// Track sur un lecteur sans disquette insérée), et n'est donc pas
-    /// persisté.
+    /// jamais le fichier réellement sur disque (voir
+    /// doc/persistance-disquette.md). "None" signifie qu'aucun fichier ne
+    /// soutient l'image (ne devrait pas arriver ici : Format Track sur un
+    /// lecteur sans disquette insérée), et n'est donc pas persisté.
+    ///
+    /// Réécrit tout le fichier à chaque appel plutôt que le seul secteur
+    /// modifié — coût négligeable pour un usage ponctuel (SAVE BASIC), mais
+    /// à reconsidérer si un logiciel écrit très fréquemment sur disque (voir
+    /// la section "Optimisation non faite" du même document).
     fn persist_drive_dsk(&self) {
         let drv = self.drive();
         if drv.current_filename == "None" {
