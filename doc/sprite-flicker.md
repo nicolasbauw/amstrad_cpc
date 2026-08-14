@@ -135,29 +135,69 @@ explicitement cette trame de chauffe.
 
 ### Ce que ça règle, et ce que ça ne règle pas
 
-Mesuré sur 398 trames capturées dès le départ de la course démo, en
-comptant les pixels qui oscillent A→B→A d'une trame à l'autre (bandeau de
-score exclu : le chronomètre y change normalement à chaque trame, ce n'est
-pas le bug cherché) :
+Le compte d'interruptions par trame est désormais rigoureusement stable à 6.
+Le clignotement visible, lui, subsiste. Un meilleur point de reproduction l'a
+rendu bien plus facile à étudier : **1 min 52 s après avoir validé
+`RUN"BMXSIM`**, le premier coureur franchit la ligne, s'arrête, et clignote
+alors en permanence (et non plus par intermittence).
 
-| | pixels oscillants | pire trame |
+## Le clignotement de fin de course : le tracé qui court après le faisceau
+
+Mesuré sur cette scène (harnais headless, 58 trames capturées) : environ
+118 pixels oscillent à chaque trame, dans une boîte de 40 x 22 pixels
+(x 436..475, y 372..393) — la taille d'un sprite, et deux captures
+consécutives montrent bien le coureur **présent puis totalement absent**.
+
+Le mécanisme, lui, se lit dans la position de la routine de tracé du jeu
+(sa longue section DI) par rapport au faisceau :
+
+| | scanlines où tourne le tracé | pixels oscillants |
 |---|---|---|
-| Règle inversée (avant) | 3112 | 672 |
-| Règle conforme (après) | **2544** | 544 |
+| Code actuel | 111→254, 143→278, 163→294 (cycle de 3) | 6840 sur 58 trames |
+| Sans l'effacement du bit 5 | **163→296 à chaque trame** | **0** |
 
-Une réduction d'environ 18 %, dans la zone même du panneau START/FINISH
-(x 604..671, y 364..401) où le drapeau signalé se trouve — mais **pas une
-disparition**. Le correctif est juste et vaut pour lui-même (c'est un écart
-avéré à la documentation matérielle, qui affecte potentiellement tout
-logiciel sensible au rythme des interruptions), mais il ne suffit pas à
-expliquer tout le symptôme visible.
+Le sprite occupe les scanlines ~136 à 146. Quand le tracé démarre à 163, le
+faisceau a déjà dépassé cette zone : le sprite est effacé puis redessiné
+hors champ, invisible. Quand il démarre à 111 ou 143, le faisceau traverse
+la zone pendant que le sprite est effacé — il disparaît pour cette trame.
 
-Piste restante, non explorée : le détecteur A→B→A ne sait pas distinguer un
-bug d'une **animation légitime sur deux trames** (un drapeau qui flotte en
-alternant deux images produit exactement ce motif). Une partie du résidu
-mesuré est donc peut-être parfaitement normale. Trancher demanderait
-d'inspecter visuellement les trames en cause, ou de désassembler la routine
-d'animation du jeu.
+L'écart entre ces positions de départ (32 lignes) est exactement celui de
+l'effacement du bit 5 par `acknowledge_interrupt`. Comme le jeu masque les
+interruptions 145 lignes d'affilée, ses acquittements sont très tardifs, le
+compteur vaut alors 33 à 51, et chaque effacement le recule de 32 lignes :
+la boucle principale du jeu, cadencée sur ces interruptions, démarre son
+tracé à une position de faisceau différente d'une trame à l'autre.
+
+**Mais ce n'est pas là qu'est notre écart avec le matériel réel.** Trois
+vérifications convergent :
+
+- l'effacement du bit 5 à l'acquittement est bien documenté
+  ([cpctech](https://cpctech.cpcwiki.de/docs/ints.html) : *"The top bit
+  (bit 5), of the counter is set to '0' and the interrupt request is
+  cleared."*) ;
+- notre détection de l'acquittement est exacte : la crate `zilog_z80` ne
+  vide sa requête (`self.int`) que lorsqu'elle accepte réellement
+  l'interruption, jamais quand elle l'ignore faute d'IFF1 ;
+- **Caprice32 implémente la même règle** (`GateArray.sl_count &= 0x1f` dans
+  son `z80.c`) et ne montre pourtant pas le clignotement.
+
+Retirer cet effacement supprimerait bien le symptôme (0 pixel oscillant,
+tracé verrouillé sur la scanline 163), mais masquerait un écart de phase
+dont la cause est ailleurs — c'est pourquoi ça n'a pas été fait.
+
+### Piste restante
+
+Ce qui reste à expliquer : pourquoi notre phase atterrit-elle sur 111/143
+alors que le matériel réel semble se stabiliser sur une position unique. La
+section DI du jeu dure **145 lignes** chez nous (routine de tracé,
+`PC` 0x9831 → 0x9D6D, parcourant 0x504F..0xA275) ; c'est cette durée qui
+détermine la valeur du compteur à l'acquittement, donc de quel côté du seuil
+de 32 lignes on tombe. Un écart de quelques pour cent sur la durée de cette
+routine suffirait à changer le résultat. Le comparer à une mesure de
+référence (vrai CPC, ou trace d'un émulateur réputé exact sur la même
+scène) serait le prochain pas utile — plus prometteur que de continuer à
+auditer les tables de cycles à l'aveugle, ce qui a déjà été fait sans rien
+trouver (section suivante).
 
 ### Audit des tables de cycles Z80 (`zilog_z80`)
 
