@@ -106,63 +106,71 @@ Chacun des trois bugs de cette section a un test de régression dans
 `psg.rs` qui échoue sans son correctif (vérifié explicitement en réappliquant
 temporairement le bug avant de conclure).
 
-## Le mystère du `@`
+## Le `@` : le caractère existe, c'est le dessin qui a changé
 
-Une fois `<`, `>` et `SHIFT+$` fiables, restait : `@` (Mac, sans SHIFT)
-donne `#` sur le CPC au lieu de `@`. La légende du clavier CPC réel place
-pourtant `@` en variante SHIFTée de `$`, à la position `(2,6)` de la
-matrice.
+Une fois `<`, `>` et `SHIFT+$` fiables, restait une dernière anomalie
+apparente : rien à l'écran ne ressemble jamais à un `@`. La légende du
+clavier CPC réel place pourtant `@` en variante SHIFTée de `$`, à la
+position `(2,6)` de la matrice.
 
-### Recherche exhaustive, sans résultat
+### Ce que montre l'écran
 
-Testé méthodiquement, position par position, en pilotant la matrice CPC
-directement (sans passer par la traduction clavier Mac, pour écarter toute
-suspicion côté SDL) :
+Testé position par position en pilotant la matrice CPC directement (sans
+passer par la traduction clavier Mac, pour écarter toute suspicion côté
+SDL) :
 
-- `(2,6)` avec SHIFT CPC posé proprement (isolé, sans rien d'autre) : **`à`**,
-  pas `@`.
-- Toutes les positions à caractère imprimable des lignes 2 à 8 de la
-  matrice, y compris toutes les variantes SHIFT jamais vérifiées jusque-là
-  (`^` mort, `-`, `)`, `,`, `;`) : aucune ne donne `@`. (Trouvaille au
-  passage : le `^` shifté donne aussi `ù`, un doublon avec sa position déjà
-  connue — la table de caractères du CPC a apparemment plusieurs
-  redondances de ce genre.)
+- `(2,6)` avec SHIFT CPC posé proprement : **`à`**, pas `@`.
+- Toutes les autres positions à caractère imprimable des lignes 2 à 8, y
+  compris les variantes SHIFT jamais vérifiées (`^` mort, `-`, `)`, `,`,
+  `;`) : aucune ne donne `@`. (Trouvaille au passage : le `^` shifté donne
+  aussi `ù`, doublon avec sa position déjà connue.)
 - Le pavé "calculatrice" `f0`-`f9` / `.` / flèches (lignes 0 et 1) avec
-  SHIFT : toujours les mêmes chiffres, SHIFT n'y change rien.
-- La page Wikipédia *Amstrad CPC character set* : confirme que `@` est au
-  code standard ASCII `0x40`, mais ne documente aucune disposition clavier.
+  SHIFT : toujours les mêmes chiffres.
+- Balayage complet de la police en BASIC, sur clavier réel, scruté
+  plusieurs fois :
+  ```basic
+  10 FOR i=32 TO 255
+  20 PRINT i;CHR$(i);" ";
+  30 IF (i-31) MOD 8=0 THEN PRINT
+  40 IF (i-31) MOD 96=0 THEN PRINT "SUITE=touche":WHILE INKEY$="":WEND
+  50 NEXT i
+  ```
+  Aucun `@` nulle part dans les 224 caractères affichables.
 
-### La conclusion, obtenue autrement
+Confirmé enfin en extrayant directement la police de la ROM (table de 256
+glyphes de 8 octets, à partir de `0x3800` dans la ROM basse — offset
+vérifié en rendant `A`, `B` et `0`) : le dessin du `@` est absent des 256
+entrées. `bin/OS6128-AZERTY.rom` et `bin/cpc6128.rom` ont tous deux `à` au
+code 64.
 
-Plutôt que de continuer à chercher quelle touche produit `@`, la question a
-été retournée : **que produit vraiment le code `CHR$(64)` sur cette ROM ?**
+### Mais la touche n'est pas vide de sens
+
+Il était tentant d'en conclure que `@` était inatteignable. C'est faux, et
+l'objection qui l'a fait remarquer était la bonne : Amstrad n'aurait pas
+gravé une touche ne correspondant à rien. La bonne question n'était pas
+« quel dessin apparaît ? » mais « quel **code** la touche émet-elle ? » :
 
 ```basic
-PRINT CHR$(64)
+PRINT ASC("<SHIFT+$>")
 ```
 
-Réponse de la ROM : **`à`**, pas `@`.
+Réponse de la ROM : **64**.
 
-La table de caractères française a réattribué le code 64 (habituellement
-`@` en ASCII standard) à `à`, pour loger les lettres accentuées (`à`, `é`,
-`è`, `ç`, `ù`...) dans une table de taille fixe. `@`, peu utilisé en BASIC
-français, a été sacrifié. Ce n'est donc pas un problème de disposition
-clavier : le glyphe `@` n'existe simplement plus dans la police de cette
-ROM. La légende `@ \ $` gravée sur le clavier physique (probablement un
-moule de touches générique, réutilisé pour plusieurs marchés) ne correspond
-plus au firmware français réellement chargé.
+La touche émet donc bien le code 64, c'est-à-dire le caractère `@` de
+l'ASCII. Ce que la ROM française a changé, c'est uniquement le **glyphe**
+associé à ce code : elle y dessine `à`, pour loger les lettres accentuées
+(`à`, `ç`...) sans agrandir une table de taille fixe. C'est le principe des
+variantes nationales ISO 646 : mêmes codes, dessins différents selon le
+pays (on retrouve d'ailleurs `ç` au code 92, celui du `\` en ASCII — ce qui
+explique le second symbole de la légende `@ \ $` de cette touche).
 
-**Comportement retenu** : la touche Mac qui produirait `@` (sans SHIFT, sur
-la touche `#/@`) reste routée vers le `#` du CPC — c'est le choix le plus
-utile possible, puisqu'aucun caractère `@` n'existe à atteindre de toute
-façon.
+Conséquence pratique : `@` **est** accessible et parfaitement fonctionnel.
+Un programme qui écrit ce caractère dans un fichier, l'envoie à une
+imprimante ou le compare à `CHR$(64)` manipule bien un `@`. Seul son rendu
+à l'écran diffère. La légende gravée sur le clavier décrit le code émis
+(sens international), pas le dessin qu'en fait le firmware français.
 
-## Méthode
-
-Toute cette investigation s'est faite sans jamais avoir la main sur un vrai
-Mac : par itérations avec l'utilisateur (qui teste sur son clavier réel et
-rapporte le symptôme exact), combinées à une instrumentation temporaire
-(`KEYLOG`, retirée) tracée événement par événement, et à des bancs d'essai
-headless (`Machine::step` piloté directement, sans fenêtre, capture d'écran
-PNG relue directement) pour vérifier chaque hypothèse avant de la proposer
-comme correctif — jamais l'inverse.
+**Rien à corriger dans l'émulateur** : le comportement observé est fidèle
+au matériel. La touche Mac `#/@` reste routée vers le `#` du CPC, et
+`SHIFT+$` produit le code 64 (`@`), affiché `à` — exactement comme sur un
+vrai 6128 français.
