@@ -214,7 +214,24 @@ impl GateArray {
         } else if self.vsync_delay > 0 {
             self.vsync_delay -= 1;
             if self.vsync_delay == 0 {
-                if (self.hsync_counter & 0x20) != 0 {
+                // Une interruption n'est levée à ce recalage QUE si le bit 5
+                // du compteur est à ZÉRO (compteur < 32) — pas l'inverse.
+                // C'est ce que décrivent les documents de référence
+                // (cpctech.cpcwiki.de/docs/ints.html, repris par CPCWiki) :
+                //
+                //   "If the top bit of the 6-bit counter is set to '1' (i.e.
+                //    the counter >=32), then there is no interrupt request,
+                //    and the 6-bit counter is reset to '0'. If the top bit
+                //    of the 6-bit counter is set to '0' (i.e. the counter
+                //    <32), then a interrupt request is issued, and the
+                //    6-bit counter is reset to '0'."
+                //
+                // C'est ce recalage qui rattrape la dérive de phase
+                // introduite par `acknowledge_interrupt` (voir sa doc) :
+                // inversé, il ne compensait rien et le nombre
+                // d'interruptions par trame se mettait à varier (voir
+                // doc/sprite-flicker.md).
+                if (self.hsync_counter & 0x20) == 0 {
                     interrupt = true;
                 }
                 self.hsync_counter = 0;
@@ -381,26 +398,29 @@ mod tests {
         );
     }
 
-    /// Compteur < 32 au moment du contrôle : le VSYNC le remet à zéro sans
-    /// lever d'interruption supplémentaire.
+    /// Compteur < 32 au moment du contrôle : interruption levée, puis remise
+    /// à zéro. C'est ce cas qui rattrape la dérive de phase laissée par un
+    /// acquittement tardif (voir `acknowledge_interrupt`).
     #[test]
-    fn vsync_resets_counter_without_interrupt_when_bit5_clear() {
+    fn vsync_forces_interrupt_when_bit5_clear() {
         let mut ga = GateArray::new();
         ga.hsync_counter = 10;
         assert!(!ga.step_hsync(true));
         assert!(!ga.step_hsync(false));
-        assert!(!ga.step_hsync(false));
+        assert!(ga.step_hsync(false));
         assert_eq!(ga.hsync_counter, 0);
     }
 
-    /// Compteur >= 32 au moment du contrôle : interruption forcée puis remise à zéro.
+    /// Compteur >= 32 au moment du contrôle : le VSYNC le remet à zéro sans
+    /// lever d'interruption supplémentaire — la prochaine arrivera d'elle-même
+    /// assez tôt.
     #[test]
-    fn vsync_forces_interrupt_when_bit5_set() {
+    fn vsync_resets_counter_without_interrupt_when_bit5_set() {
         let mut ga = GateArray::new();
         ga.hsync_counter = 40;
         assert!(!ga.step_hsync(true));
         assert!(!ga.step_hsync(false));
-        assert!(ga.step_hsync(false));
+        assert!(!ga.step_hsync(false));
         assert_eq!(ga.hsync_counter, 0);
     }
 }
