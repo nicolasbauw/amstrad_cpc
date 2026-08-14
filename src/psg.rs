@@ -24,10 +24,49 @@ pub struct Psg {
     pub keyboard_matrix: [u8; 10],
     pub selected_keyboard_line: u8,
     pub controller_state: [u8; 8], // 0-7: bits de la manette (Up, Down, Left, Right, Fire1, Fire2, Fire3, Fire4)
+    /// Position CPC choisie au dernier appui des touches Mac "$ / * / €" et
+    /// "< / >", qui dépend du SHIFT Mac à cet instant précis. Mémorisée pour
+    /// que le relâchement vise la MÊME position, même si le SHIFT Mac a
+    /// changé d'état entre les deux événements : relâcher SHIFT avant la
+    /// touche elle-même est un ordre de frappe parfaitement normal, et sans
+    /// cette mémoire le relâchement recalculait une position différente de
+    /// celle posée à l'appui — le bit d'origine restait alors bloqué "pressé"
+    /// indéfiniment, générant des répétitions du caractère via le balayage
+    /// clavier du firmware (bug constaté sur clavier réel).
+    dollar_asterisk_target: Option<(usize, u8)>,
+    /// Position CPC ciblée par la touche "< / >", et si SON relâchement doit
+    /// aussi relâcher le SHIFT du CPC (uniquement si cette touche l'a
+    /// elle-même synthétisé — voir le commentaire de `Scancode::NonUsBackslash`).
+    less_greater_target: Option<((usize, u8), bool)>,
+    /// Écritures de bit matrice différées de quelques cycles Z80 (voir
+    /// `DEFER_TICKS` et `tick`) : jamais présenter au firmware deux
+    /// changements de bit dans la même scrutation clavier. Un vrai clavier
+    /// ne produit jamais ça (même en tapant vite, il y a toujours quelques
+    /// cycles où un seul doigt a bougé), et l'anti-rebond du firmware
+    /// interprète mal ce cas — bug constaté sur clavier réel : SHIFT+$
+    /// donnait systématiquement "<" au lieu de "*", à chaque appui, pas
+    /// seulement au démarrage. Étaler le relâchement/engagement du SHIFT du
+    /// CPC et l'engagement de la position sur deux scrutations distinctes,
+    /// comme le ferait naturellement une vraie combinaison SHIFT+touche,
+    /// règle le problème.
+    deferred: Vec<DeferredBit>,
     /// Partie génératrice de son : les registres restent ici (ils sont aussi la
     /// porte du clavier), la synthèse vit dans son propre module.
     pub sound: Sound,
 }
+
+/// Voir le commentaire de `Psg::deferred`.
+struct DeferredBit {
+    line: usize,
+    bit: u8,
+    pressed: bool,
+    ticks_left: u32,
+}
+
+/// ~10 ms à 4 MHz : plusieurs interruptions clavier du CPC (300 Hz, soit
+/// ~13 333 cycles chacune) tiennent largement dans ce délai, avec de la
+/// marge, tout en restant totalement imperceptible à la frappe humaine.
+const DEFER_TICKS: u32 = 40_000;
 
 impl Psg {
     pub fn new() -> Self {
@@ -37,14 +76,55 @@ impl Psg {
             keyboard_matrix: [0xFF; 10],
             selected_keyboard_line: 0,
             controller_state: [0; 8],
+            dollar_asterisk_target: None,
+            less_greater_target: None,
+            deferred: Vec::new(),
             sound: Sound::new(),
         }
+    }
+
+    /// Pose ou relâche un bit de la matrice immédiatement.
+    fn set_bit_now(&mut self, line: usize, bit: u8, pressed: bool) {
+        if pressed {
+            self.keyboard_matrix[line] &= !(1 << bit);
+        } else {
+            self.keyboard_matrix[line] |= 1 << bit;
+        }
+    }
+
+    /// Programme un changement de bit `DEFER_TICKS` cycles Z80 plus tard.
+    fn set_bit_deferred(&mut self, line: usize, bit: u8, pressed: bool) {
+        self.deferred.push(DeferredBit {
+            line,
+            bit,
+            pressed,
+            ticks_left: DEFER_TICKS,
+        });
+    }
+
+    /// Annule un changement différé en attente pour ce bit, s'il y en a un :
+    /// une frappe assez brève pour être relâchée avant l'échéance ne doit
+    /// pas laisser un appui fantôme s'appliquer après coup.
+    fn cancel_deferred(&mut self, line: usize, bit: u8) {
+        self.deferred
+            .retain(|d| !(d.line == line && d.bit == bit));
     }
 
     /// Fait avancer la synthèse sonore de `cpu_ticks` cycles Z80 (4 MHz). Le
     /// PSG est cadencé au quart de cette fréquence sur le CPC.
     pub fn tick(&mut self, cpu_ticks: u32) {
         self.sound.tick_cpu(&self.registers, cpu_ticks);
+
+        let mut i = 0;
+        while i < self.deferred.len() {
+            if self.deferred[i].ticks_left <= cpu_ticks {
+                let d = self.deferred.remove(i);
+                self.set_bit_now(d.line, d.bit, d.pressed);
+            } else {
+                self.deferred[i].ticks_left -= cpu_ticks;
+                i += 1;
+            }
+        }
     }
 
     /// Met à jour l'état d'un bouton de la manette.
@@ -93,29 +173,141 @@ impl Psg {
     }
 
     /// Touches dont le Keycode macOS n'est pas exploitable de façon fiable : touche
-    /// morte "^/¨" et caractères hors table SDLK ("ù", "#/@"). On se base ici sur le
-    /// Scancode, qui reflète la position PHYSIQUE de la touche et ignore la disposition
-    /// clavier active (donc insensible aux touches mortes). À appeler en PLUS (ou à la
-    /// place, pour ces trois touches précises) du traitement par Keycode dans la boucle
-    /// d'événements.
+    /// morte "^/¨" et caractères hors table SDLK ("ù", "#/@", "$/*/€", "</>"). On se
+    /// base ici sur le Scancode, qui reflète la position PHYSIQUE de la touche et
+    /// ignore la disposition clavier active (donc insensible aux touches mortes et
+    /// au SHIFT). À appeler en PLUS (ou à la place, pour ces touches précises) du
+    /// traitement par Keycode dans la boucle d'événements.
+    ///
+    /// `shift_held` est l'état du SHIFT physique au moment de l'événement.
+    ///
+    /// Trois de ces touches (Grave, RightBracket, NonUsBackslash) ont chacune deux
+    /// caractères Mac (SHIFT ou non) dont les cibles CPC ne sont PAS l'une la
+    /// variante shiftée de l'autre (ou, pour NonUsBackslash, le sont mais sur une
+    /// touche CPC différente de celle où le SHIFT Mac serait naturellement retombé).
+    /// Le SHIFT Mac ne doit donc jamais fuiter tel quel vers le SHIFT du CPC : sans
+    /// ce découplage, le bit de position posé ici se combine avec le bit SHIFT CPC
+    /// posé en parallèle par la touche SHIFT elle-même (`set_key_state`), et produit
+    /// la variante shiftée de la mauvaise touche CPC (bugs constatés : SHIFT+@
+    /// donnait ">" au lieu de "#", SHIFT+< donnait "<" au lieu de ">").
+    ///
+    /// Quand la cible CPC a malgré tout besoin du SHIFT du CPC (cas de "<", plus
+    /// bas), il est synthétisé plutôt que réutilisé tel quel : voir le commentaire
+    /// de `Psg::deferred` pour pourquoi ce n'est pas un simple bit posé au même
+    /// instant que la position.
     ///
     /// Retourne `true` si la touche a été prise en charge ici.
-    pub fn set_key_state_scancode(&mut self, scancode: Scancode, pressed: bool) -> bool {
-        let cpc_key: Option<(usize, u8)> = match scancode {
+    pub fn set_key_state_scancode(
+        &mut self,
+        scancode: Scancode,
+        pressed: bool,
+        shift_held: bool,
+    ) -> bool {
+        match scancode {
             // "ù / %" -> position du "'" en disposition US
-            Scancode::Apostrophe => Some((3, 4)),
+            Scancode::Apostrophe => {
+                self.apply_bits(&[(3, 4)], pressed);
+                true
+            }
             // touche morte "^ / ¨" -> position du "[" en disposition US
-            Scancode::LeftBracket => Some((3, 2)),
-            // touche ISO supplémentaire "# / @" (en haut à gauche) -> position du "`" en disposition US
-            Scancode::Grave => Some((2, 3)),
-            _ => None,
-        };
+            Scancode::LeftBracket => {
+                self.apply_bits(&[(3, 2)], pressed);
+                true
+            }
 
-        if let Some(bit) = cpc_key {
-            self.apply_bits(&[bit], pressed);
-            true
-        } else {
-            false
+            // Touche ISO supplémentaire "# / @" (en haut à gauche) -> position du "`"
+            // en disposition US. "#" et "@" du Mac visent tous deux le "#" du CPC
+            // (2,3), jamais shiftée.
+            Scancode::Grave => {
+                if pressed {
+                    if shift_held {
+                        self.set_bit_now(2, 5, false); // relache le SHIFT reel
+                        self.set_bit_deferred(2, 3, true); // position, une scrutation plus tard
+                    } else {
+                        self.set_bit_now(2, 3, true);
+                    }
+                } else {
+                    self.cancel_deferred(2, 3);
+                    self.set_bit_now(2, 3, false);
+                    self.set_bit_now(2, 5, false);
+                }
+                true
+            }
+
+            // Touche "$ / * / €" du Mac, juste après la touche morte "^/¨" en position
+            // physique (donc juste après LeftBracket en scancode). "$" (non shiftée)
+            // vise le "$" du CPC (2,6), "*" (shiftée) vise le "*" du CPC (2,1) — deux
+            // touches CPC distinctes, ni l'une ni l'autre shiftée.
+            //
+            // La position n'est choisie qu'au premier appui, et mémorisée dans
+            // `dollar_asterisk_target` (verrouillée, pas recalculée à chaque
+            // répétition SDL) : le relâchement doit viser la MÊME position, pas en
+            // recalculer une nouvelle à partir du SHIFT Mac courant, qui a pu changer
+            // entre-temps (relâcher SHIFT avant la touche est un ordre de frappe
+            // courant) — sans cette mémoire le bit posé à l'appui restait bloqué
+            // "pressé" indéfiniment.
+            Scancode::RightBracket => {
+                if pressed {
+                    if self.dollar_asterisk_target.is_none() {
+                        let bit = if shift_held { (2, 1) } else { (2, 6) };
+                        self.dollar_asterisk_target = Some(bit);
+                        if shift_held {
+                            self.set_bit_now(2, 5, false);
+                            self.set_bit_deferred(bit.0, bit.1, true);
+                        } else {
+                            self.set_bit_now(bit.0, bit.1, true);
+                        }
+                    }
+                } else if let Some(bit) = self.dollar_asterisk_target.take() {
+                    self.cancel_deferred(bit.0, bit.1);
+                    self.set_bit_now(bit.0, bit.1, false);
+                    self.set_bit_now(2, 5, false);
+                }
+                true
+            }
+
+            // Touche ISO "< / >" du Mac (bas de clavier, à côté de SHIFT gauche). Le
+            // CPC a ses propres touches "*/<" (2,1) et "#/>" (2,3), dont "<" et ">"
+            // sont les variantes shiftées : ">" (Mac shifté) coïncide avec le SHIFT
+            // réel déjà engagé par la touche SHIFT elle-même, rien à synthétiser, juste
+            // la position (2,3). "<" (Mac SANS shift) demande au contraire de
+            // synthétiser le SHIFT du CPC nous-mêmes, exactement comme pour le pavé
+            // numérique — mais engagé en premier et la position seulement après un
+            // court délai, pour reproduire l'ordre naturel d'une vraie combinaison
+            // SHIFT+touche plutôt qu'un saut simultané des deux bits.
+            //
+            // `less_greater_target` retient aussi si CETTE touche a synthétisé le
+            // SHIFT du CPC (cas "<") ou s'est appuyée sur celui déjà posé par la
+            // touche SHIFT elle-même (cas ">") : au relâchement, ne toucher au bit
+            // SHIFT que si on l'a soi-même engagé. Bug constaté sur clavier réel
+            // sans cette distinction : relâcher ">" en gardant SHIFT physiquement
+            // enfoncé (pour continuer à taper) relâchait quand même le SHIFT du CPC,
+            // désynchronisé de la touche SHIFT réelle toujours tenue — l'appui
+            // suivant sur cette touche héritait d'un SHIFT CPC déjà faux et
+            // retombait sur "#" au lieu de ">".
+            Scancode::NonUsBackslash => {
+                if pressed {
+                    if self.less_greater_target.is_none() {
+                        let bit = if shift_held { (2, 3) } else { (2, 1) };
+                        self.less_greater_target = Some((bit, !shift_held));
+                        if shift_held {
+                            self.set_bit_now(bit.0, bit.1, true);
+                        } else {
+                            self.set_bit_now(2, 5, true);
+                            self.set_bit_deferred(bit.0, bit.1, true);
+                        }
+                    }
+                } else if let Some((bit, synthesized_shift)) = self.less_greater_target.take() {
+                    self.cancel_deferred(bit.0, bit.1);
+                    self.set_bit_now(bit.0, bit.1, false);
+                    if synthesized_shift {
+                        self.set_bit_now(2, 5, false);
+                    }
+                }
+                true
+            }
+
+            _ => false,
         }
     }
 
@@ -158,9 +350,18 @@ impl Psg {
             Keycode::Equals | Keycode::Plus => Some(&[(3, 6)]), // "=" (Shift -> "+", via vrai SHIFT physique)
             Keycode::Colon | Keycode::Slash => Some(&[(3, 7)]), // ":" (Shift -> "/", via vrai SHIFT physique)
             Keycode::Percent => Some(&[(3, 4)]),                // "%" (variante shiftée de "ù")
-            Keycode::Hash => Some(&[(2, 3)]), // "#" (filet de sécurité, cf. Scancode::Grave)
-            Keycode::Dollar => Some(&[(2, 6)]), // "$"
-            Keycode::Asterisk | Keycode::KpMultiply => Some(&[(2, 1)]), // "*"
+            // "#", "$", "*" et "</>": gérées par Scancode (Grave, RightBracket,
+            // NonUsBackslash) dans `set_key_state_scancode`, pas ici — un Keycode
+            // direct ne relâche pas le SHIFT CPC quand le SHIFT Mac est impliqué, et
+            // n'est de toute façon pas fiable sur macOS pour ces touches (SDL rapporte
+            // le même Keycode qu'il y ait SHIFT ou non), voir le commentaire de cette
+            // fonction dans `set_key_state_scancode`.
+            Keycode::KpMultiply => Some(&[(2, 1)]), // "*" (pavé numérique)
+
+            // Pas de mapping pour "@" : vérifié sur clavier réel (voir KEYLOG), la
+            // variante shiftée de la touche "$" (2,6) donne "à" sur le CPC, pas "@"
+            // (l'hypothèse précédente, jamais vérifiée, était fausse). Reste sans
+            // solution connue pour l'instant.
 
             // Pavé numérique : ces touches n'ont pas de modificateur physique sur le Mac,
             // donc on simule nous-mêmes le SHIFT du CPC pour atteindre le caractère voulu.
@@ -182,10 +383,6 @@ impl Psg {
             Keycode::Comma => Some(&[(4, 6)]), // touche physique "M" -> "," en AZERTY
             Keycode::Semicolon | Keycode::Period => Some(&[(4, 7)]), // touche physique "," -> ";" en AZERTY
             Keycode::M => Some(&[(3, 5)]), // touche "M" du Mac -> "M" du CPC
-
-            // NB : le CPC français n'a pas de touche "< >" dédiée comme sur le clavier
-            // ISO du Mac ; on ne mappe donc plus Keycode::Less / Keycode::Greater
-            // (c'est ce qui produisait à tort "," et "?").
 
             // Ligne 5
             Keycode::Num8 => Some(&[(5, 0)]),
@@ -363,5 +560,280 @@ mod tests {
         psg.selected_register = 14;
 
         assert_eq!(psg.read_current_register(), 0b0111_1111);
+    }
+
+    /// Un vrai SHIFT physique appuyé en même temps que la touche ISO "# / @"
+    /// (Mac) ne doit pas fuiter vers le SHIFT du CPC : les deux caractères Mac
+    /// visent la même touche CPC non shiftée "#". Sans le relâchement forcé du
+    /// bit SHIFT CPC, la combinaison produisait ">" (variante shiftée d'une
+    /// touche voisine) au lieu de "#" — bug constaté sur clavier réel.
+    #[test]
+    fn the_iso_hash_at_key_never_engages_the_cpc_shift() {
+        let mut psg = Psg::new();
+
+        // SHIFT physique déjà enfoncé (ligne 2, bit 5 à 0 = pressé).
+        psg.set_key_state(Keycode::LShift, true);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 5), 0, "SHIFT CPC pose");
+
+        // Puis la touche ISO "#/@" (Grave en Scancode), avec SHIFT Mac enfoncé
+        // (shift_held = true, ce qui produit "@" côté Mac). Le relâchement du
+        // SHIFT est immédiat, seule la position est différée (voir
+        // `Psg::deferred`) : on laisse le temps s'écouler pour l'appliquer.
+        psg.set_key_state_scancode(Scancode::Grave, true, true);
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC doit etre relache immediatement, malgre le SHIFT Mac enfonce"
+        );
+        psg.tick(DEFER_TICKS);
+
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 3),
+            0,
+            "le bit de position (2,3) du CPC doit etre pose apres le delai"
+        );
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC doit rester relache"
+        );
+    }
+
+    /// La touche Mac "$ / * / €" vise deux touches CPC distinctes et non
+    /// shiftées selon le SHIFT Mac : "$" (2,6) sans SHIFT Mac, "*" (2,1) avec.
+    /// Ni l'une ni l'autre n'implique le SHIFT du CPC. Sans SHIFT Mac, la
+    /// position s'applique immédiatement (transition d'un seul bit, sûre) ;
+    /// avec SHIFT Mac, elle est différée (voir `the_iso_hash_at_key_...`).
+    #[test]
+    fn the_dollar_asterisk_key_targets_two_unshifted_cpc_keys() {
+        let mut psg = Psg::new();
+
+        psg.set_key_state_scancode(Scancode::RightBracket, true, false);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 6), 0, "\"$\" du CPC pose");
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 5), 1 << 5, "SHIFT CPC relache");
+        psg.set_key_state_scancode(Scancode::RightBracket, false, false);
+
+        psg.set_key_state_scancode(Scancode::RightBracket, true, true);
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "SHIFT CPC relache immediatement"
+        );
+        psg.tick(DEFER_TICKS);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 1), 0, "\"*\" du CPC pose");
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 5), 1 << 5, "SHIFT CPC relache");
+    }
+
+    /// Relâcher SHIFT avant la touche "$/*/€" elle-même est un ordre de frappe
+    /// courant. Bug constaté sur clavier réel : la position CPC ("*", posée à
+    /// l'appui avec SHIFT Mac tenu) restait bloquée "pressée" après le
+    /// relâchement, parce que celui-ci recalculait une position différente
+    /// ("$") à partir du SHIFT Mac déjà retombé — d'où des lignes de "*" en
+    /// rafale via le balayage clavier du firmware.
+    #[test]
+    fn releasing_shift_before_the_dollar_asterisk_key_does_not_leave_a_bit_stuck() {
+        let mut psg = Psg::new();
+
+        // Appui avec SHIFT Mac tenu : vise "*" (2,1), appliqué apres le delai.
+        psg.set_key_state_scancode(Scancode::RightBracket, true, true);
+        psg.tick(DEFER_TICKS);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 1), 0, "\"*\" pose a l'appui");
+
+        // SHIFT deja retombe au moment du relachement de la touche.
+        psg.set_key_state_scancode(Scancode::RightBracket, false, false);
+
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 1),
+            1 << 1,
+            "\"*\" doit etre relache, pas rester bloque"
+        );
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 6),
+            1 << 6,
+            "\"$\" ne doit jamais avoir ete engage par ce relachement"
+        );
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC doit etre relache par ce relachement, pas engage"
+        );
+    }
+
+    /// Bug constaté sur clavier réel, distinct du bit bloqué ci-dessus : le
+    /// relâchement de "$/*/€" (et, de la même façon, de "#/@" et "</>")
+    /// engageait par erreur le SHIFT du CPC au lieu de le relâcher (inversion
+    /// de polarité : `set_bit_now(2, 5, true)` au lieu de `false`). La frappe
+    /// suivante en héritait, sans lien apparent avec elle-même : un "$" tout
+    /// seul, après un premier SHIFT+$, se retrouvait avec le SHIFT du CPC
+    /// déjà engagé et affichait "à" au lieu de "$".
+    #[test]
+    fn releasing_the_dollar_asterisk_key_after_a_shifted_press_releases_the_cpc_shift() {
+        let mut psg = Psg::new();
+
+        // SHIFT+$ : vise "*", relache immediat du SHIFT reel, position differee.
+        psg.set_key_state_scancode(Scancode::RightBracket, true, true);
+        psg.set_key_state_scancode(Scancode::RightBracket, false, true); // SHIFT Mac encore tenu au relachement
+        psg.tick(DEFER_TICKS);
+
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC ne doit pas rester engage apres ce relachement"
+        );
+
+        // "$" seul, ensuite : ne doit pas heriter d'un SHIFT CPC fantome.
+        psg.set_key_state_scancode(Scancode::RightBracket, true, false);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 6), 0, "\"$\" pose");
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "SHIFT CPC toujours relache : pas de \"a accent grave\" a la place de \"$\""
+        );
+    }
+
+    /// Même bug que ci-dessus, sur la touche "#/@" : deux appuis SHIFT+@ puis
+    /// @ seul de suite ne doivent pas faire dériver le second vers ">".
+    #[test]
+    fn releasing_the_hash_at_key_after_a_shifted_press_releases_the_cpc_shift() {
+        let mut psg = Psg::new();
+
+        psg.set_key_state_scancode(Scancode::Grave, true, true);
+        psg.set_key_state_scancode(Scancode::Grave, false, true);
+
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC ne doit pas rester engage apres ce relachement"
+        );
+
+        psg.set_key_state_scancode(Scancode::Grave, true, false);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 3), 0, "\"#\" pose");
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "SHIFT CPC toujours relache : pas de \">\" a la place de \"#\""
+        );
+    }
+
+    /// Un relâchement très rapide (plus court que le délai) ne doit pas
+    /// laisser un appui fantôme s'appliquer après coup : l'écriture différée
+    /// doit être annulée, pas seulement contredite plus tard.
+    #[test]
+    fn a_very_short_press_cancels_the_deferred_write() {
+        let mut psg = Psg::new();
+
+        psg.set_key_state_scancode(Scancode::RightBracket, true, true);
+        psg.set_key_state_scancode(Scancode::RightBracket, false, true);
+        psg.tick(DEFER_TICKS);
+
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 1),
+            1 << 1,
+            "\"*\" ne doit jamais s'engager apres un relachement aussi rapide"
+        );
+    }
+
+    /// Même bug, provoqué par la répétition clavier plutôt que par le
+    /// relâchement : SDL répète les événements KeyDown tant que la touche
+    /// reste enfoncée. Si SHIFT retombe pendant ce temps, une répétition ne
+    /// doit pas migrer vers une nouvelle position CPC sans avoir libéré la
+    /// première.
+    #[test]
+    fn a_key_repeat_does_not_retarget_the_dollar_asterisk_key_mid_hold() {
+        let mut psg = Psg::new();
+
+        psg.set_key_state_scancode(Scancode::RightBracket, true, true); // appui initial
+        psg.set_key_state_scancode(Scancode::RightBracket, true, false); // repetition, SHIFT retombe
+        psg.tick(DEFER_TICKS);
+
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 1),
+            0,
+            "\"*\" doit rester la cible verrouillee malgre la repetition"
+        );
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 6),
+            1 << 6,
+            "\"$\" ne doit pas avoir ete engage par la repetition"
+        );
+
+        psg.set_key_state_scancode(Scancode::RightBracket, false, false);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 1), 1 << 1, "\"*\" relache");
+    }
+
+    /// "<" et ">" existent bel et bien sur le clavier CPC AZERTY (variantes
+    /// shiftées de "*" et "#" respectivement). Keycode::Less/Greater ne sont
+    /// pas fiables sur macOS (même défaut que "#/@" et "$/*/€" : SDL rapporte
+    /// le même Keycode que SHIFT soit enfoncé ou non) — bug constaté sur
+    /// clavier réel : SHIFT+< donnait "<" au lieu de ">". D'où le passage par
+    /// Scancode::NonUsBackslash, avec shift_held pour distinguer les deux
+    /// cibles.
+    #[test]
+    fn the_iso_less_greater_key_targets_the_right_cpc_key_via_scancode() {
+        // ">" (Mac shifté) : le SHIFT reel est deja engage par la touche SHIFT
+        // elle-meme, rien a synthetiser, la position s'applique immediatement.
+        let mut psg = Psg::new();
+        psg.set_key_state(Keycode::LShift, true);
+        psg.set_key_state_scancode(Scancode::NonUsBackslash, true, true);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 3), 0, "\">\" position posee");
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 5), 0, "SHIFT CPC deja engage");
+
+        // "<" (Mac SANS shift) : le SHIFT CPC est synthetise, engage
+        // immediatement, position differee.
+        let mut psg = Psg::new();
+        psg.set_key_state_scancode(Scancode::NonUsBackslash, true, false);
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            0,
+            "SHIFT CPC synthetise immediatement"
+        );
+        psg.tick(DEFER_TICKS);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 1), 0, "\"<\" position posee");
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 5), 0, "SHIFT CPC toujours engage");
+    }
+
+    /// Même bit bloqué que pour "$/*/€" si SHIFT Mac change d'état entre
+    /// l'appui et le relâchement de cette touche.
+    #[test]
+    fn releasing_the_less_greater_key_targets_the_locked_position() {
+        let mut psg = Psg::new();
+
+        psg.set_key_state_scancode(Scancode::NonUsBackslash, true, false); // "<"
+        psg.tick(DEFER_TICKS);
+        psg.set_key_state_scancode(Scancode::NonUsBackslash, false, true); // SHIFT retombe autrement
+
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 1), 1 << 1, "\"<\" relache");
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 3), 1 << 3, "\">\" jamais engage");
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC doit etre relache par ce relachement, pas engage"
+        );
+    }
+
+    /// Bug constaté sur clavier réel, distinct des précédents : ">" ne
+    /// synthétise pas le SHIFT du CPC (il s'appuie sur celui déjà posé par la
+    /// touche SHIFT elle-même, encore tenue). Le relâchement de ">" ne doit
+    /// donc PAS relâcher le SHIFT du CPC tant que SHIFT reste physiquement
+    /// enfoncé, sous peine de désynchroniser le bit CPC de l'état réel : le
+    /// prochain appui sur ">" retombait alors sur "#", faute de SHIFT CPC.
+    #[test]
+    fn releasing_greater_while_shift_is_still_held_keeps_the_cpc_shift_engaged() {
+        let mut psg = Psg::new();
+        psg.set_key_state(Keycode::LShift, true);
+
+        psg.set_key_state_scancode(Scancode::NonUsBackslash, true, true); // ">"
+        psg.set_key_state_scancode(Scancode::NonUsBackslash, false, true); // relache ">", SHIFT toujours tenu
+
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            0,
+            "le SHIFT CPC doit rester engage : la touche SHIFT reelle est toujours tenue"
+        );
+
+        // Nouvel appui sur ">" : doit encore viser ">", pas retomber sur "#".
+        psg.set_key_state_scancode(Scancode::NonUsBackslash, true, true);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 3), 0, "\">\" pose de nouveau");
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 5), 0, "SHIFT CPC toujours engage");
     }
 }

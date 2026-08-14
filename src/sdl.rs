@@ -334,18 +334,26 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(kc),
                     scancode: Some(sc),
+                    keymod,
                     ..
                 } => {
-                    if !machine.bus.psg.set_key_state_scancode(sc, true) {
+                    let shift_held = keymod.intersects(
+                        sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
+                    );
+                    if !machine.bus.psg.set_key_state_scancode(sc, true, shift_held) {
                         machine.bus.psg.set_key_state(kc, true);
                     }
                 }
                 Event::KeyUp {
                     keycode: Some(kc),
                     scancode: Some(sc),
+                    keymod,
                     ..
                 } => {
-                    if !machine.bus.psg.set_key_state_scancode(sc, false) {
+                    let shift_held = keymod.intersects(
+                        sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
+                    );
+                    if !machine.bus.psg.set_key_state_scancode(sc, false, shift_held) {
                         machine.bus.psg.set_key_state(kc, false);
                     }
                 }
