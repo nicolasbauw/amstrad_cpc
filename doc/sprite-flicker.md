@@ -3,11 +3,13 @@
 Note d'enquête. **Une cause corrigée** (le rendu en instantané unique, voir
 plus bas) et **un chantier ouvert** sous BMX Simulator.
 
-⚠️ **À faire en priorité : annuler le commit « Gate Array : la regle
-d'interruption du recalage VSYNC etait inversee ».** La comparaison avec
-Caprice32, faite après coup, montre que ce changement nous éloigne de
-l'émulateur de référence sans régler le clignotement. Détail dans
-« La règle du recalage VSYNC : documentation contre émulateur de référence ».
+Une fausse piste a été suivie puis **annulée** en cours de route : aligner
+le recalage VSYNC du Gate Array sur la lecture littérale de la
+documentation. La comparaison avec Caprice32 a montré que ce changement
+nous éloignait de l'émulateur de référence sans rien régler. Détail dans
+« La règle du recalage VSYNC : documentation contre émulateur de référence »
+— l'épisode est conservé ici parce que la contradiction entre la
+documentation et l'implémentation de référence vaut d'être connue.
 
 ## Le symptôme
 
@@ -119,13 +121,10 @@ par [Grimware](https://www.grimware.org/doku.php/documentations/devices/gatearra
 > If the top bit of the 6-bit counter is set to "0" (i.e. the counter <32),
 > then a interrupt request is issued, and the 6-bit counter is reset to "0"."
 
-Notre code faisait l'inverse : interruption quand le bit 5 est à 1. Il a
-été aligné sur cette lecture littérale (commit « Gate Array : la regle
-d'interruption du recalage VSYNC etait inversee »).
-
-**Cette correction est très probablement une erreur, à annuler.** Trois
-éléments l'indiquent, découverts en comparant ensuite avec l'émulateur de
-référence :
+Notre code fait l'inverse : interruption quand le bit 5 est à 1. Il a été
+aligné un temps sur cette lecture littérale, puis **remis comme avant**
+(commit d'origine annulé). Trois éléments justifient ce retour en arrière,
+découverts en comparant ensuite avec l'émulateur de référence :
 
 1. **Caprice32 fait l'inverse de la documentation**, et donc comme notre
    code d'origine (`src/crtc.cpp`) :
@@ -156,15 +155,15 @@ référence :
    assouplir le test `an_interrupt_lands_during_vsync_on_every_frame` : un
    signal qui aurait dû alerter.
 
-Et surtout : **ce changement n'a pas réglé le clignotement** (18 % de
+Et surtout : **ce changement n'avait pas réglé le clignotement** (18 % de
 réduction sur le phénomène intermittent, et aucune amélioration sur le
-clignotement permanent de fin de course, cf. plus bas). Il nous éloigne de
-l'émulateur de référence sans rien apporter.
+clignotement permanent de fin de course, cf. plus bas). Il nous éloignait
+de l'émulateur de référence sans rien apporter : d'où son annulation.
 
-### Ce que ça change (et pourquoi ça ne suffit pas)
+### Ce que ça changeait (et pourquoi ça ne suffisait pas)
 
 Avec la règle littérale de la documentation, le compte d'interruptions par
-trame devient rigoureusement stable à 6 pendant la course démo (contre 17 à
+trame devenait rigoureusement stable à 6 pendant la course démo (contre 17 à
 22 trames hors-6 par seconde avant). Mais le clignotement visible ne
 disparaît pas pour autant : 3112 → 2544 pixels oscillants sur 398 trames,
 soit 18 %, et rien du tout sur le clignotement permanent de fin de course

@@ -251,24 +251,10 @@ mod tests {
     /// Test de non-régression du bug d'origine : une interruption doit tomber
     /// pendant le VSYNC à chaque trame, sinon le firmware ne détecte jamais le
     /// retour de trame et ne committe jamais INK/BORDER vers le Gate Array.
-    ///
-    /// La toute première trame après la mise sous tension est exclue : le
-    /// compteur du Gate Array démarre à une phase arbitraire, et c'est
-    /// justement le recalage sur le VSYNC de cette trame-là qui l'aligne pour
-    /// toutes les suivantes. Un vrai CPC a le même transitoire ; le firmware
-    /// attend simplement une trame de plus avant son premier commit.
     #[test]
     fn an_interrupt_lands_during_vsync_on_every_frame() {
         let mut crtc = Crtc::new();
         let mut ga = crate::gate_array::GateArray::new();
-
-        // Trame de chauffe : elle recale le compteur sur le VSYNC.
-        for _ in 0..crtc.frame_scanlines() {
-            let vsync_start = crtc.step_scanline();
-            if ga.step_hsync(vsync_start) {
-                ga.acknowledge_interrupt();
-            }
-        }
 
         for frame in 0..4 {
             let mut interrupts_during_vsync = 0;
