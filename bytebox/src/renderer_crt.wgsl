@@ -1,24 +1,44 @@
-// Shader CRT (F5, Plan V2.md jalon M4) : scanlines + masque phosphore,
-// inspiré de la famille Lottes/"easymode" (pas de distorsion en barillet,
-// non demandée). Même quad plein écran que renderer_frame.wgsl ; c'est
-// renderer.rs qui choisit l'un ou l'autre pipeline selon F5.
+// Shader CRT (F5, Plan V2.md jalon M4) : troisième réécriture.
 //
-// Deux effets, deux espaces de calcul délibérément différents :
+// Les deux précédentes (assombrissement du pixel selon sa position dans son
+// propre texel, puis reconstruction gaussienne du faisceau) restaient trop
+// éloignées du rendu d'un vrai CRT selon le retour utilisateur. On ne peut
+// pas reprendre le code d'un shader RetroArch existant (Mega Bezel, CyberLab,
+// crt-easymode...) : ce sont tous des shaders GPLv3, et ByteBox est MIT — les
+// intégrer littéralement en ferait une œuvre dérivée GPL. En revanche, la
+// TECHNIQUE de crt-easymode est documentée publiquement
+// (https://docs.libretro.com/shader/crt/, et son algorithme analysé depuis
+// son code source public) : on s'en inspire ici pour une implémentation WGSL
+// entièrement réécrite à partir de zéro, avec nos propres noms et notre
+// propre structure — pas une traduction du fichier GPL.
 //
-// - Les bandes de balayage correspondent à une ligne du SIGNAL VIDÉO : leur
-//   nombre doit rester celui de l'image source (SCREEN_HEIGHT lignes) quel
-//   que soit le zoom, donc leur calcul se fait en espace pixel SOURCE
-//   (uv * source_size). Une pitch fixe en pixels d'écran donnerait un
-//   nombre de bandes différent à x1 et à x3.
+// Deux idées qui manquaient aux essais précédents :
 //
-// - Le masque (grille d'ouverture/masque perforé) est au contraire une
-//   texture du TUBE lui-même : sur un vrai CRT, sa finesse est fixée par la
-//   fabrication de l'écran, sans aucun rapport avec la résolution de
-//   l'image qu'il affiche. Le calculer en espace pixel source (comme le
-//   premier essai de ce shader) donnait un masque aussi grossier que les
-//   pixels du CPC — de gros carrés adoucis, pas un CRT. Il se calcule donc
-//   en espace pixel de SORTIE réel (`@builtin(position)`), à une taille de
-//   cellule fixe en pixels d'écran.
+// - Un vrai CRT n'assombrit pas un pixel carré de façon isotrope : il balaie
+//   des LIGNES, chacune un point lumineux continu qui déborde horizontalement
+//   sur ses voisines (d'où un flou horizontal doux) mais reste une bande fine
+//   verticalement (d'où des bandes de balayage nettes, pas un flou vertical).
+//   Le flou gaussien symétrique du deuxième essai traitait X et Y de la même
+//   façon modulo un sigma différent ; ici on distingue franchement : un
+//   simple lissage cosinus entre les deux colonnes voisines à l'horizontale,
+//   et une vraie courbe de "profil de faisceau" (cos²) à la verticale, qui
+//   RESTE NON NORMALISÉE entre deux lignes pour creuser un vrai espace sombre
+//   entre elles (contrairement à une moyenne pondérée normalisée, qui donne
+//   toujours l'illusion d'une pleine luminosité).
+//
+// - Le masque phosphore d'un vrai tube n'est pas un point qui s'assombrit :
+//   c'est une TRIADE de sous-pixels rouge/vert/bleu. Un masque qui se
+//   contente de moduler la luminosité, comme dans les deux essais
+//   précédents, ne peut jamais ressembler à la texture fine et colorée
+//   visible sur la référence RetroArch fournie par l'utilisateur. Ici,
+//   chaque pixel de sortie appartient à une colonne R, G ou B (motif qui se
+//   répète tous les 3 pixels d'écran, avec un décalage d'une colonne sur les
+//   lignes impaires — le "staggering" d'un vrai masque perforé) et voit sa
+//   couleur pondérée en conséquence.
+//
+// Le mélange se fait en espace linéaire (le mixage additif de lumière n'a de
+// sens qu'après avoir défait la correction gamma de la source), avant de
+// ré-encoder en sortie.
 
 struct CrtParams {
     source_size: vec2<f32>,
@@ -57,46 +77,105 @@ fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
     return out;
 }
 
-// Intensité de l'assombrissement entre les lignes de balayage : 0 = aucun
-// effet, 1 = noir complet au bord de chaque ligne source.
-const SCANLINE_STRENGTH: f32 = 0.4;
+const PI: f32 = 3.14159265;
+const HALF_PI: f32 = 1.57079633;
 
-// Taille d'une cellule du masque phosphore, en pixels de sortie réels —
-// c'est ce nombre, pas la résolution source, qui donne sa finesse au
-// masque. Plus petit = grille plus fine (mais plus coûteuse à distinguer
-// sans un zoom suffisant, voir plus bas). Volontairement non entier :
-// à une période entière, un fragment shader qui échantillonne pile au
-// centre de chaque pixel de sortie retombe exactement en phase d'une
-// colonne à l'autre — le motif s'annule au lieu de se dessiner (constaté
-// avec 2.0 : tous les fragments tombaient à la même distance du centre de
-// leur cellule, donnant un assombrissement uniforme plutôt qu'une grille).
-const MASK_PERIOD: f32 = 2.3;
-// Luminosité minimale entre deux points du masque : ne descend jamais au
-// noir complet, sous peine d'un maillage trop dur plutôt qu'un grain discret.
-const MASK_MIN: f32 = 0.55;
+// Gamma de linéarisation à l'entrée / de ré-encodage à la sortie : mélanger
+// des couleurs directement en espace gamma (sRGB-like) assombrit trop les
+// zones de transition. Valeurs usuelles pour ce type de shader.
+const GAMMA_IN: f32 = 2.4;
+const GAMMA_OUT: f32 = 2.2;
 
-// Compense la perte de luminosité moyenne qu'entraînent les deux effets
-// ci-dessus : sans ça, l'image paraît plus sombre une fois le shader actif.
-const GAIN: f32 = 1.2;
+// Exposant du profil de faisceau (cos² à une puissance) : plus grand = bande
+// de balayage plus fine et plus contrastée, plus petit = plus douce.
+const SCANLINE_BEAM: f32 = 2.5;
+// Force du creux entre deux lignes : 0 = pas de bande visible, 1 = creux
+// complet (obscurité totale entre deux lignes de balayage).
+const SCANLINE_STRENGTH: f32 = 0.7;
+
+// Luminosité résiduelle des deux sous-pixels "éteints" d'une triade de
+// masque (0 = uniquement la couleur dominante, 1 = pas de masque du tout).
+const MASK_MIN: f32 = 0.25;
+const MASK_STRENGTH: f32 = 0.85;
+
+// Compense la perte de luminosité moyenne entraînée par les bandes de
+// balayage et le masque.
+const BRIGHT_BOOST: f32 = 1.4;
+
+fn to_linear(c: vec3<f32>) -> vec3<f32> {
+    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(GAMMA_IN));
+}
+
+fn to_display(c: vec3<f32>) -> vec3<f32> {
+    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / GAMMA_OUT));
+}
+
+// Lissage cosinus entre deux texels voisins : une transition en S, plus
+// douce qu'un dégradé linéaire mais qui ne déborde pas au-delà des deux
+// texels immédiats (contrairement à la somme gaussienne à 5 colonnes de
+// l'essai précédent) — le spot du faisceau reste net, juste sans arête vive.
+fn ease(frac: f32) -> f32 {
+    return 0.5 - 0.5 * cos(frac * PI);
+}
+
+// Profil du faisceau à la verticale : pic à 1.0 pile sur le centre d'une
+// ligne source, retombe à 0.0 à mi-chemin de la ligne voisine. Volontairement
+// NON normalisé par l'appelant (voir fs_main) : c'est cette absence de
+// normalisation entre deux lignes qui creuse la bande sombre du balayage.
+fn scan_weight(dist_lines: f32) -> f32 {
+    let c = cos(clamp(dist_lines, -1.0, 1.0) * HALF_PI);
+    return pow(max(c, 0.0), SCANLINE_BEAM);
+}
+
+// Couleur d'une ligne source `row`, ré-échantillonnée horizontalement entre
+// ses deux colonnes voisines autour de `cont_x` (position continue, en
+// texels source).
+fn sample_row(cont_x: f32, row: f32) -> vec3<f32> {
+    let col0 = floor(cont_x - 0.5);
+    let frac_x = cont_x - (col0 + 0.5);
+    let uv0 = vec2<f32>(col0 + 0.5, row + 0.5) / params.source_size;
+    let uv1 = vec2<f32>(col0 + 1.5, row + 0.5) / params.source_size;
+    let c0 = to_linear(textureSample(t_frame, s_frame, uv0).rgb);
+    let c1 = to_linear(textureSample(t_frame, s_frame, uv1).rgb);
+    return mix(c0, c1, ease(frac_x));
+}
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let color = textureSample(t_frame, s_frame, in.uv).rgb;
+    // Reconstruction du faisceau, en espace pixel SOURCE (ni le flou
+    // horizontal ni le pas des bandes de balayage ne doivent dépendre du
+    // zoom de sortie : x1/x2/x3/plein écran doivent tous montrer le même
+    // nombre de bandes, dans les mêmes proportions relatives à l'image).
+    let texel = in.uv * params.source_size;
+    let row0 = floor(texel.y - 0.5);
+    let dist0 = (texel.y - 0.5) - row0;
+    let w0 = scan_weight(dist0);
+    let w1 = scan_weight(dist0 - 1.0);
 
-    // Bandes de balayage : chaque ligne source est la plus lumineuse en son
-    // centre vertical, et s'assombrit vers le haut/bas — un cosinus plutôt
-    // qu'un découpage net, pour une transition sans crénelage au zoom élevé.
-    let row_frac = fract(in.uv.y * params.source_size.y) - 0.5;
-    let scan = mix(1.0, cos(row_frac * 3.14159265) * 0.5 + 0.5, SCANLINE_STRENGTH);
+    let color_scanned = sample_row(texel.x, row0) * w0 + sample_row(texel.x, row0 + 1.0) * w1;
+    // Un mélange linéaire non pondéré (sans creux de balayage) sert de plancher
+    // de luminosité : SCANLINE_STRENGTH règle l'intensité du seul effet de
+    // bande, indépendamment de GAMMA_IN/OUT ou du reste du pipeline.
+    let color_flat = mix(sample_row(texel.x, row0), sample_row(texel.x, row0 + 1.0), dist0);
+    let color = mix(color_flat, color_scanned, SCANLINE_STRENGTH);
 
-    // Masque phosphore : petits points, en grille régulière sur l'écran
-    // réel (voir le commentaire en tête de fichier). Un produit de cosinus
-    // plutôt qu'une distance à un centre de cellule (`fract` + `smoothstep`,
-    // le premier essai) : sans discontinuité à la frontière des cellules,
-    // moins sujet à l'aliasing qui annulait le motif à MASK_PERIOD entier.
-    let phase = in.clip_position.xy * (6.2831853 / MASK_PERIOD);
-    let dot = cos(phase.x) * cos(phase.y); // 1.0 au centre d'un point, -1.0 entre deux
-    let mask = mix(1.0, MASK_MIN, smoothstep(-0.2, 0.6, -dot));
+    // Masque phosphore : triade RVB, en pixels de SORTIE réels (propriété du
+    // tube, sans rapport avec la résolution de l'image source) — décalée
+    // d'une colonne sur les lignes impaires, comme un vrai masque perforé.
+    let out_x = i32(floor(in.clip_position.x));
+    let out_y = i32(floor(in.clip_position.y));
+    let stagger = out_y % 2;
+    let phase = (out_x + stagger) % 3;
+    var mask_color: vec3<f32>;
+    if (phase == 0) {
+        mask_color = vec3<f32>(1.0, MASK_MIN, MASK_MIN);
+    } else if (phase == 1) {
+        mask_color = vec3<f32>(MASK_MIN, 1.0, MASK_MIN);
+    } else {
+        mask_color = vec3<f32>(MASK_MIN, MASK_MIN, 1.0);
+    }
+    let mask = mix(vec3<f32>(1.0), mask_color, MASK_STRENGTH);
 
-    return vec4<f32>(color * scan * mask * GAIN, 1.0);
+    let final_color = to_display(color * mask) * BRIGHT_BOOST;
+    return vec4<f32>(final_color, 1.0);
 }
