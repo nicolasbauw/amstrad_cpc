@@ -4,7 +4,9 @@
 //! qu'assembler une `Machine` prête à tourner et l'y confier via `run`.
 
 use crate::autotype::AutoTyper;
-use crate::console_panel::ConsolePanel;
+use crate::console_log::ConsoleLog;
+use crate::console_panel::QuickCommandBar;
+use crate::console_window::ConsoleWindow;
 use crate::machine::{self, Machine};
 use crate::renderer::Renderer;
 use crate::video;
@@ -163,6 +165,24 @@ pub fn run(
     let debug_window_id = debug_window.id();
     let mut status_panel = crate::status_panel::StatusPanel::new(debug_window)?;
 
+    // Console complète (F11), cachée par défaut, sur le même modèle que la
+    // fenêtre de statut ci-dessus : elle remplace entièrement la console
+    // pilotée depuis le terminal qui a lancé l'émulateur (voir
+    // console_window.rs, Plan V2.md jalon M2) — il n'y en a plus d'autre.
+    let mut console_window_visible = false;
+    let mut console_win = video_subsystem
+        .window("Amstrad CPC 6128 - Console", 900, 700)
+        .position_centered()
+        .hidden()
+        .resizable()
+        .metal_view()
+        .build()?;
+    if let Err(e) = set_window_icon(&mut console_win) {
+        println!("Can't set console window icon: {e}");
+    }
+    let console_window_id = console_win.id();
+    let mut console_window = ConsoleWindow::new(console_win)?;
+
     // Titre dynamique de la fenêtre en fonction du mode configuré
     let window_title = if machine.diagnostic_mode {
         "ByteBox - Amstrad CPC 6128 - BASIC 1.1 AZERTY + Diag ROM"
@@ -195,10 +215,12 @@ pub fn run(
     let main_window_id = renderer.window().id();
     let mut event_pump = sdl_context.event_pump()?;
 
-    // Console F11 (Plan V2.md, jalon M2) : mêmes commandes que le fil stdin
-    // historique (console.rs), alimentées via le même canal MonitorCmd.
-    let mut console_visible = false;
-    let mut console_panel = ConsolePanel::new();
+    // Barre de commande rapide (F10, console_panel.rs) et console complète
+    // (F11, console_window.rs) : deux vues du même historique
+    // (Plan V2.md, jalon M2), alimentées via le même canal MonitorCmd.
+    let mut quick_bar_visible = false;
+    let mut quick_bar = QuickCommandBar::new();
+    let mut console_log = ConsoleLog::new();
     let cmd_sender = machine.command_sender();
 
     let mut frame_buffer = vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 3];
@@ -231,7 +253,8 @@ pub fn run(
             // l'identifiant de la fenêtre de statut, sans effet sur les
             // événements de la fenêtre principale.
             status_panel.handle_event(&event);
-            // Même chose pour la console F11, superposée à la fenêtre
+            console_window.handle_event(&event);
+            // Même chose pour la barre rapide F10, superposée à la fenêtre
             // principale : `Renderer::handle_event` filtre lui aussi sur
             // l'identifiant de fenêtre.
             renderer.handle_event(&event);
@@ -247,6 +270,9 @@ pub fn run(
                     if window_id == debug_window_id {
                         debug_visible = false;
                         status_panel.window_mut().hide();
+                    } else if window_id == console_window_id {
+                        console_window_visible = false;
+                        console_window.window_mut().hide();
                     } else if window_id == main_window_id {
                         running = false;
                     }
@@ -273,6 +299,15 @@ pub fn run(
                     ..
                 } if window_id == debug_window_id => {
                     status_panel.resize();
+                }
+                Event::Window {
+                    win_event:
+                        sdl2::event::WindowEvent::SizeChanged(..)
+                        | sdl2::event::WindowEvent::Resized(..),
+                    window_id,
+                    ..
+                } if window_id == console_window_id => {
+                    console_window.resize();
                 }
                 // Le pointeur système n'a aucun rôle dans l'émulation (le
                 // clavier et la manette suffisent) : il ne fait que masquer
@@ -329,35 +364,66 @@ pub fn run(
                     );
                 }
                 // Événements d'enfoncement de touches du clavier moderne PC
+                //
+                // Pas-à-pas CPU (F8) et pas-à-pas ligne (F9) : anciennement
+                // F10/Shift+F10, déplacées pour lui laisser la barre de
+                // commande rapide (voir plus bas).
                 Event::KeyDown {
-                    keycode: Some(sdl2::keyboard::Keycode::F10),
-                    keymod,
+                    keycode: Some(sdl2::keyboard::Keycode::F8),
                     ..
                 } => {
-                    if keymod.contains(sdl2::keyboard::Mod::LSHIFTMOD)
-                        || keymod.contains(sdl2::keyboard::Mod::RSHIFTMOD)
-                    {
-                        // Shift + F10 : Step Line
-                        let start_line = machine.current_line;
-                        while machine.current_line == start_line {
-                            let ticks = machine.step();
-                            if ticks == 0 {
-                                break;
-                            }
+                    println!(
+                        "{}",
+                        (zilog_z80::dasm::dasm(&machine.bus, machine.cpu.reg.pc)).0
+                    );
+                    machine.step();
+                    machine.print_registers();
+                }
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F9),
+                    ..
+                } => {
+                    let start_line = machine.current_line;
+                    while machine.current_line == start_line {
+                        let ticks = machine.step();
+                        if ticks == 0 {
+                            break;
                         }
-                        println!(
-                            "Stepped to next video line (Line {}).",
-                            machine.current_line
-                        );
-                        machine.print_registers();
+                    }
+                    println!(
+                        "Stepped to next video line (Line {}).",
+                        machine.current_line
+                    );
+                    machine.print_registers();
+                }
+                // Barre de commande rapide (F10, Plan V2.md jalon M2) :
+                // superposée à la fenêtre principale plutôt que dans une
+                // fenêtre séparée (contrairement à F11/F12), donc pas de
+                // show()/hide() ici — son affichage tient entièrement à
+                // `quick_bar_visible`, lu par la fermeture passée à
+                // `renderer.present` plus bas. Reprend le focus à chaque
+                // ouverture pour taper sans clic préalable.
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F10),
+                    ..
+                } => {
+                    quick_bar_visible = !quick_bar_visible;
+                    if quick_bar_visible {
+                        quick_bar.request_focus();
+                    }
+                }
+                // Console complète (F11) : fenêtre séparée, sur le même
+                // modèle que le statut machine (F12).
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F11),
+                    ..
+                } => {
+                    console_window_visible = !console_window_visible;
+                    if console_window_visible {
+                        console_window.window_mut().show();
+                        console_window.request_focus();
                     } else {
-                        // F10 : Step CPU
-                        println!(
-                            "{}",
-                            (zilog_z80::dasm::dasm(&machine.bus, machine.cpu.reg.pc)).0
-                        );
-                        machine.step();
-                        machine.print_registers();
+                        console_window.window_mut().hide();
                     }
                 }
                 Event::KeyDown {
@@ -371,31 +437,19 @@ pub fn run(
                         status_panel.window_mut().hide();
                     }
                 }
-                // Console de commandes (Plan V2.md, jalon M2) : superposée à
-                // la fenêtre principale plutôt que dans une fenêtre séparée
-                // (contrairement à F12), donc pas de show()/hide() ici — son
-                // affichage tient entièrement à `console_visible`, lu par la
-                // fermeture passée à `renderer.present` plus bas. Reprend le
-                // focus à chaque ouverture pour taper sans clic préalable.
-                Event::KeyDown {
-                    keycode: Some(sdl2::keyboard::Keycode::F11),
-                    ..
-                } => {
-                    console_visible = !console_visible;
-                    if console_visible {
-                        console_panel.request_focus();
-                    }
-                }
-                // La console absorbe le clavier tant qu'elle est ouverte :
-                // sans cette garde, taper une commande l'enverrait aussi à
-                // la matrice clavier émulée (le CPC "entendrait" chaque
-                // lettre tapée dans la console).
+                // La barre rapide absorbe le clavier tant qu'elle est
+                // ouverte, et cette entrée globale ne doit de toute façon
+                // s'appliquer qu'à la fenêtre principale : sans le filtre
+                // sur `window_id`, taper dans la console complète (F11,
+                // fenêtre séparée) ou dans la fenêtre de statut (F12)
+                // enverrait aussi chaque touche à la matrice clavier émulée.
                 Event::KeyDown {
                     keycode: Some(kc),
                     scancode: Some(sc),
                     keymod,
+                    window_id,
                     ..
-                } if !console_visible => {
+                } if window_id == main_window_id && !quick_bar_visible => {
                     let shift_held = keymod.intersects(
                         sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
                     );
@@ -541,38 +595,36 @@ pub fn run(
         }
 
         // Traité avant le rendu, pour que la sortie d'une commande saisie
-        // dans le panneau F11 apparaisse dans le panneau dès cette trame,
-        // plutôt qu'avec un tour de boucle de retard.
-        //
-        // Une commande traitée (donc sa sortie imprimée, potentiellement
-        // plusieurs lignes) laisse le prompt "> " affiché plus haut par le
-        // fil console remonter hors de vue : on le réimprime ici, juste
-        // après cette sortie, pour qu'il reste visible sous ce qu'on vient
-        // de lire plutôt que de sembler avoir disparu. La sortie va aussi
-        // bien sur la sortie standard (fil `stdin`, usage terminal habituel)
-        // que dans l'historique du panneau F11 : les deux façades affichent
-        // la même chose, qu'elles soient ou non à l'origine de la commande.
-        if let Ok(output) = machine.console_handle() {
-            if !output.is_empty() {
-                print!("{output}");
-                console_panel.push_output(&output);
-            }
-            print!("> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
+        // dans l'une des deux façades console apparaisse dès cette trame,
+        // plutôt qu'avec un tour de boucle de retard. Il n'y a plus de
+        // terminal à alimenter : la sortie va uniquement dans le journal
+        // partagé, lu aussi bien par la barre rapide (F10, une ligne) que
+        // par la console complète (F11, tout l'historique).
+        if let Ok(output) = machine.console_handle()
+            && !output.is_empty()
+        {
+            console_log.push_output(&output);
         }
 
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
-        let mut console_ui = |ctx: &egui::Context| console_panel.ui(ctx, &cmd_sender);
-        let overlay: Option<&mut dyn FnMut(&egui::Context)> =
-            if console_visible { Some(&mut console_ui) } else { None };
+        let mut quick_bar_ui = |ctx: &egui::Context| quick_bar.ui(ctx, &cmd_sender, &mut console_log);
+        let overlay: Option<&mut dyn FnMut(&egui::Context)> = if quick_bar_visible {
+            Some(&mut quick_bar_ui)
+        } else {
+            None
+        };
         renderer.present(&frame_buffer, overlay);
 
         if debug_visible {
             let registers = machine.get_registers_string();
             let hardware = machine.get_hardware_string(machine.show_keyboard_matrix());
             status_panel.render(&registers, &hardware);
+        }
+
+        if console_window_visible {
+            console_window.render(&mut console_log, &cmd_sender);
         }
 
         // Mesure de la vitesse réelle, moyennée sur une seconde : c'est elle

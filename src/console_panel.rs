@@ -1,79 +1,78 @@
-//! Panneau console (F11), superposé à l'image émulée par `renderer.rs`
-//! (Plan V2.md, jalon M2) : remplace la dépendance à un terminal externe pour
-//! saisir les commandes (`disk`, `tape`, `pc`, `b`, `t`...), jusqu'ici
-//! réservées au fil `stdin` de `console.rs`.
+//! Barre de commande rapide (F10), superposée à l'image émulée par
+//! `renderer.rs` (Plan V2.md, jalon M2) : une ligne de saisie et, au plus,
+//! une ligne de retour — pour une commande ponctuelle sans occuper l'écran.
+//! La console complète, avec tout l'historique défilant, c'est
+//! `console_window.rs` (F11).
 //!
 //! Ce module ne connaît rien à wgpu ni à SDL2 : il construit juste l'UI
-//! egui (`ui`) et pousse les commandes saisies sur le même canal
-//! `MonitorCmd` que le fil `stdin` — `Machine` ne voit donc aucune
-//! différence entre une commande tapée au clavier physique et une tapée ici.
+//! egui et pousse les commandes saisies sur le même canal `MonitorCmd` que
+//! la console complète — `Machine` ne voit donc aucune différence entre les
+//! deux façades.
 
+use crate::console_log::ConsoleLog;
 use crate::monitor::{MonitorMessage, parse_command};
 use std::sync::mpsc::Sender;
 
-pub struct ConsolePanel {
-    /// Lignes déjà affichées : commandes tapées (préfixées "> ") et sortie
-    /// produite par `Machine::console_handle`.
-    history: Vec<String>,
+pub struct QuickCommandBar {
     input: String,
-    /// Le focus doit être redemandé à chaque ouverture (F11) : `egui` ne le
+    /// Le focus doit être redemandé à chaque ouverture (F10) : `egui` ne le
     /// retient pas d'une trame sur l'autre quand le panneau est reconstruit.
     request_focus: bool,
 }
 
-impl ConsolePanel {
+impl QuickCommandBar {
     pub fn new() -> Self {
         Self {
-            history: Vec::new(),
             input: String::new(),
             request_focus: true,
         }
     }
 
-    /// À appeler quand le panneau redevient visible (F11), pour que la
-    /// ligne de saisie récupère le focus clavier sans clic préalable.
     pub fn request_focus(&mut self) {
         self.request_focus = true;
     }
 
-    /// Ajoute la sortie d'une commande déjà traitée (voir
-    /// `Machine::console_handle`) à l'historique affiché. Les sorties vides
-    /// (commandes qui ne produisent rien, comme `j` ou `pc`) n'ajoutent pas
-    /// de ligne creuse.
-    pub fn push_output(&mut self, output: &str) {
-        for line in output.lines() {
-            self.history.push(line.to_string());
-        }
-    }
-
-    pub fn ui(&mut self, ctx: &egui::Context, cmd_sender: &Sender<MonitorMessage>) {
-        egui::TopBottomPanel::bottom("console_panel")
-            .resizable(true)
-            .default_height(240.0)
+    pub fn ui(&mut self, ctx: &egui::Context, cmd_sender: &Sender<MonitorMessage>, log: &mut ConsoleLog) {
+        egui::TopBottomPanel::bottom("quick_command_bar")
+            .resizable(false)
+            .exact_height(if log.last_line().is_some() { 56.0 } else { 34.0 })
             .frame(
                 egui::Frame::default()
                     .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 25, 235))
-                    .inner_margin(8.0),
+                    .inner_margin(6.0),
             )
             .show(ctx, |ui| {
+                // Jamais plus d'une ligne de retour : c'est ce qui distingue
+                // cette barre de la console complète (F11).
+                if let Some(last) = log.last_line() {
+                    ui.label(
+                        egui::RichText::new(last)
+                            .monospace()
+                            .color(egui::Color32::from_rgb(180, 180, 190)),
+                    );
+                }
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(">").monospace().color(egui::Color32::from_rgb(220, 220, 225)));
+                    ui.label(
+                        egui::RichText::new(">")
+                            .monospace()
+                            .color(egui::Color32::from_rgb(220, 220, 225)),
+                    );
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.input)
                             .desired_width(f32::INFINITY)
                             .font(egui::TextStyle::Monospace)
-                            .hint_text("commande (h pour l'aide)"),
+                            .hint_text("commande rapide — F11 pour la console complète"),
                     );
                     if self.request_focus {
                         response.request_focus();
                         self.request_focus = false;
                     }
-                    let submitted = response.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let submitted =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if submitted {
                         let line = std::mem::take(&mut self.input);
                         if !line.trim().is_empty() {
-                            self.history.push(format!("> {line}"));
+                            log.push_command(&line);
                             let _ = cmd_sender.send(parse_command(&line));
                         }
                         // Redemande le focus : sans ça, ENTRÉE le fait perdre
@@ -81,18 +80,6 @@ impl ConsolePanel {
                         self.request_focus = true;
                     }
                 });
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        for line in &self.history {
-                            ui.label(
-                                egui::RichText::new(line)
-                                    .monospace()
-                                    .color(egui::Color32::from_rgb(220, 220, 225)),
-                            );
-                        }
-                    });
             });
     }
 }

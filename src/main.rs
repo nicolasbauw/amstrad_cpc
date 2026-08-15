@@ -2,9 +2,11 @@ mod audio;
 mod autotype;
 mod bus;
 mod config;
-mod console;
+mod console_log;
 mod console_panel;
+mod console_window;
 mod crtc;
+mod egui_gpu;
 mod fdc;
 mod gate_array;
 mod hexconversion;
@@ -15,8 +17,8 @@ mod ppi;
 mod psg;
 mod renderer;
 mod sdl;
-mod status_panel;
 mod snapshot;
+mod status_panel;
 mod sound;
 mod tape;
 mod trace;
@@ -88,25 +90,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     machine.diagnostic_mode = diag_mode;
     machine.load_roms()?;
 
-    if let Some(path) = &disk {
-        if let Err(e) = machine.load_disk(path) {
-            println!("Can't load disk '{path}': {e}");
-        }
-        // Contrairement aux commandes tapées dans la console (dont la sortie
-        // est suivie d'un réaffichage de "> " par `sdl::run`, voir
-        // `Machine::console_handle`), ce message s'affiche ici avant même
-        // que le fil console ait fini son propre prompt initial : sans ce
-        // réaffichage, il resterait sans prompt visible en dessous.
-        print!("> ");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
+    if let Some(path) = &disk
+        && let Err(e) = machine.load_disk(path)
+    {
+        println!("Can't load disk '{path}': {e}");
     }
 
-    if let Some(path) = &tape {
-        if let Err(e) = machine.load_tape(path) {
-            println!("Can't load tape '{path}': {e}");
-        }
-        print!("> ");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
+    if let Some(path) = &tape
+        && let Err(e) = machine.load_tape(path)
+    {
+        println!("Can't load tape '{path}': {e}");
     }
 
     let autotyper = autocmd

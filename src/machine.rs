@@ -317,22 +317,14 @@ impl Machine {
             println!("Drive B enabled (config.toml)");
         }
 
-        // L'émulateur ne dépend pas de sa console : si le fil ne démarre pas
-        // (limite système sur le nombre de fils, par exemple), on le signale
-        // et on continue sans elle plutôt que de refuser de démarrer. Les
-        // commandes ne seront simplement pas disponibles — comme c'est déjà
-        // le cas au lancement depuis le bureau, sans terminal attaché.
-        if let Err(e) = crate::console::launch(m.cmd_channel.0.clone()) {
-            println!("Console disabled: {e}");
-        }
         m
     }
 
-    /// Extrémité d'émission du canal de commandes (`MonitorCmd`), pour toute
-    /// façade qui veut en envoyer sans passer par le fil `stdin` (`console.rs`)
-    /// — le panneau F11 (`console_panel.rs`), notamment. `Sender` se clone
-    /// à volonté (implémentation standard `mpsc`), donc plusieurs façades
-    /// peuvent coexister sans se marcher dessus.
+    /// Extrémité d'émission du canal de commandes (`MonitorCmd`) : la barre
+    /// rapide (F10, `console_panel.rs`) et la console complète (F11,
+    /// `console_window.rs`) y envoient toutes deux leurs commandes.
+    /// `Sender` se clone à volonté (implémentation standard `mpsc`), donc
+    /// les deux façades coexistent sans se marcher dessus.
     pub fn command_sender(&self) -> mpsc::Sender<MonitorMessage> {
         self.cmd_channel.0.clone()
     }
@@ -1199,11 +1191,12 @@ impl Machine {
     }
 
     /// Traite au plus une commande en attente et renvoie tout ce qu'elle a
-    /// produit. Alimentée aussi bien par le fil `stdin` (`console.rs`) que
-    /// par le panneau F11 (`console_panel.rs`) via le même canal
-    /// `cmd_channel` : les deux façades partagent donc la même sortie,
-    /// capturée ici plutôt qu'écrite directement sur la sortie standard —
-    /// nécessaire pour l'afficher dans le panneau, qui n'a pas de terminal.
+    /// produit. Alimentée aussi bien par la barre rapide (F10,
+    /// `console_panel.rs`) que par la console complète (F11,
+    /// `console_window.rs`) via le même canal `cmd_channel` : les deux
+    /// façades partagent donc la même sortie, capturée ici plutôt qu'écrite
+    /// directement sur la sortie standard — aucune des deux n'a de
+    /// terminal, contrairement à l'ancien fil `stdin` qu'elles remplacent.
     ///
     /// Les `println!`/`print!` du corps de la fonction sont volontairement
     /// inchangés : les deux macros du même nom, définies juste en dessous,
