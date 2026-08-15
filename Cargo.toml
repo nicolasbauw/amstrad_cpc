@@ -1,11 +1,11 @@
 [package]
 name = "bytebox"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 license = "MIT"
 
 [dependencies]
-zilog_z80 = { path = "../ZilogZ80" }
+zilog_z80 = "1.0.0"
 sdl2 = { version = "0.38.0", features = ["ttf"] }
 toml = "1.1.4"
 serde = { version = "1.0.229", features = ["derive"] }
