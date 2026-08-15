@@ -41,12 +41,38 @@ use bytebox_core::video;
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CrtParams {
     source_size: [f32; 2],
+    /// `video::PIXELS_PER_SCANLINE` : voir le commentaire du champ homonyme
+    /// côté WGSL. Constant lui aussi, comme `source_size`.
+    line_height: f32,
     mask_cell_px: f32,
     mask_min: f32,
     mask_strength: f32,
     scanline_beam: f32,
     scanline_strength: f32,
+    beam_bloom: f32,
     bright_boost: f32,
+    /// Un uniforme WGSL est aligné sur 16 octets : 10 `f32` (40) sont
+    /// complétés à 48. Doit rester en phase avec le `_padding` du shader.
+    _padding: [f32; 2],
+}
+
+impl CrtParams {
+    /// Complète les réglages réglables (`CrtSettings`) par ce que le shader
+    /// doit savoir de la géométrie du tampon source, invariant de l'exécution.
+    fn new(settings: CrtSettings) -> Self {
+        Self {
+            source_size: [video::SCREEN_WIDTH as f32, video::SCREEN_HEIGHT as f32],
+            line_height: video::PIXELS_PER_SCANLINE as f32,
+            mask_cell_px: settings.mask_cell_px,
+            mask_min: settings.mask_min,
+            mask_strength: settings.mask_strength,
+            scanline_beam: settings.scanline_beam,
+            scanline_strength: settings.scanline_strength,
+            beam_bloom: settings.beam_bloom,
+            bright_boost: settings.bright_boost,
+            _padding: [0.0, 0.0],
+        }
+    }
 }
 
 /// Réglages ajustables du shader CRT (F5), exposés au panneau de
@@ -61,6 +87,7 @@ pub struct CrtSettings {
     pub mask_strength: f32,
     pub scanline_beam: f32,
     pub scanline_strength: f32,
+    pub beam_bloom: f32,
     pub bright_boost: f32,
 }
 
@@ -68,14 +95,23 @@ impl Default for CrtSettings {
     /// Valeurs choisies par itération visuelle (Plan V2.md, jalon M4),
     /// réglées en plein écran sur un écran haute densité (4K), où l'unité
     /// "pixel de sortie" est physiquement minuscule.
+    ///
+    /// Les trois réglages de masque viennent du réglage validé par
+    /// l'utilisateur. Ceux de balayage ont dû être recalibrés : la période
+    /// des scanlines a doublé (elle suit maintenant les vraies lignes de
+    /// balayage CPC, pas les lignes du tampon — voir `line_height`) et
+    /// `beam_bloom` remplace `bright_boost` dans son rôle de compensation de
+    /// luminosité, si bien que les anciennes valeurs poussées à fond n'ont
+    /// plus le même sens.
     fn default() -> Self {
         Self {
             mask_cell_px: 2.9,
-            mask_min: 0.5,
+            mask_min: 0.6,
             mask_strength: 0.6,
-            scanline_beam: 5.5,
+            scanline_beam: 6.0,
             scanline_strength: 1.0,
-            bright_boost: 1.5,
+            beam_bloom: 0.35,
+            bright_boost: 1.3,
         }
     }
 }
@@ -295,15 +331,7 @@ impl Renderer {
         // identique — `bind_group` est donc réutilisé tel quel), plus un
         // groupe 1 pour la taille de l'image source.
         let crt_settings = CrtSettings::default();
-        let crt_params = CrtParams {
-            source_size: [video::SCREEN_WIDTH as f32, video::SCREEN_HEIGHT as f32],
-            mask_cell_px: crt_settings.mask_cell_px,
-            mask_min: crt_settings.mask_min,
-            mask_strength: crt_settings.mask_strength,
-            scanline_beam: crt_settings.scanline_beam,
-            scanline_strength: crt_settings.scanline_strength,
-            bright_boost: crt_settings.bright_boost,
-        };
+        let crt_params = CrtParams::new(crt_settings);
         // COPY_DST : contrairement à `source_size`, ces réglages sont
         // réécrits en direct depuis le panneau F6 (`set_crt_settings`), pas
         // seulement lus une fois à la construction.
@@ -448,15 +476,7 @@ impl Renderer {
     /// CPC elle-même à chaque `present`.
     pub fn set_crt_settings(&mut self, settings: CrtSettings) {
         self.crt_settings = settings;
-        let params = CrtParams {
-            source_size: [video::SCREEN_WIDTH as f32, video::SCREEN_HEIGHT as f32],
-            mask_cell_px: settings.mask_cell_px,
-            mask_min: settings.mask_min,
-            mask_strength: settings.mask_strength,
-            scanline_beam: settings.scanline_beam,
-            scanline_strength: settings.scanline_strength,
-            bright_boost: settings.bright_boost,
-        };
+        let params = CrtParams::new(settings);
         self.queue
             .write_buffer(&self.crt_params_buffer, 0, bytemuck::bytes_of(&params));
     }

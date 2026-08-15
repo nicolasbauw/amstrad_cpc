@@ -17,7 +17,10 @@ const V_BACK_PORCH_LINES: i32 = 22;
 /// Un caractère CRTC fait 2 octets, rendus sur 16 pixels de large.
 const PIXELS_PER_CHAR: i32 = 16;
 /// Chaque scanline du CPC est doublée verticalement dans le tampon.
-const PIXELS_PER_SCANLINE: i32 = 2;
+/// Public parce que le shader CRT (`renderer_crt.wgsl`) en a besoin : c'est
+/// la vraie période d'une ligne de balayage, et donc celle de ses scanlines
+/// — une par ligne du tampon en dessinerait deux fois trop.
+pub const PIXELS_PER_SCANLINE: i32 = 2;
 
 /// Abscisse du premier pixel d'une colonne de caractères, mesurée à partir du HSYNC.
 fn char_x(x_char: u32, r2: i32, line_chars: i32) -> i32 {

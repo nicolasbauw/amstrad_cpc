@@ -47,11 +47,22 @@ space, so it keeps the same proportions at every zoom level; the phosphor
 mask is sized in real output pixels (a property of the simulated tube, not
 of the source image), so it stays visible at `x1` too, not just from `x2` up.
 
+Scanlines follow the *real* CPC scanline period, not the frame buffer's:
+`video::render` draws each CPC scanline twice (600 buffer rows = 300 real
+scanlines), so one band per buffer row would draw twice as many as the
+machine ever had, each half as tall.
+
+Bright areas show weaker scanlines than dark ones, on purpose: a more
+intense electron beam is physically wider, so it fills more of the gap. That
+"beam bloom" is what keeps whites white without a global brightness multiply
+— such a multiply clips the highlights while lifting the troughs, which
+flattens the very scanline contrast it was meant to restore.
+
 Every constant behind this effect — mask cell size, mask/scanline strength,
-scanline beam width, brightness boost — is a slider in the "Shader CRT"
-section of the configuration panel (`F6`), with a "Reset to defaults"
-button. The shipped defaults are tuned for a high-density (4K) display;
-lower-DPI screens will likely want smaller values.
+scanline beam width, beam bloom, brightness boost — is a slider in the
+"Shader CRT" section of the configuration panel (`F6`), with a "Reset to
+defaults" button. The shipped defaults are tuned for a high-density (4K)
+display; lower-DPI screens will likely want smaller values.
 
 ## Emulator commands:
     disk d.dsk          Loads the d.dsk disk image on drive A

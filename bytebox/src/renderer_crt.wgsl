@@ -46,12 +46,25 @@
 // bas pour ce que chacun contrôle visuellement.
 struct CrtParams {
     source_size: vec2<f32>,
+    /// Hauteur d'une VRAIE ligne de balayage CPC, en lignes du tampon
+    /// source (`video::PIXELS_PER_SCANLINE`). Vaut 2 : `video::render`
+    /// double chaque scanline verticalement, donc les 600 lignes du tampon
+    /// ne sont que 300 lignes de balayage réelles. Dessiner une scanline par
+    /// ligne de tampon en dessinerait deux fois trop, chacune deux fois trop
+    /// fine — ce qui les rendait presque invisibles quel que soit le réglage.
+    line_height: f32,
     mask_cell_px: f32,
     mask_min: f32,
     mask_strength: f32,
     scanline_beam: f32,
     scanline_strength: f32,
+    beam_bloom: f32,
     bright_boost: f32,
+    // `vec2` et pas `vec3` : un `vec3<f32>` est aligné sur 16 octets et
+    // décalerait tout le complément. Ici les 10 `f32` qui précèdent font 40
+    // octets, ce `vec2` les porte à 48, un multiple de 16 — la taille exacte
+    // de `CrtParams` côté Rust.
+    _padding: vec2<f32>,
 };
 
 @group(0) @binding(0)
@@ -156,14 +169,19 @@ fn average_scan_weight(dist_lines: f32, beam: f32, footprint: f32) -> f32 {
     return (a + b + c) / 3.0;
 }
 
-// Couleur d'une ligne source `row`, ré-échantillonnée horizontalement entre
-// ses deux colonnes voisines autour de `cont_x` (position continue, en
-// texels source).
-fn sample_row(cont_x: f32, row: f32) -> vec3<f32> {
+// Couleur de la ligne de balayage CPC `line` (pas la ligne de tampon : voir
+// `line_height`), ré-échantillonnée horizontalement entre ses deux colonnes
+// voisines autour de `cont_x` (position continue, en texels source).
+fn sample_line(cont_x: f32, line: f32) -> vec3<f32> {
+    // Centre du groupe de `line_height` lignes de tampon qui portent cette
+    // ligne de balayage. Elles sont identiques (`video::render` duplique),
+    // donc n'importe laquelle ferait l'affaire — viser le centre garde
+    // l'échantillonnage robuste si le doublage venait à changer.
+    let row = (line + 0.5) * params.line_height;
     let col0 = floor(cont_x - 0.5);
     let frac_x = cont_x - (col0 + 0.5);
-    let uv0 = vec2<f32>(col0 + 0.5, row + 0.5) / params.source_size;
-    let uv1 = vec2<f32>(col0 + 1.5, row + 0.5) / params.source_size;
+    let uv0 = vec2<f32>(col0 + 0.5, row) / params.source_size;
+    let uv1 = vec2<f32>(col0 + 1.5, row) / params.source_size;
     let c0 = to_linear(textureSample(t_frame, s_frame, uv0).rgb);
     let c1 = to_linear(textureSample(t_frame, s_frame, uv1).rgb);
     return mix(c0, c1, ease(frac_x));
@@ -176,19 +194,43 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // zoom de sortie : x1/x2/x3/plein écran doivent tous montrer le même
     // nombre de bandes, dans les mêmes proportions relatives à l'image).
     let texel = in.uv * params.source_size;
-    // `fwidth` donne, en pixels source, la taille de l'empreinte verticale
-    // d'un pixel de sortie (1.0 à x1, 1/3 à x3...) — voir `average_scan_weight`.
-    let footprint = fwidth(texel.y);
-    let row0 = floor(texel.y - 0.5);
-    let dist0 = (texel.y - 0.5) - row0;
-    let w0 = average_scan_weight(dist0, params.scanline_beam, footprint);
-    let w1 = average_scan_weight(dist0 - 1.0, params.scanline_beam, footprint);
+    // Position verticale en LIGNES DE BALAYAGE CPC réelles, pas en lignes du
+    // tampon (voir `line_height`) : c'est la période à laquelle un vrai tube
+    // dessine ses scanlines.
+    let line_coord = texel.y / params.line_height;
+    // `fwidth` donne l'empreinte verticale d'un pixel de sortie, dans cette
+    // même unité — voir `average_scan_weight`.
+    let footprint = fwidth(line_coord);
+    let line0 = floor(line_coord - 0.5);
+    let dist0 = (line_coord - 0.5) - line0;
 
-    let color_scanned = sample_row(texel.x, row0) * w0 + sample_row(texel.x, row0 + 1.0) * w1;
+    let c0 = sample_line(texel.x, line0);
+    let c1 = sample_line(texel.x, line0 + 1.0);
     // Un mélange linéaire non pondéré (sans creux de balayage) sert de plancher
     // de luminosité : scanline_strength règle l'intensité du seul effet de
     // bande, indépendamment de GAMMA_IN/OUT ou du reste du pipeline.
-    let color_flat = mix(sample_row(texel.x, row0), sample_row(texel.x, row0 + 1.0), dist0);
+    let color_flat = mix(c0, c1, dist0);
+
+    // Largeur du faisceau selon la luminosité locale : sur un vrai tube, un
+    // faisceau plus intense est physiquement plus large ("bloom" du spot),
+    // donc les zones claires montrent des scanlines plus discrètes que les
+    // zones sombres. Sans ça, le seul moyen de rattraper l'assombrissement
+    // global qu'imposent les scanlines est un facteur multiplicatif
+    // (`bright_boost`) — mais il sature les blancs, et écrase justement le
+    // contraste des scanlines qu'on cherchait à renforcer : d'où le "il faut
+    // tout mettre à fond et elles restent discrètes". Avec le bloom, les
+    // blancs restent blancs sans boost, et l'exposant peut monter beaucoup
+    // plus haut là où ça se voit.
+    let luma = dot(color_flat, vec3<f32>(0.2126, 0.7152, 0.0722));
+    // Comparé en espace perceptuel plutôt que linéaire : sinon la quasi
+    // totalité de l'image (tout sauf les blancs francs) compterait comme
+    // "sombre" et le bloom ne servirait presque jamais.
+    let brightness = pow(clamp(luma, 0.0, 1.0), 1.0 / GAMMA_OUT);
+    let beam = params.scanline_beam * mix(1.0, params.beam_bloom, brightness);
+
+    let w0 = average_scan_weight(dist0, beam, footprint);
+    let w1 = average_scan_weight(dist0 - 1.0, beam, footprint);
+    let color_scanned = c0 * w0 + c1 * w1;
     let color = mix(color_flat, color_scanned, params.scanline_strength);
 
     // Masque phosphore : triade RVB, en pixels de SORTIE réels (propriété du

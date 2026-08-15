@@ -277,12 +277,19 @@ impl ConfigPanel {
         );
         ui.add(egui::Slider::new(&mut settings.mask_strength, 0.0..=1.0).text("Mask strength"));
         ui.add(egui::Slider::new(&mut settings.mask_min, 0.0..=1.0).text("Mask min brightness"));
+        // Plage étendue jusqu'à 24 : 10 était atteint en butée sans que les
+        // scanlines paraissent encore assez marquées — c'était en fait le
+        // symptôme d'un bug de période (voir `line_height` dans le shader),
+        // mais la marge reste utile maintenant qu'il est corrigé.
         ui.add(
-            egui::Slider::new(&mut settings.scanline_beam, 1.0..=10.0).text("Scanline beam width"),
+            egui::Slider::new(&mut settings.scanline_beam, 1.0..=24.0).text("Scanline beam width"),
         );
         ui.add(
             egui::Slider::new(&mut settings.scanline_strength, 0.0..=1.0)
                 .text("Scanline strength"),
+        );
+        ui.add(
+            egui::Slider::new(&mut settings.beam_bloom, 0.05..=1.0).text("Beam bloom (bright)"),
         );
         ui.add(
             egui::Slider::new(&mut settings.bright_boost, 1.0..=2.5).text("Brightness boost"),
