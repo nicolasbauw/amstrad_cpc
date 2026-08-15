@@ -18,6 +18,8 @@
 
     F1 / F2 / F3   window size x1 / x2 / x3
     F4             toggle fullscreen
+    F5             toggle the CRT shader (scanlines, rounded pixels — only
+                   visible above x1, see below)
     F6             toggle the configuration/media panel (disks, tape,
                    drive B, extra RAM, zoom, volume — all with an
                    immediate effect, no restart needed)
@@ -33,6 +35,17 @@ The emulator no longer depends on the terminal it was launched from: every
 command and every message goes through the quick command bar (`F10`) or the
 full console window (`F11`), so launching from a desktop icon works exactly
 like launching from a terminal.
+
+## CRT shader
+
+`F5` overlays scanlines and rounds off each pixel's corners, computed in
+source-pixel space so the effect keeps the same proportions at every zoom
+level rather than a fixed number of screen pixels per scanline. One
+consequence: at `x1` (the emulated screen at its native 800×600, one CPC
+pixel per screen pixel) there's no spare resolution left to draw the
+gradient into, so the shader has essentially nothing to show — this is
+expected, not a bug. The effect becomes visible from `x2` up, and is most
+convincing at `x3` or fullscreen on a high-resolution display.
 
 ## Emulator commands:
     disk d.dsk          Loads the d.dsk disk image on drive A

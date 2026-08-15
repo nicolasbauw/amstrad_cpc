@@ -18,11 +18,30 @@
 //! juste une seconde passe de rendu par-dessus la première (`present`, en
 //! `LoadOp::Load` plutôt que `Clear`, pour ne pas effacer l'image CPC déjà
 //! dessinée).
+//!
+//! Depuis le jalon M4, deux pipelines dessinent le quad CPC : `pipeline`
+//! (pixel net, inchangé) et `crt_pipeline` (scanlines + aperture arrondie
+//! des pixels, `renderer_crt.wgsl`), basculés par F5. Les deux partagent le
+//! même groupe de liaison 0 (texture + échantillonneur) ; seul le second a
+//! besoin d'un groupe 1 (taille de l'image source, en uniforme).
 
 use egui_sdl2_event::EguiSDL2State;
 use sdl2::video::Window;
+use wgpu::util::DeviceExt;
 
 use bytebox_core::video;
+
+/// Paramètres du shader CRT (`renderer_crt.wgsl`) : juste la taille de
+/// l'image source, en pixels source — jamais en pixels de sortie, voir le
+/// commentaire du shader. Constante après construction (`SCREEN_WIDTH`/
+/// `HEIGHT` ne changent jamais en cours d'exécution) : écrite une seule
+/// fois, pas mise à jour à chaque trame.
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct CrtParams {
+    source_size: [f32; 2],
+    _padding: [f32; 2],
+}
 
 /// # Sécurité
 ///
@@ -38,6 +57,12 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
+    /// Pipeline shader CRT (F5, `renderer_crt.wgsl`) : partage `bind_group`
+    /// ci-dessus (groupe 0, même disposition), ajoute `crt_params_bind_group`
+    /// en groupe 1.
+    crt_pipeline: wgpu::RenderPipeline,
+    crt_params_bind_group: wgpu::BindGroup,
+    crt_enabled: bool,
     frame_texture: wgpu::Texture,
     /// Buffer de conversion RGB24 (produit par `video::render`) vers
     /// RGBA8 (seul format que wgpu accepte en texture couleur usuelle) :
@@ -132,7 +157,9 @@ impl Renderer {
         // Nearest, pas Linear : c'est le filtrage par défaut de SDL2 (aucun
         // hint `SDL_HINT_RENDER_SCALE_QUALITY` n'était positionné), pixel
         // net à l'agrandissement. L'adoucissement de l'image agrandie est le
-        // rôle du futur shader CRT (jalon M4), pas de cette mise à l'échelle.
+        // rôle du shader CRT (F5, jalon M4, `renderer_crt.wgsl`), pas de
+        // cette mise à l'échelle — les deux pipelines partagent ce même
+        // échantillonneur, seul le fragment shader diffère.
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("frame sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -224,6 +251,83 @@ impl Renderer {
             cache: None,
         });
 
+        // Pipeline shader CRT (F5, jalon M4) : même groupe de liaison 0 que
+        // le pipeline net ci-dessus (texture + échantillonneur, disposition
+        // identique — `bind_group` est donc réutilisé tel quel), plus un
+        // groupe 1 pour la taille de l'image source.
+        let crt_params = CrtParams {
+            source_size: [video::SCREEN_WIDTH as f32, video::SCREEN_HEIGHT as f32],
+            _padding: [0.0, 0.0],
+        };
+        let crt_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("crt params buffer"),
+            contents: bytemuck::bytes_of(&crt_params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let crt_params_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("crt params bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let crt_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("crt params bind group"),
+            layout: &crt_params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: crt_params_buffer.as_entire_binding(),
+            }],
+        });
+        let crt_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("crt shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("renderer_crt.wgsl").into()),
+        });
+        let crt_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("crt pipeline layout"),
+            bind_group_layouts: &[&bind_group_layout, &crt_params_layout],
+            push_constant_ranges: &[],
+        });
+        let crt_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("crt pipeline"),
+            layout: Some(&crt_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &crt_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &crt_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         // Même raisonnement de format que la texture de trame CPC ci-dessus :
         // non-sRGB, comme le recommande la doc d'`egui_wgpu::Renderer::new`
         // (son shader écrit déjà des valeurs en espace gamma).
@@ -238,6 +342,9 @@ impl Renderer {
             config,
             pipeline,
             bind_group,
+            crt_pipeline,
+            crt_params_bind_group,
+            crt_enabled: false,
             frame_texture,
             rgba: vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 4],
             egui_ctx: egui::Context::default(),
@@ -272,6 +379,13 @@ impl Renderer {
     /// fenêtre (voir `status_panel.rs`, même mécanisme).
     pub fn handle_event(&mut self, event: &sdl2::event::Event) {
         self.egui_state.sdl2_input_to_egui(&self.window, event);
+    }
+
+    /// Bascule le shader CRT (F5). Repli sur le rendu net (`self.pipeline`)
+    /// quand désactivé : comportement de départ inchangé, comme pour tout
+    /// bascule F1-F12 de ce fichier.
+    pub fn toggle_crt(&mut self) {
+        self.crt_enabled = !self.crt_enabled;
     }
 
     /// Calcule le rectangle (en pixels physiques) où dessiner l'image
@@ -364,8 +478,13 @@ impl Renderer {
             if w > 0.0 && h > 0.0 {
                 rpass.set_viewport(x, y, w, h, 0.0, 1.0);
                 rpass.set_scissor_rect(x as u32, y as u32, w as u32, h as u32);
-                rpass.set_pipeline(&self.pipeline);
                 rpass.set_bind_group(0, &self.bind_group, &[]);
+                if self.crt_enabled {
+                    rpass.set_pipeline(&self.crt_pipeline);
+                    rpass.set_bind_group(1, &self.crt_params_bind_group, &[]);
+                } else {
+                    rpass.set_pipeline(&self.pipeline);
+                }
                 rpass.draw(0..4, 0..1);
             }
         }

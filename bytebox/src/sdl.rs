@@ -399,6 +399,14 @@ pub fn run(
                         },
                     );
                 }
+                // Shader CRT (F5, Plan V2.md jalon M4) : scanlines +
+                // aperture arrondie des pixels, voir renderer_crt.wgsl.
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F5),
+                    ..
+                } => {
+                    renderer.toggle_crt();
+                }
                 // Événements d'enfoncement de touches du clavier moderne PC
                 //
                 // Pas-à-pas CPU (F8) et pas-à-pas ligne (F9) : anciennement
