@@ -13,7 +13,24 @@
   ```sh
   cargo run -- --disk=Barbarian.dsk --autocmd='RUN"BARBA.I'
   ```
-  
+
+## Function keys
+
+    F1 / F2 / F3   window size x1 / x2 / x3
+    F4             toggle fullscreen
+    F8             step to next Z80 instruction
+    F9             step to next video line
+    F10            toggle the quick command bar (one input line, overlaid
+                   on the emulator window)
+    F11            toggle the full console window (scrollable history,
+                   same commands as the quick command bar)
+    F12            toggle the machine status window
+
+The emulator no longer depends on the terminal it was launched from: every
+command and every message goes through the quick command bar (`F10`) or the
+full console window (`F11`), so launching from a desktop icon works exactly
+like launching from a terminal.
+
 ## Emulator commands:
     disk d.dsk          Loads the d.dsk disk image on drive A
     disk d.dsk b        Loads the d.dsk disk image on drive B (if enabled in config.toml)
@@ -81,11 +98,11 @@ key", after which the emulated datacorder starts feeding the firmware.
 
 A concrete example of combined usage:
 
-1. You launch the emulator.
-2. You open the machine status window alongside it using **`F12`**.
-3. You enter a breakpoint command in the console (e.g., `b 0x0038` for the interrupt).
+1. launch the emulator.
+2. open the machine status window alongside it using **`F12`**.
+3. enter a breakpoint command in the quick command bar or the full console (e.g., `b 0x0038` for the interrupt) using **`F10`** or **`F11`**.
 4. As soon as the breakpoint is hit, the emulator freezes, and the debug window displays the full machine state.
-5. You press **`F10`** several times: you see the disassembly print out in the console, and all register values ​​(PC, SP, A, B, C...) update in the debug window.
-6. You press **`Shift + F10`**: the emulator skips ahead by one video line, and you watch the `HSYNC Counter` and `current_line` update in real-time on the debugger screen.
+5. press **`F8`** several times: you see the disassembly print out in the console, and all register values ​​(PC, SP, A, B, C...) update in the debug window.
+6. press **`F9`**: the emulator skips ahead by one video line, and you watch the `HSYNC Counter` and `current_line` update in real-time on the debugger screen.
 
 ![Screenshot](assets/machine_status.png)
