@@ -3,6 +3,7 @@ mod autotype;
 mod bus;
 mod config;
 mod console;
+mod console_panel;
 mod crtc;
 mod fdc;
 mod gate_array;

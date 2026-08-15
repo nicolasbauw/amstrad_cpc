@@ -328,6 +328,15 @@ impl Machine {
         m
     }
 
+    /// Extrémité d'émission du canal de commandes (`MonitorCmd`), pour toute
+    /// façade qui veut en envoyer sans passer par le fil `stdin` (`console.rs`)
+    /// — le panneau F11 (`console_panel.rs`), notamment. `Sender` se clone
+    /// à volonté (implémentation standard `mpsc`), donc plusieurs façades
+    /// peuvent coexister sans se marcher dessus.
+    pub fn command_sender(&self) -> mpsc::Sender<MonitorMessage> {
+        self.cmd_channel.0.clone()
+    }
+
     /// Indique si la matrice clavier doit être affichée dans la fenêtre
     /// SDL "Machine Status" (config.toml, section [debugger]).
     pub fn show_keyboard_matrix(&self) -> bool {
@@ -1189,12 +1198,33 @@ impl Machine {
         s
     }
 
-    pub fn print_hardware_status(&mut self, show_kb: bool) {
-        print!("{}", self.get_hardware_string(show_kb));
-    }
-
-    pub fn console_handle(&mut self) -> Result<(), Box<dyn Error>> {
+    /// Traite au plus une commande en attente et renvoie tout ce qu'elle a
+    /// produit. Alimentée aussi bien par le fil `stdin` (`console.rs`) que
+    /// par le panneau F11 (`console_panel.rs`) via le même canal
+    /// `cmd_channel` : les deux façades partagent donc la même sortie,
+    /// capturée ici plutôt qu'écrite directement sur la sortie standard —
+    /// nécessaire pour l'afficher dans le panneau, qui n'a pas de terminal.
+    ///
+    /// Les `println!`/`print!` du corps de la fonction sont volontairement
+    /// inchangés : les deux macros du même nom, définies juste en dessous,
+    /// les font écrire dans `out` plutôt que sur la vraie sortie standard —
+    /// c'est le shadowing lexical habituel de Rust pour une macro locale,
+    /// pas une réécriture ligne à ligne.
+    pub fn console_handle(&mut self) -> Result<String, Box<dyn Error>> {
         let (command, arg, arg2) = self.cmd_channel.1.try_recv()?;
+        let mut out = String::new();
+        macro_rules! println {
+            () => {{ out.push('\n'); }};
+            ($($arg:tt)*) => {{
+                out.push_str(&format!($($arg)*));
+                out.push('\n');
+            }};
+        }
+        macro_rules! print {
+            ($($arg:tt)*) => {{
+                out.push_str(&format!($($arg)*));
+            }};
+        }
 
         match command {
             MonitorCmd::Help => {
@@ -1218,11 +1248,11 @@ impl Machine {
                     self.waiting_for_key = true;
                     println!("Waiting for a key press on the CPC window to show matrix status...");
                 } else {
-                    self.print_hardware_status(false);
+                    print!("{}", self.get_hardware_string(false));
                 }
             }
             MonitorCmd::Registers => {
-                self.print_registers();
+                print!("{}", self.get_registers_string());
             }
             MonitorCmd::ReadMem => {
                 let a = arg.to_u16()?;
@@ -1300,7 +1330,7 @@ impl Machine {
             MonitorCmd::Step => {
                 println!("{}", (zilog_z80::dasm::dasm(&self.bus, self.cpu.reg.pc)).0);
                 self.step();
-                self.print_registers();
+                print!("{}", self.get_registers_string());
             }
             MonitorCmd::StepLine => {
                 let start_line = self.current_line;
@@ -1311,7 +1341,7 @@ impl Machine {
                     }
                 }
                 println!("Stepped to next video line (Line {}).", self.current_line);
-                self.print_registers();
+                print!("{}", self.get_registers_string());
             }
             MonitorCmd::RemoveBreakpoint => {
                 let a = arg.to_u16()?;
@@ -1456,7 +1486,7 @@ impl Machine {
                 _ => println!("Usage: t | t on | t calls | t off | t dump [n] | t save <file>"),
             },
         }
-        Ok(())
+        Ok(out)
     }
 }
 

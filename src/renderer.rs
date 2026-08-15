@@ -10,9 +10,19 @@
 //! Suit l'exemple officiel `raw-window-handle-with-wgpu` de la crate sdl2 :
 //! seule combinaison balisée pour faire cohabiter SDL2 (fenêtrage, entrées)
 //! et wgpu (rendu) dans un même process.
+//!
+//! Porte aussi, depuis le jalon M2, la surcouche egui de la fenêtre
+//! principale (console F11, futurs panneaux F6/F7) : contrairement à la
+//! fenêtre de statut (`status_panel.rs`, M1), c'est la MÊME fenêtre/surface
+//! que le rendu CPC, donc le même contexte wgpu — pas de second GPU à créer,
+//! juste une seconde passe de rendu par-dessus la première (`present`, en
+//! `LoadOp::Load` plutôt que `Clear`, pour ne pas effacer l'image CPC déjà
+//! dessinée).
+
+use egui_sdl2_event::EguiSDL2State;
+use sdl2::video::Window;
 
 use crate::video;
-use sdl2::video::Window;
 
 /// # Sécurité
 ///
@@ -33,6 +43,10 @@ pub struct Renderer {
     /// RGBA8 (seul format que wgpu accepte en texture couleur usuelle) :
     /// alloué une fois, réutilisé à chaque trame.
     rgba: Vec<u8>,
+    egui_ctx: egui::Context,
+    egui_state: EguiSDL2State,
+    egui_renderer: egui_wgpu::Renderer,
+    egui_start: std::time::Instant,
     window: Window,
 }
 
@@ -210,6 +224,13 @@ impl Renderer {
             cache: None,
         });
 
+        // Même raisonnement de format que la texture de trame CPC ci-dessus :
+        // non-sRGB, comme le recommande la doc d'`egui_wgpu::Renderer::new`
+        // (son shader écrit déjà des valeurs en espace gamma).
+        let egui_renderer =
+            egui_wgpu::Renderer::new(&device, surface_format, egui_wgpu::RendererOptions::default());
+        let egui_state = EguiSDL2State::new(draw_w, draw_h, 1.0);
+
         Ok(Self {
             surface,
             device,
@@ -219,6 +240,10 @@ impl Renderer {
             bind_group,
             frame_texture,
             rgba: vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 4],
+            egui_ctx: egui::Context::default(),
+            egui_state,
+            egui_renderer,
+            egui_start: std::time::Instant::now(),
             window,
         })
     }
@@ -239,6 +264,14 @@ impl Renderer {
         self.config.width = w.max(1);
         self.config.height = h.max(1);
         self.surface.configure(&self.device, &self.config);
+        self.egui_state.update_screen_rect(w, h);
+    }
+
+    /// À appeler pour chaque événement SDL2 reçu, qu'il concerne cette
+    /// fenêtre ou non : `EguiSDL2State` filtre lui-même sur l'identifiant de
+    /// fenêtre (voir `status_panel.rs`, même mécanisme).
+    pub fn handle_event(&mut self, event: &sdl2::event::Event) {
+        self.egui_state.sdl2_input_to_egui(&self.window, event);
     }
 
     /// Calcule le rectangle (en pixels physiques) où dessiner l'image
@@ -255,7 +288,12 @@ impl Renderer {
     }
 
     /// Envoie une trame (buffer RGB24 de `video::render`) à l'écran.
-    pub fn present(&mut self, frame_buffer: &[u8]) {
+    ///
+    /// `overlay`, s'il est fourni, construit une interface egui (console
+    /// F11, futurs panneaux) dessinée par-dessus l'image CPC dans la même
+    /// passe de commandes — `None` reproduit exactement le comportement du
+    /// jalon M0 (aucune passe egui, aucun coût).
+    pub fn present(&mut self, frame_buffer: &[u8], overlay: Option<&mut dyn FnMut(&egui::Context)>) {
         debug_assert_eq!(frame_buffer.len(), video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 3);
         for (rgba, rgb) in self.rgba.chunks_exact_mut(4).zip(frame_buffer.chunks_exact(3)) {
             rgba[0] = rgb[0];
@@ -331,6 +369,62 @@ impl Renderer {
                 rpass.draw(0..4, 0..1);
             }
         }
+
+        if let Some(build_ui) = overlay {
+            self.egui_state.update_time(
+                Some(self.egui_start.elapsed().as_secs_f64()),
+                1.0 / 60.0,
+            );
+            let raw_input = std::mem::take(&mut self.egui_state.raw_input);
+            let full_output = self.egui_ctx.run(raw_input, build_ui);
+            self.egui_state
+                .process_output(&self.window, &full_output.platform_output);
+
+            let paint_jobs = self
+                .egui_ctx
+                .tessellate(full_output.shapes, full_output.pixels_per_point);
+            let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [self.config.width, self.config.height],
+                pixels_per_point: full_output.pixels_per_point,
+            };
+            for (id, delta) in &full_output.textures_delta.set {
+                self.egui_renderer
+                    .update_texture(&self.device, &self.queue, *id, delta);
+            }
+            self.egui_renderer.update_buffers(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &paint_jobs,
+                &screen_descriptor,
+            );
+            {
+                let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("egui overlay pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            // Garde l'image CPC tout juste dessinée : cette
+                            // passe s'ajoute par-dessus, elle ne remplace rien.
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                let mut rpass = rpass.forget_lifetime();
+                self.egui_renderer
+                    .render(&mut rpass, &paint_jobs, &screen_descriptor);
+            }
+            for id in &full_output.textures_delta.free {
+                self.egui_renderer.free_texture(id);
+            }
+        }
+
         self.queue.submit([encoder.finish()]);
         output.present();
     }

@@ -4,6 +4,7 @@
 //! qu'assembler une `Machine` prête à tourner et l'y confier via `run`.
 
 use crate::autotype::AutoTyper;
+use crate::console_panel::ConsolePanel;
 use crate::machine::{self, Machine};
 use crate::renderer::Renderer;
 use crate::video;
@@ -194,6 +195,12 @@ pub fn run(
     let main_window_id = renderer.window().id();
     let mut event_pump = sdl_context.event_pump()?;
 
+    // Console F11 (Plan V2.md, jalon M2) : mêmes commandes que le fil stdin
+    // historique (console.rs), alimentées via le même canal MonitorCmd.
+    let mut console_visible = false;
+    let mut console_panel = ConsolePanel::new();
+    let cmd_sender = machine.command_sender();
+
     let mut frame_buffer = vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 3];
     // Deux fois la durée d'une trame standard (312 lignes de 256 ticks) : simple
     // garde-fou pour ne pas bloquer la boucle SDL si le VSYNC n'arrive jamais.
@@ -224,6 +231,10 @@ pub fn run(
             // l'identifiant de la fenêtre de statut, sans effet sur les
             // événements de la fenêtre principale.
             status_panel.handle_event(&event);
+            // Même chose pour la console F11, superposée à la fenêtre
+            // principale : `Renderer::handle_event` filtre lui aussi sur
+            // l'identifiant de fenêtre.
+            renderer.handle_event(&event);
             match event {
                 Event::Quit { .. } => {
                     running = false;
@@ -360,12 +371,31 @@ pub fn run(
                         status_panel.window_mut().hide();
                     }
                 }
+                // Console de commandes (Plan V2.md, jalon M2) : superposée à
+                // la fenêtre principale plutôt que dans une fenêtre séparée
+                // (contrairement à F12), donc pas de show()/hide() ici — son
+                // affichage tient entièrement à `console_visible`, lu par la
+                // fermeture passée à `renderer.present` plus bas. Reprend le
+                // focus à chaque ouverture pour taper sans clic préalable.
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F11),
+                    ..
+                } => {
+                    console_visible = !console_visible;
+                    if console_visible {
+                        console_panel.request_focus();
+                    }
+                }
+                // La console absorbe le clavier tant qu'elle est ouverte :
+                // sans cette garde, taper une commande l'enverrait aussi à
+                // la matrice clavier émulée (le CPC "entendrait" chaque
+                // lettre tapée dans la console).
                 Event::KeyDown {
                     keycode: Some(kc),
                     scancode: Some(sc),
                     keymod,
                     ..
-                } => {
+                } if !console_visible => {
                     let shift_held = keymod.intersects(
                         sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
                     );
@@ -510,25 +540,39 @@ pub fn run(
             audio.push(&samples);
         }
 
+        // Traité avant le rendu, pour que la sortie d'une commande saisie
+        // dans le panneau F11 apparaisse dans le panneau dès cette trame,
+        // plutôt qu'avec un tour de boucle de retard.
+        //
+        // Une commande traitée (donc sa sortie imprimée, potentiellement
+        // plusieurs lignes) laisse le prompt "> " affiché plus haut par le
+        // fil console remonter hors de vue : on le réimprime ici, juste
+        // après cette sortie, pour qu'il reste visible sous ce qu'on vient
+        // de lire plutôt que de sembler avoir disparu. La sortie va aussi
+        // bien sur la sortie standard (fil `stdin`, usage terminal habituel)
+        // que dans l'historique du panneau F11 : les deux façades affichent
+        // la même chose, qu'elles soient ou non à l'origine de la commande.
+        if let Ok(output) = machine.console_handle() {
+            if !output.is_empty() {
+                print!("{output}");
+                console_panel.push_output(&output);
+            }
+            print!("> ");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
-        renderer.present(&frame_buffer);
+        let mut console_ui = |ctx: &egui::Context| console_panel.ui(ctx, &cmd_sender);
+        let overlay: Option<&mut dyn FnMut(&egui::Context)> =
+            if console_visible { Some(&mut console_ui) } else { None };
+        renderer.present(&frame_buffer, overlay);
 
         if debug_visible {
             let registers = machine.get_registers_string();
             let hardware = machine.get_hardware_string(machine.show_keyboard_matrix());
             status_panel.render(&registers, &hardware);
-        }
-
-        // Une commande traitée (donc sa sortie imprimée, potentiellement
-        // plusieurs lignes) laisse le prompt "> " affiché plus haut par le
-        // fil console remonter hors de vue : on le réimprime ici, juste
-        // après cette sortie, pour qu'il reste visible sous ce qu'on vient
-        // de lire plutôt que de sembler avoir disparu.
-        if machine.console_handle().is_ok() {
-            print!("> ");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
         }
 
         // Mesure de la vitesse réelle, moyennée sur une seconde : c'est elle
