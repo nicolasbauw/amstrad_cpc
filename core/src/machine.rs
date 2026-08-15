@@ -365,6 +365,14 @@ impl Machine {
         self.config.display.default_zoom.as_deref()
     }
 
+    /// Répertoire par défaut où chercher/créer une image disque ou cassette
+    /// (config.toml, `[file] dsk_path`) — utile à toute façade proposant un
+    /// sélecteur de fichier (le panneau F6, notamment), pour l'ouvrir au
+    /// bon endroit plutôt que dans le répertoire courant du processus.
+    pub fn dsk_path(&self) -> Option<&str> {
+        self.config.file.dsk_path.as_deref()
+    }
+
     /// Volume de la sortie audio, dans [0, 1].
     pub fn volume(&self) -> f32 {
         self.volume

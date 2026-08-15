@@ -80,10 +80,25 @@ impl ConfigPanel {
         machine: &Machine,
         cmd_sender: &Sender<MonitorMessage>,
     ) {
+        let dsk_path = machine.dsk_path();
         let fdc = machine.bus.fdc.borrow();
-        Self::disk_drive_row(ui, "Drive A", &fdc.drive_a.current_filename, "", cmd_sender);
+        Self::disk_drive_row(
+            ui,
+            "Drive A",
+            &fdc.drive_a.current_filename,
+            "",
+            dsk_path,
+            cmd_sender,
+        );
         if fdc.drive_b_enabled {
-            Self::disk_drive_row(ui, "Drive B", &fdc.drive_b.current_filename, "b", cmd_sender);
+            Self::disk_drive_row(
+                ui,
+                "Drive B",
+                &fdc.drive_b.current_filename,
+                "b",
+                dsk_path,
+                cmd_sender,
+            );
         } else {
             ui.label("Drive B is disabled (see Hardware below).");
         }
@@ -112,7 +127,7 @@ impl ConfigPanel {
         ui.horizontal(|ui| {
             ui.label(format!("Tape: {tape_label}"));
             if ui.button("Insert…").clicked()
-                && let Some(path) = rfd::FileDialog::new()
+                && let Some(path) = Self::file_dialog(machine.dsk_path())
                     .add_filter("Tape image", &["cdt"])
                     .pick_file()
             {
@@ -140,6 +155,7 @@ impl ConfigPanel {
         label: &str,
         current_filename: &str,
         drive_arg2: &str,
+        dsk_path: Option<&str>,
         cmd_sender: &Sender<MonitorMessage>,
     ) {
         let loaded = current_filename != "None";
@@ -147,7 +163,7 @@ impl ConfigPanel {
         ui.horizontal(|ui| {
             ui.label(format!("{label}: {shown}"));
             if ui.button("Insert…").clicked()
-                && let Some(path) = rfd::FileDialog::new()
+                && let Some(path) = Self::file_dialog(dsk_path)
                     .add_filter("Disk image", &["dsk"])
                     .pick_file()
             {
@@ -165,6 +181,19 @@ impl ConfigPanel {
                 ));
             }
         });
+    }
+
+    /// Sélecteur de fichier natif, ouvert par défaut dans `[file] dsk_path`
+    /// (config.toml) plutôt que dans le répertoire courant du processus —
+    /// c'est là que vivent les images disque/cassette la plupart du temps.
+    /// Absent, `rfd` retombe sur son propre choix par défaut (généralement
+    /// le répertoire courant, ou le dernier utilisé).
+    fn file_dialog(dsk_path: Option<&str>) -> rfd::FileDialog {
+        let dialog = rfd::FileDialog::new();
+        match dsk_path {
+            Some(dir) => dialog.set_directory(dir),
+            None => dialog,
+        }
     }
 
     fn hardware_section(
