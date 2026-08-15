@@ -156,6 +156,11 @@ pub fn run(
         .hidden()
         .resizable()
         .metal_view()
+        // Reste visible par-dessus la fenêtre principale même en plein
+        // écran (F4) : sans ça, recliquer sur l'émulateur repasse cette
+        // fenêtre derrière, alors qu'elle sert justement à être consultée
+        // en même temps que lui.
+        .always_on_top()
         .build()?;
     // Même icône que la fenêtre principale : sans cet appel, le gestionnaire
     // de fenêtres retombe sur son icône par défaut (le logo Wayland sous
@@ -177,6 +182,8 @@ pub fn run(
         .hidden()
         .resizable()
         .metal_view()
+        // Voir le commentaire équivalent sur la fenêtre de statut ci-dessus.
+        .always_on_top()
         .build()?;
     if let Err(e) = set_window_icon(&mut console_win) {
         app_log!("Can't set console window icon: {e}");
