@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 zilog_z80 = "1.0.0"
-sdl2 = { version = "0.38.0", features = ["ttf", "raw-window-handle"] }
+sdl2 = { version = "0.38.0", features = ["raw-window-handle"] }
 toml = "1.1.4"
 serde = { version = "1.0.229", features = ["derive"] }
 directories = "6.0.0"

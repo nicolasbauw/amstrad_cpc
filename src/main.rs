@@ -14,6 +14,7 @@ mod ppi;
 mod psg;
 mod renderer;
 mod sdl;
+mod status_panel;
 mod snapshot;
 mod sound;
 mod tape;

@@ -270,7 +270,6 @@ impl Machine {
                 debugger: config::Debugger {
                     keyboard: false,
                     audio: false,
-                    font_path: None,
                 },
                 file: config::FileConfig::default(),
                 display: config::DisplayConfig::default(),
@@ -339,14 +338,6 @@ impl Machine {
     /// signalées sur la console (config.toml, section [debugger]).
     pub fn report_audio_regulation(&self) -> bool {
         self.config.debugger.audio
-    }
-
-    /// Chemin de la police TrueType pour la fenêtre "Machine Status"
-    /// (config.toml, section [debugger]). Absent si non configuré : la
-    /// valeur par défaut dépend alors du système d'exploitation, voir
-    /// `sdl::run`.
-    pub fn font_path(&self) -> Option<&str> {
-        self.config.debugger.font_path.as_deref()
     }
 
     /// Niveau de zoom à appliquer au démarrage ("x1", "x2", "x3" ou

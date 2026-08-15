@@ -142,30 +142,16 @@ pub fn run(
         }
     };
 
-    // 5. Initialisation de SDL_ttf pour le debugger
-    let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
-    // Chemin configurable (config.toml, [debugger] font_path) : utile pour
-    // développer sous Linux tout en testant occasionnellement sur un Mac,
-    // dont le chemin de police standard diffère. Sans configuration, retombe
-    // sur le chemin standard du système en cours.
-    let font_path = match machine.font_path() {
-        Some(path) => path.to_string(),
-        None if cfg!(target_os = "macos") => {
-            std::env::var("HOME")? + "/Library/Fonts/NotoSansMono-Regular.ttf"
-        }
-        None => "/usr/share/fonts/noto/NotoSansMono-Regular.ttf".to_string(),
-    };
-
-    let font = ttf_context
-        .load_font(font_path, 13)
-        .map_err(|e| e.to_string())?;
-
+    // 5. Fenêtre "machine status" (F12), cachée par défaut. Son contenu est
+    // un panneau egui (voir status_panel.rs, Plan V2.md jalon M1) : plus de
+    // police à charger depuis le disque, egui embarque la sienne.
     let mut debug_visible = false;
     let mut debug_window = video_subsystem
         .window("Amstrad CPC 6128 - Machine Status", 800, 1000)
         .position_centered()
         .hidden()
         .resizable()
+        .metal_view()
         .build()?;
     // Même icône que la fenêtre principale : sans cet appel, le gestionnaire
     // de fenêtres retombe sur son icône par défaut (le logo Wayland sous
@@ -173,8 +159,8 @@ pub fn run(
     if let Err(e) = set_window_icon(&mut debug_window) {
         println!("Can't set debug window icon: {e}");
     }
-    let mut debug_canvas = debug_window.into_canvas().build()?;
-    let debug_window_id = debug_canvas.window().id();
+    let debug_window_id = debug_window.id();
+    let mut status_panel = crate::status_panel::StatusPanel::new(debug_window)?;
 
     // Titre dynamique de la fenêtre en fonction du mode configuré
     let window_title = if machine.diagnostic_mode {
@@ -231,6 +217,13 @@ pub fn run(
 
     while running {
         for event in event_pump.poll_iter() {
+            // Alimente egui même quand le panneau est caché : sinon la
+            // première trame après un F12 le retrouverait avec un état
+            // d'entrée périmé (position de souris, modificateurs...).
+            // `EguiSDL2State::sdl2_input_to_egui` filtre lui-même sur
+            // l'identifiant de la fenêtre de statut, sans effet sur les
+            // événements de la fenêtre principale.
+            status_panel.handle_event(&event);
             match event {
                 Event::Quit { .. } => {
                     running = false;
@@ -242,7 +235,7 @@ pub fn run(
                 } => {
                     if window_id == debug_window_id {
                         debug_visible = false;
-                        debug_canvas.window_mut().hide();
+                        status_panel.window_mut().hide();
                     } else if window_id == main_window_id {
                         running = false;
                     }
@@ -260,6 +253,15 @@ pub fn run(
                     ..
                 } if window_id == main_window_id => {
                     renderer.resize();
+                }
+                Event::Window {
+                    win_event:
+                        sdl2::event::WindowEvent::SizeChanged(..)
+                        | sdl2::event::WindowEvent::Resized(..),
+                    window_id,
+                    ..
+                } if window_id == debug_window_id => {
+                    status_panel.resize();
                 }
                 // Taille d'affichage : F1 normale, F2 x2, F3 x3, F4 plein
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
@@ -332,9 +334,9 @@ pub fn run(
                 } => {
                     debug_visible = !debug_visible;
                     if debug_visible {
-                        debug_canvas.window_mut().show();
+                        status_panel.window_mut().show();
                     } else {
-                        debug_canvas.window_mut().hide();
+                        status_panel.window_mut().hide();
                     }
                 }
                 Event::KeyDown {
@@ -493,62 +495,9 @@ pub fn run(
         renderer.present(&frame_buffer);
 
         if debug_visible {
-            // Rendu en temps réel du debugger sur la deuxième fenêtre
-            debug_canvas.set_draw_color(sdl2::pixels::Color::RGB(15, 15, 25)); // Bleu nuit
-            debug_canvas.clear();
-
-            let mut debug_text = String::new();
-            debug_text.push_str(&machine.get_registers_string());
-            debug_text.push('\n');
-            debug_text.push_str(&machine.get_hardware_string(machine.show_keyboard_matrix()));
-
-            let texture_creator_debug = debug_canvas.texture_creator();
-            let mut y = 10;
-            let line_height = 16;
-
-            for line in debug_text.lines() {
-                let formatted_line = line.replace('\t', "    ");
-                if !formatted_line.trim().is_empty() {
-                    // La ligne "Disk access" se termine par un marqueur '●' (rouge,
-                    // accès disque en cours) rendu séparément du reste du texte.
-                    let (text_part, dot) = match formatted_line.strip_suffix('\u{25CF}') {
-                        Some(prefix) => (prefix, true),
-                        None => (formatted_line.as_str(), false),
-                    };
-
-                    let mut x = 15;
-                    if !text_part.is_empty() {
-                        let surface = font
-                            .render(text_part)
-                            .blended(sdl2::pixels::Color::RGB(220, 220, 225))
-                            .map_err(|e| e.to_string())?;
-                        let texture = texture_creator_debug
-                            .create_texture_from_surface(&surface)
-                            .map_err(|e| e.to_string())?;
-
-                        let query = texture.query();
-                        let target_rect = sdl2::rect::Rect::new(x, y, query.width, query.height);
-                        let _ = debug_canvas.copy(&texture, None, Some(target_rect));
-                        x += query.width as i32;
-                    }
-
-                    if dot {
-                        let surface = font
-                            .render("\u{25CF}")
-                            .blended(sdl2::pixels::Color::RGB(220, 40, 40))
-                            .map_err(|e| e.to_string())?;
-                        let texture = texture_creator_debug
-                            .create_texture_from_surface(&surface)
-                            .map_err(|e| e.to_string())?;
-
-                        let query = texture.query();
-                        let target_rect = sdl2::rect::Rect::new(x, y, query.width, query.height);
-                        let _ = debug_canvas.copy(&texture, None, Some(target_rect));
-                    }
-                }
-                y += line_height;
-            }
-            debug_canvas.present();
+            let registers = machine.get_registers_string();
+            let hardware = machine.get_hardware_string(machine.show_keyboard_matrix());
+            status_panel.render(&registers, &hardware);
         }
 
         // Une commande traitée (donc sa sortie imprimée, potentiellement

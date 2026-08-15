@@ -137,14 +137,6 @@ pub struct Debugger {
     /// config.toml qui marchait.
     #[serde(default)]
     pub audio: bool,
-    /// Chemin complet vers la police TrueType utilisée par la fenêtre
-    /// "Machine Status". Absent, retombe sur le chemin standard du système
-    /// en cours (voir `sdl::run`) — c'est ce qui remplace l'ancien
-    /// `cfg!(target_os = "macos")` en dur, utile pour développer sous Linux
-    /// tout en testant occasionnellement sur un Mac (chemins de police
-    /// différents sur les deux systèmes).
-    #[serde(default)]
-    pub font_path: Option<String>,
 }
 
 pub fn load_config_file() -> Result<Config, MachineError> {
@@ -196,20 +188,6 @@ mod tests {
             config.rom.system.is_none(),
             "sans section [rom], les chemins doivent rester absents (secours code en dur)"
         );
-        assert!(
-            config.debugger.font_path.is_none(),
-            "sans font_path configure, le chemin par defaut du systeme doit s'appliquer"
-        );
-    }
-
-    #[test]
-    fn font_path_is_read_when_present() {
-        let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\nfont_path = \"/tmp/MyFont.ttf\"\n";
-        let config: Config = toml::from_str(file).expect("fichier refuse");
-        assert_eq!(
-            config.debugger.font_path.as_deref(),
-            Some("/tmp/MyFont.ttf")
-        );
     }
 
     #[test]
@@ -246,7 +224,6 @@ mod tests {
             debugger: Debugger {
                 keyboard: false,
                 audio: false,
-                font_path: None,
             },
             file: FileConfig {
                 dsk_path: Some("bin".to_string()),
