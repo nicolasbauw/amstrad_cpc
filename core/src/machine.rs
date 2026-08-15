@@ -257,6 +257,12 @@ pub struct Machine {
     config: config::Config,
 }
 
+impl Default for Machine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Machine {
     pub fn new() -> Self {
         // Charge la configuration utilisateur (config.toml) avant la
@@ -1629,8 +1635,8 @@ mod tests {
         // ligne de commande (--autocmd='RUN"BARBA.I'), et c'est justement
         // celle qui a échappé aux tests du module autotype — la commande se
         // tapait mais ne validait jamais rien, faute d'ENTRÉE. C'est
-        // `crate::ensure_validated` (main.rs) qui l'ajoute.
-        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("RUN\"BARBA.I"));
+        // `crate::autotype::ensure_validated` qui l'ajoute.
+        let mut typer = crate::autotype::AutoTyper::new(&crate::autotype::ensure_validated("RUN\"BARBA.I"));
         let mut ticks = 0u64;
         while !typer.is_done() {
             let elapsed = machine.step();
@@ -1715,7 +1721,7 @@ mod tests {
             return;
         }
 
-        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("ùtape\nrun\""));
+        let mut typer = crate::autotype::AutoTyper::new(&crate::autotype::ensure_validated("ùtape\nrun\""));
         let mut ticks = 0u64;
         while !typer.is_done() {
             let elapsed = machine.step();
@@ -1816,7 +1822,7 @@ mod tests {
         const COPY: (usize, u8) = (1, 1);
         const ENTREE: (usize, u8) = (2, 2);
 
-        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("RUN\"DISCO"));
+        let mut typer = crate::autotype::AutoTyper::new(&crate::autotype::ensure_validated("RUN\"DISCO"));
         let mut ticks = 0u64;
         while !typer.is_done() {
             let elapsed = machine.step();
@@ -1946,7 +1952,7 @@ mod tests {
             return;
         }
 
-        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("RUN\"BMXSIM"));
+        let mut typer = crate::autotype::AutoTyper::new(&crate::autotype::ensure_validated("RUN\"BMXSIM"));
         let mut t = 0u64;
         while !typer.is_done() {
             let e = machine.step();

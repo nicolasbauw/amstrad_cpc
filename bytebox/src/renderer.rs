@@ -22,7 +22,7 @@
 use egui_sdl2_event::EguiSDL2State;
 use sdl2::video::Window;
 
-use crate::video;
+use bytebox_core::video;
 
 /// # Sécurité
 ///

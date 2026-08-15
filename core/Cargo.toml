@@ -1,0 +1,15 @@
+[package]
+name = "bytebox-core"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+zilog_z80 = "1.0.0"
+# Uniquement pour Keycode/Scancode (matrice clavier du PSG) : la coquille de
+# présentation (bytebox/) est seule à avoir besoin des features graphiques
+# de sdl2 (raw-window-handle...).
+sdl2 = "0.38.0"
+toml = "1.1.4"
+serde = { version = "1.0.229", features = ["derive"] }
+directories = "6.0.0"

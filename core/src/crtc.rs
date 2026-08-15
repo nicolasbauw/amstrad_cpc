@@ -36,6 +36,12 @@ const DEFAULT_REGISTERS: [u8; 18] = [
     0, 0, 0, 0, // R14-R17 : curseur / light pen
 ];
 
+impl Default for Crtc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Crtc {
     /// Crée un CRTC initialisé.
     pub fn new() -> Self {

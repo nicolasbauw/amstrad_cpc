@@ -109,17 +109,26 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 name = "bytebox"
 version = "1.0.0"
 dependencies = [
+ "bytebox-core",
  "bytemuck",
- "directories",
  "egui",
  "egui-sdl2-event",
  "egui-wgpu",
  "image",
  "pollster",
  "sdl2",
+ "wgpu",
+ "zilog_z80",
+]
+
+[[package]]
+name = "bytebox-core"
+version = "1.0.0"
+dependencies = [
+ "directories",
+ "sdl2",
  "serde",
  "toml",
- "wgpu",
  "zilog_z80",
 ]
 

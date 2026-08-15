@@ -1,32 +1,11 @@
-[package]
-name = "bytebox"
-version = "1.0.0"
-edition = "2024"
-license = "MIT"
+[workspace]
+resolver = "2"
+members = ["core", "bytebox"]
 
-[dependencies]
-zilog_z80 = "1.0.0"
-sdl2 = { version = "0.38.0", features = ["raw-window-handle"] }
-toml = "1.1.4"
-serde = { version = "1.0.229", features = ["derive"] }
-directories = "6.0.0"
-image = { version = "0.25", default-features = false, features = ["png"] }
-# M0 a demarre sur la version utilisee par l'exemple officiel
-# raw-window-handle-with-wgpu de la crate sdl2 (wgpu 0.20). M1 la fait
-# suivre celle qu'exige la chaine egui choisie ci-dessous (raw-window-handle
-# reste ^0.6 dans les deux cas, seul point de couplage avec sdl2 : la bascule
-# ne remet donc pas en cause le choix du jalon M0).
-wgpu = "27.0.1"
-pollster = "0.2"
-bytemuck = { version = "1.19", features = ["derive"] }
-# Chaine egui (Plan V2.md, jalon M1) : versions choisies pour que les trois
-# s'accordent exactement (memes egui ^0.33.3) tout en acceptant notre sdl2
-# 0.38.0 deja en place — egui_sdl2_platform, l'autre option citee par le
-# plan, est resté sur sdl2 ^0.38.0/egui ^0.32 mais n'a plus été mis à jour
-# depuis ; egui-sdl2-event suit les sorties d'egui de plus près.
-egui = "0.33.3"
-egui-wgpu = "0.33.3"
-egui-sdl2-event = "1.33.3"
+# `cargo build`/`cargo test`/`cargo run` sans `-p` agissent sur tous les
+# membres par défaut ; `bytebox` reste le binaire à lancer
+# (`cargo run -p bytebox`, ou simplement `cargo run` puisque c'est le seul
+# membre à définir un binaire).
 
 [profile.release]
 panic = "abort"

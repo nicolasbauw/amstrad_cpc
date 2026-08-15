@@ -68,6 +68,12 @@ struct DeferredBit {
 /// marge, tout en restant totalement imperceptible à la frappe humaine.
 const DEFER_TICKS: u32 = 40_000;
 
+impl Default for Psg {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Psg {
     pub fn new() -> Self {
         Self {

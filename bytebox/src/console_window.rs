@@ -11,7 +11,7 @@
 
 use crate::console_log::ConsoleLog;
 use crate::egui_gpu::EguiGpu;
-use crate::monitor::{MonitorMessage, parse_command};
+use bytebox_core::monitor::{MonitorMessage, parse_command};
 use sdl2::video::Window;
 use std::sync::mpsc::Sender;
 

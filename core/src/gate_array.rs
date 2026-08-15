@@ -113,6 +113,12 @@ pub struct GateArray {
     interrupt_cancel_pending: bool,
 }
 
+impl Default for GateArray {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GateArray {
     /// Crée un Gate Array initialisé aux valeurs par défaut.
     pub fn new() -> Self {

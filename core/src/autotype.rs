@@ -11,6 +11,19 @@ use crate::app_log;
 use crate::psg::Psg;
 use std::collections::VecDeque;
 
+/// Une commande `--autocmd`/`-a` sans retour à la ligne resterait tapée mais
+/// jamais validée : BASIC ne l'exécute qu'après ENTRÉE. Ajoute cette ENTRÉE
+/// systématiquement, sauf si l'appelant l'a déjà fournie — pour ne pas
+/// envoyer un second ENTRÉE parasite, qui pourrait interagir avec ce que le
+/// jeu affiche juste après (un menu, un choix de touche...).
+pub fn ensure_validated(command: &str) -> String {
+    if command.ends_with('\n') {
+        command.to_string()
+    } else {
+        format!("{command}\n")
+    }
+}
+
 /// Position d'une touche dans la matrice clavier du CPC (ligne, bit), et si
 /// SHIFT doit être maintenu pour produire ce caractère.
 ///
@@ -209,6 +222,24 @@ impl AutoTyper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cas qui a échappé aux tests précédents : une commande donnée sans
+    /// ENTRÉE final se tapait, mais ne validait jamais rien. Repéré à
+    /// l'usage, pas par un test — d'où celui-ci.
+    #[test]
+    fn a_command_without_a_trailing_newline_gets_one() {
+        assert_eq!(ensure_validated("RUN\"BARBA.I"), "RUN\"BARBA.I\n");
+    }
+
+    #[test]
+    fn a_command_that_already_ends_with_a_newline_is_left_alone() {
+        assert_eq!(ensure_validated("RUN\"BARBA.I\n"), "RUN\"BARBA.I\n");
+    }
+
+    #[test]
+    fn an_empty_command_still_gets_a_newline() {
+        assert_eq!(ensure_validated(""), "\n");
+    }
 
     fn pressed_keys(psg: &Psg) -> Vec<(usize, u8)> {
         let mut v = Vec::new();

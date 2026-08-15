@@ -1,31 +1,15 @@
-mod applog;
 mod audio;
-mod autotype;
-mod bus;
-mod config;
 mod console_log;
 mod console_panel;
 mod console_window;
-mod crtc;
 mod egui_gpu;
-mod fdc;
-mod gate_array;
-mod hexconversion;
-mod machine;
-mod memory;
-mod monitor;
-mod ppi;
-mod psg;
 mod renderer;
 mod sdl;
-mod snapshot;
 mod status_panel;
-mod sound;
-mod tape;
-mod trace;
-mod video;
 
-use machine::Machine;
+use bytebox_core::app_log;
+use bytebox_core::autotype;
+use bytebox_core::machine::Machine;
 use std::env;
 
 /// Cherche la valeur d'une option `--nom=valeur`, `--nom valeur`, `-nom=valeur`
@@ -44,19 +28,6 @@ fn cli_value(args: &[String], names: &[&str]) -> Option<String> {
         }
     }
     None
-}
-
-/// Une commande `--autocmd` sans retour à la ligne resterait tapée mais
-/// jamais validée : BASIC ne l'exécute qu'après ENTRÉE. On l'ajoute donc
-/// systématiquement, sauf si l'appelant l'a déjà fournie — pour ne pas
-/// envoyer un second ENTRÉE parasite, qui pourrait interagir avec ce que le
-/// jeu affiche juste après (un menu, un choix de touche...).
-fn ensure_validated(command: &str) -> String {
-    if command.ends_with('\n') {
-        command.to_string()
-    } else {
-        format!("{command}\n")
-    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -105,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let autotyper = autocmd
         .as_deref()
-        .map(|cmd| autotype::AutoTyper::new(&ensure_validated(cmd)));
+        .map(|cmd| autotype::AutoTyper::new(&autotype::ensure_validated(cmd)));
 
     // 3. Fenêtrage SDL2 et boucle principale, jusqu'à la fermeture.
     sdl::run(machine, autotyper)
@@ -114,24 +85,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Cas qui a échappé aux tests du module `autotype` : une commande
-    /// donnée sans ENTRÉE final se tapait, mais ne validait jamais rien.
-    /// Repéré à l'usage, pas par un test — d'où celui-ci.
-    #[test]
-    fn a_command_without_a_trailing_newline_gets_one() {
-        assert_eq!(ensure_validated("RUN\"BARBA.I"), "RUN\"BARBA.I\n");
-    }
-
-    #[test]
-    fn a_command_that_already_ends_with_a_newline_is_left_alone() {
-        assert_eq!(ensure_validated("RUN\"BARBA.I\n"), "RUN\"BARBA.I\n");
-    }
-
-    #[test]
-    fn an_empty_command_still_gets_a_newline() {
-        assert_eq!(ensure_validated(""), "\n");
-    }
 
     #[test]
     fn cli_value_accepts_the_equals_and_the_space_forms() {

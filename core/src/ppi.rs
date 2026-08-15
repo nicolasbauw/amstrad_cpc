@@ -10,6 +10,12 @@ pub struct Ppi {
     pub control_register: u8, // Configuration de la direction des ports
 }
 
+impl Default for Ppi {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Ppi {
     /// Crée un PPI initialisé.
     pub fn new() -> Self {

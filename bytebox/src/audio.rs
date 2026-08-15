@@ -5,8 +5,8 @@
 //! passage du flux émulé vers le matériel réel, avec ce que cela suppose de
 //! régulation de latence et de mise en forme du signal.
 
-use crate::app_log;
-use crate::sound::SAMPLE_RATE;
+use bytebox_core::app_log;
+use bytebox_core::sound::SAMPLE_RATE;
 use sdl2::audio::{AudioQueue, AudioSpecDesired};
 
 /// Taille du bloc demandé à SDL. 512 échantillons à 44,1 kHz font environ

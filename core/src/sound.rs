@@ -123,6 +123,12 @@ impl Params {
     }
 }
 
+impl Default for Sound {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sound {
     pub fn new() -> Self {
         Self {

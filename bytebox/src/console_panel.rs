@@ -10,7 +10,7 @@
 //! deux façades.
 
 use crate::console_log::ConsoleLog;
-use crate::monitor::{MonitorMessage, parse_command};
+use bytebox_core::monitor::{MonitorMessage, parse_command};
 use std::sync::mpsc::Sender;
 
 pub struct QuickCommandBar {

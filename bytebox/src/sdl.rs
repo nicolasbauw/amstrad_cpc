@@ -3,14 +3,14 @@
 //! rendu de la trame et régulation de la cadence. `main.rs` ne fait
 //! qu'assembler une `Machine` prête à tourner et l'y confier via `run`.
 
-use crate::app_log;
-use crate::autotype::AutoTyper;
+use bytebox_core::app_log;
+use bytebox_core::autotype::AutoTyper;
 use crate::console_log::ConsoleLog;
 use crate::console_panel::QuickCommandBar;
 use crate::console_window::ConsoleWindow;
-use crate::machine::{self, Machine};
+use bytebox_core::machine::{self, Machine};
 use crate::renderer::Renderer;
-use crate::video;
+use bytebox_core::video;
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::surface::Surface;
@@ -234,7 +234,7 @@ pub fn run(
     // de démarrage, config invalide, --disk/--tape en ligne de commande...)
     // attendait dans la file globale (voir applog.rs) : on le récupère ici,
     // rien n'est perdu.
-    for line in crate::applog::drain() {
+    for line in bytebox_core::applog::drain() {
         console_log.push_output(&line);
     }
 
@@ -624,7 +624,7 @@ pub fn run(
         // trame (voir applog.rs) : connexion de manette, disquette éjectée,
         // avertissement de régulation audio... Rien de tout cela ne doit
         // atteindre le terminal qui a lancé l'émulateur.
-        for line in crate::applog::drain() {
+        for line in bytebox_core::applog::drain() {
             console_log.push_output(&line);
         }
 
