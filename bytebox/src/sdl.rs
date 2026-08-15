@@ -263,16 +263,26 @@ pub fn run(
         for event in event_pump.poll_iter() {
             // Alimente egui même quand le panneau est caché : sinon la
             // première trame après un F12 le retrouverait avec un état
-            // d'entrée périmé (position de souris, modificateurs...).
-            // `EguiSDL2State::sdl2_input_to_egui` filtre lui-même sur
-            // l'identifiant de la fenêtre de statut, sans effet sur les
-            // événements de la fenêtre principale.
+            // d'entrée périmé (position de souris, modificateurs...). Sans
+            // risque de fuite vers le CPC : `status_panel` et
+            // `console_window` sont des fenêtres SDL2 séparées, et
+            // `EguiSDL2State::sdl2_input_to_egui` filtre les événements sur
+            // l'identifiant de fenêtre — une frappe faite dans la fenêtre
+            // principale (jouer, taper au BASIC...) ne les atteint jamais.
             status_panel.handle_event(&event);
             console_window.handle_event(&event);
-            // Même chose pour la barre rapide F10, superposée à la fenêtre
-            // principale : `Renderer::handle_event` filtre lui aussi sur
-            // l'identifiant de fenêtre.
-            renderer.handle_event(&event);
+            // La barre rapide F10, elle, est superposée à la fenêtre
+            // PRINCIPALE (même wgpu, voir renderer.rs) : ce filtre par
+            // fenêtre ne la protège donc de rien, toute frappe faite en
+            // jouant a le même identifiant de fenêtre qu'elle. Sans la
+            // condition ci-dessous, ces frappes s'accumulaient en silence
+            // dans la file d'entrée d'egui tant que F10 restait fermée (rien
+            // ne la vidait, `Renderer::present` ne traitant cette file que
+            // lorsque la barre est affichée) et se déversaient d'un coup, à
+            // l'ouverture, dans son champ de saisie.
+            if quick_bar_visible {
+                renderer.handle_event(&event);
+            }
             match event {
                 Event::Quit { .. } => {
                     running = false;
