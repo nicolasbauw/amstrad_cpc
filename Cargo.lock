@@ -28,7 +28,7 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
 name = "bytebox"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "directories",
  "image",
@@ -435,3 +435,5 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 [[package]]
 name = "zilog_z80"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4f71fdd71f03e0d7762ddb5cb0af3ccfba429ce2e20d41e8752d02bc04b1b3"
