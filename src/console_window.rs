@@ -57,13 +57,14 @@ impl ConsoleWindow {
         let input = &mut self.input;
         let request_focus = &mut self.request_focus;
 
+        let bg = egui::Color32::from_rgb(15, 15, 25);
         self.gpu.present(&self.window, self.start, |ctx| {
-            egui::CentralPanel::default()
-                .frame(
-                    egui::Frame::default()
-                        .fill(egui::Color32::from_rgb(15, 15, 25))
-                        .inner_margin(10.0),
-                )
+            // La ligne de saisie occupe le bas de la fenêtre en premier
+            // (l'ordre d'ajout compte pour les TopBottomPanel) : c'est ce
+            // qui reste ensuite qui devient la zone d'historique, plutôt
+            // que l'inverse.
+            egui::TopBottomPanel::bottom("console_input")
+                .frame(egui::Frame::default().fill(bg).inner_margin(10.0))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
@@ -92,8 +93,16 @@ impl ConsoleWindow {
                             *request_focus = true;
                         }
                     });
-                    ui.separator();
+                });
+            egui::CentralPanel::default()
+                .frame(egui::Frame::default().fill(bg).inner_margin(10.0))
+                .show(ctx, |ui| {
+                    // auto_shrink(false) : sans ça, la zone de défilement se
+                    // réduit à la largeur du texte le plus long, et
+                    // l'ascenseur se retrouve collé contre le texte plutôt
+                    // que contre le bord droit de la fenêtre.
                     egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
                         .stick_to_bottom(true)
                         .show(ui, |ui| {
                             for line in log.lines() {
