@@ -74,8 +74,8 @@ fréquemment — un formatage complet piste par piste, un jeu qui journalise
 sa progression sur disque en continu — réécrirait le fichier entier à
 chaque secteur, ce qui pourrait devenir sensible.
 
-Inscrit au chantier de finition V3 (voir TODO.txt, point 1), à traiter après
-la V2.
+Inscrit au chantier de finition V3 (voir `Plan V3.md`, point 1), à traiter
+après la V2.
 
 Piste si ça devient nécessaire un jour : écrire seulement l'octet modifié à
 son offset exact dans le fichier (`std::fs::File` ouvert en lecture-écriture,

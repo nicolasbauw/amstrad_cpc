@@ -216,8 +216,8 @@ Plusieurs approximations connues du cœur émulé (écriture disquette par image
 entière plutôt que par secteur, modèle de rotation du FDC, marques "Deleted
 Data", capture VRAM par ligne plutôt que par caractère, lecture vidéo à
 travers la commutation de banques) sont volontairement laissées en l'état :
-aucune ne nuit au fonctionnement, elles sont documentées et regroupées sous
-« V3 : finitions » dans `TODO.txt`. Elles ne font pas partie de ce plan, qui
+aucune ne nuit au fonctionnement, elles sont documentées et regroupées dans
+`Plan V3.md`. Elles ne font pas partie de ce plan, qui
 ne touche que la couche de présentation — à une exception près, signalée
 là-bas : l'amplitude du sifflement cassette a sa place dans la fenêtre de
 configuration du jalon M3.
