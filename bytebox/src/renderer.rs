@@ -65,17 +65,16 @@ pub struct CrtSettings {
 }
 
 impl Default for CrtSettings {
-    /// Valeurs choisies par itération visuelle (Plan V2.md, jalon M4) :
-    /// `mask_cell_px` et `scanline_beam` ont notamment été relevés pour
-    /// rester visibles sur un écran haute densité (4K), où l'unité "pixel de
-    /// sortie" est physiquement minuscule.
+    /// Valeurs choisies par itération visuelle (Plan V2.md, jalon M4),
+    /// réglées en plein écran sur un écran haute densité (4K), où l'unité
+    /// "pixel de sortie" est physiquement minuscule.
     fn default() -> Self {
         Self {
-            mask_cell_px: 1.3,
-            mask_min: 0.2,
-            mask_strength: 0.9,
-            scanline_beam: 5.0,
-            scanline_strength: 0.85,
+            mask_cell_px: 2.9,
+            mask_min: 0.5,
+            mask_strength: 0.6,
+            scanline_beam: 5.5,
+            scanline_strength: 1.0,
             bright_boost: 1.5,
         }
     }

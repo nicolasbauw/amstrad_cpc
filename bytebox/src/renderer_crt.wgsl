@@ -137,6 +137,25 @@ fn scan_weight(dist_lines: f32, beam: f32) -> f32 {
     return pow(max(c, 0.0), beam);
 }
 
+// Moyenne le profil de faisceau sur l'empreinte verticale d'un pixel de
+// SORTIE (`footprint`, en lignes source — voir son calcul dans fs_main via
+// `fwidth`). Un simple échantillon ponctuel se contenterait de lire
+// `scan_weight` pile à `dist_lines`, mais à x1 (une ligne source = un pixel
+// de sortie) ce point tombe systématiquement sur le centre de la ligne
+// (`dist_lines` ~ 0), là où `scan_weight` vaut son maximum : le creux entre
+// deux lignes n'est alors JAMAIS échantillonné, et l'effet disparaît
+// entièrement — pas un simple affaiblissement, une absence totale, d'où le
+// saut de luminosité observé en passant à x1. Moyenner sur trois points
+// répartis dans l'empreinte du pixel restitue une valeur représentative même
+// quand cette empreinte fait une ligne source entière.
+fn average_scan_weight(dist_lines: f32, beam: f32, footprint: f32) -> f32 {
+    let h = footprint * 0.5;
+    let a = scan_weight(dist_lines - h, beam);
+    let b = scan_weight(dist_lines, beam);
+    let c = scan_weight(dist_lines + h, beam);
+    return (a + b + c) / 3.0;
+}
+
 // Couleur d'une ligne source `row`, ré-échantillonnée horizontalement entre
 // ses deux colonnes voisines autour de `cont_x` (position continue, en
 // texels source).
@@ -157,10 +176,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // zoom de sortie : x1/x2/x3/plein écran doivent tous montrer le même
     // nombre de bandes, dans les mêmes proportions relatives à l'image).
     let texel = in.uv * params.source_size;
+    // `fwidth` donne, en pixels source, la taille de l'empreinte verticale
+    // d'un pixel de sortie (1.0 à x1, 1/3 à x3...) — voir `average_scan_weight`.
+    let footprint = fwidth(texel.y);
     let row0 = floor(texel.y - 0.5);
     let dist0 = (texel.y - 0.5) - row0;
-    let w0 = scan_weight(dist0, params.scanline_beam);
-    let w1 = scan_weight(dist0 - 1.0, params.scanline_beam);
+    let w0 = average_scan_weight(dist0, params.scanline_beam, footprint);
+    let w1 = average_scan_weight(dist0 - 1.0, params.scanline_beam, footprint);
 
     let color_scanned = sample_row(texel.x, row0) * w0 + sample_row(texel.x, row0 + 1.0) * w1;
     // Un mélange linéaire non pondéré (sans creux de balayage) sert de plancher
@@ -186,6 +208,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     let mask = mix(vec3<f32>(1.0), mask_color, params.mask_strength);
 
-    let final_color = to_display(color * mask) * params.bright_boost;
+    // bright_boost multiplie en espace LINÉAIRE, avant le ré-encodage gamma
+    // — pas après. Appliqué après (comme dans un essai précédent), un simple
+    // facteur constant sur des valeurs déjà ré-encodées éclaircit les creux
+    // de balayage bien plus que les crêtes (la courbe gamma remonte déjà les
+    // tons sombres davantage que les tons clairs), ce qui masquait une
+    // bonne partie du contraste que scanline_beam/scanline_strength étaient
+    // censés produire — augmenter ces deux réglages n'avait alors presque
+    // plus d'effet visible une fois `to_display` et le boost appliqués.
+    let final_color = to_display(color * mask * params.bright_boost);
     return vec4<f32>(final_color, 1.0);
 }
