@@ -181,6 +181,15 @@ impl ConfigPanel {
             let _ = cmd_sender.send((MonitorCmd::DriveB, arg.to_string(), String::new()));
         }
 
+        let mut diagnostic_mode = machine.diagnostic_mode;
+        if ui
+            .checkbox(&mut diagnostic_mode, "Diagnostic ROM at slot 0F")
+            .changed()
+        {
+            let arg = if diagnostic_mode { "on" } else { "off" };
+            let _ = cmd_sender.send((MonitorCmd::DiagnosticMode, arg.to_string(), String::new()));
+        }
+
         ui.horizontal(|ui| {
             ui.label("Extra RAM banks:");
             let mut banks = machine.extra_ram_banks();
@@ -193,15 +202,6 @@ impl ConfigPanel {
                 ));
             }
         });
-
-        let mut diagnostic_mode = machine.diagnostic_mode;
-        if ui
-            .checkbox(&mut diagnostic_mode, "Diagnostic ROM at slot 0F")
-            .changed()
-        {
-            let arg = if diagnostic_mode { "on" } else { "off" };
-            let _ = cmd_sender.send((MonitorCmd::DiagnosticMode, arg.to_string(), String::new()));
-        }
 
         ui.horizontal(|ui| {
             ui.label("Extra RAM banks and the Diagnostic ROM only apply at the next power cycle:");
