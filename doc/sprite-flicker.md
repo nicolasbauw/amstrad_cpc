@@ -1,7 +1,10 @@
 # Les "sprites" qui clignotaient (Cauldron, BMX Simulator)
 
-Note d'enquête. **Une cause corrigée** (le rendu en instantané unique, voir
-plus bas) et **un chantier ouvert** sous BMX Simulator.
+Note d'enquête. **RÉSOLU.** Deux causes, toutes deux corrigées : le rendu en
+instantané unique (voir plus bas), puis un CPU émulé environ 5 % trop rapide,
+qui décalait la routine de tracé du jeu par rapport au faisceau. Le
+clignotement de fin de course est passé de 6840 pixels oscillants à **zéro**,
+verrouillé par le test `bmx_simulator_finish_line_sprite_does_not_flicker`.
 
 Une fausse piste a été suivie puis **annulée** en cours de route : aligner
 le recalage VSYNC du Gate Array sur la lecture littérale de la
@@ -270,37 +273,67 @@ Pistes concrètes pour la suite, dans l'ordre :
   VSYNC : la grille de Caprice32 démarre à 1.9 ligne après le début du
   VSYNC, valeur à confronter à la nôtre.
 
-### Plan de reprise (instrumentation à faire des deux côtés)
+### La cause : le Gate Array étire chaque cycle machine, pas l'instruction
 
-Comparaison de l'ordre des opérations, faite en lecture seule :
+La comparaison instrumentée ci-dessus disait que nos sections DI duraient
+~145 lignes contre 138-151 chez Caprice32 : même fourchette, donc CPU hors
+de cause. C'était une lecture trop rapide. En relevant la durée **par
+trame** plutôt que le maximum par seconde, le motif à trois valeurs apparaît
+des deux côtés, et l'écart devient systématique :
 
-| | Caprice32 (`z80_execute`) | ByteBox (`Machine::step`) |
-|---|---|---|
-| Avance du Gate Array | après l'instruction (`z80_wait_states` → `crtc_cycle`) | après l'instruction (boucle `hsync_accumulator`) |
-| Acceptation de l'interruption | **même itération**, juste après l'avance | itération suivante, dans `cpu.execute()` |
-| Acquittement (lecture du compteur) | après l'avance du GA | **avant** l'avance du GA pour l'instruction courante |
+| | valeur 1 | valeur 2 | valeur 3 |
+|---|---|---|---|
+| Nous (avant) | 131,4 | 135,7 | 143,8 |
+| Caprice32 | 138,1 | 142,7 | 150,5 |
 
-Les écarts sont d'ordre « une instruction » (quelques microsecondes), pas 32
-lignes : l'explication est donc probablement ailleurs, et il ne sert à rien
-d'y passer du temps sans mesure. À noter tout de même que notre acquittement
-lit le compteur *avant* de l'avancer pour l'instruction en cours, ce qui le
-rend au plus une ligne trop petit — donc dans le sens opposé au symptôme.
+Environ 7 lignes de moins à chaque fois, soit ~5 % trop rapide. Assez pour
+que le tracé démarre à la scanline 175 au lieu de 209 et rattrape le
+faisceau au niveau du sprite.
 
-Ce qu'il faut mesurer côté ByteBox, à l'identique de ce qui a été fait côté
-Caprice32 (voir « Comparaison instrumentée » plus haut pour le code exact des
-sondes) :
+**Pourquoi.** Le Gate Array n'ouvre au Z80 qu'une fenêtre d'accès mémoire par
+microseconde : chaque **cycle machine** est étiré à 4 cycles d'horloge. Nous
+arrondissions la durée **totale** de l'instruction, ce qui n'est équivalent
+que si le découpage tombe juste. `PUSH BC` en est l'exemple type : 11 cycles
+nominaux, dont un M1 de 5, soit 8 + 4 + 4 = **16** sur CPC — alors
+qu'arrondir 11 donne 12. Un cycle machine entier de retard, sur une
+instruction omniprésente dans une routine de tracé.
 
-1. la position de chaque interruption dans la trame, en lignes après le début
-   du VSYNC — la référence à retrouver est `1.9, 53.9, 105.7, 156.1, 208.0,
-   261.2` ;
-2. la valeur du compteur du Gate Array à chaque acquittement, et le nombre de
-   fois où elle atteint 32 (Caprice32 : jamais, de toute la course) ;
-3. le nombre d'interruptions par trame (Caprice32 : 6, toujours).
+La comparaison opcode par opcode avec les tables de temps CPC de Caprice32
+(`src/z80.cpp` : `cc_op`, `cc_ed`, `cc_xy`) donne exactement **51 opcodes**
+sous-estimés, tous de 4 cycles :
 
-Comparer les trois relevés ligne à ligne sur la même scène (`--autocmd`,
-course démo, t ≈ 100-110 s) doit montrer où notre grille se décale. Prévoir
-de la marge : instrumenter, mesurer, analyser, corriger, nettoyer et
-commiter ne tient pas dans une fin de session.
+- `PUSH rr` et `RST n` (M1 allongé) ;
+- `LD (nn),HL`, `LD HL,(nn)`, `EX (SP),HL` et leurs formes indexées ;
+- côté ED : `IN r,(C)`, `OUT (C),r`, `LD (nn),dd`, `LD dd,(nn)`, ainsi que
+  `LDI`/`LDD`/`CPI`/`CPD` (donc chaque itération des formes répétitives) ;
+- rien sur les familles CB et DDCB/FDCB.
+
+C'est `Machine::cpc_mcycle_extra` qui rétablit ce complément, opcode par
+opcode. Confirmation par la mesure : nos sections DI passent à 136 / 140 /
+148 lignes démarrant aux scanlines 209 et 229, soit la fourchette de
+Caprice32 (138-151, départs 207-229), et le clignotement tombe à zéro.
+
+Au passage, la même comparaison a révélé un vrai bug dans la table de la
+crate `zilog_z80` : `SET 1,(HL)`, `SET 3,(HL)`, `SET 5,(HL)` et `SET 7,(HL)`
+étaient à 8 cycles au lieu de 15 (les quatre autres `SET b,(HL)` et tous les
+`RES b,(HL)` étaient corrects). Corrigé côté crate.
+
+### Effet de bord : le copieur de Discology a dû être recalé
+
+Discology chronomètre le contrôleur de disquette en comptant ses
+interrogations du registre d'état, dans une boucle qui contient un
+`IN A,(C)` — précisément l'un des opcodes corrigés (12 → 16 cycles). Son
+budget de relevé a donc changé, et la constante empirique
+`SECTOR_OVERHEAD_BYTES` (`fdc.rs`) a dû être réajustée de 62 à 100 pour que
+la copie reste fidèle.
+
+Cette constante reste fragile, et le commentaire qui l'accompagne le dit
+franchement : le comportement n'est pas monotone (96 et 100 conviennent,
+92, 98, 104 et 144 non, 108 et 130 si), et la valeur physiquement exacte du
+format AMSDOS (144) ne convient pas, parce que le relevé de Discology ne
+dispose que d'environ 0,92 tour de disquette. Un modèle de rotation plus
+fidèle — position angulaire réelle de chaque secteur — rendrait ce réglage
+inutile.
 
 ### Audit des tables de cycles Z80 (`zilog_z80`)
 
@@ -330,11 +363,10 @@ assertions portant sur des durées de cycles, dont une table de référence
 dédiée (`REFERENCE_TIMINGS`, 33 entrées) qui couvre précisément ces
 catégories à risque.
 
-**Aucune anomalie trouvée** — et la comparaison instrumentée avec Caprice32
-(plus haut) a depuis confirmé que cet audit regardait au mauvais endroit :
-la durée de la section DI du jeu est la même des deux côtés (~145 lignes
-chez nous, 138-151 chez Caprice32). Notre précision cycle-à-cycle n'est
-donc pas en cause dans ce symptôme. Cela ne prouve pas l'absence totale d'imprécision
+**Aucune anomalie trouvée** — et pour cause : cet audit vérifiait les durées
+**nominales Zilog**, qui étaient justes. L'erreur était dans la conversion
+vers le temps CPC (arrondi du total au lieu de chaque cycle machine), une
+étape que l'audit ne couvrait pas. Voir « La cause » plus haut. Cela ne prouve pas l'absence totale d'imprécision
 (seules les catégories les plus suspectes ont été vérifiées, pas les 1024
 entrées une par une, et le CRTC n'a pas été réaudité), mais faute d'indice
 concret pointant vers une instruction particulière, creuser plus loin

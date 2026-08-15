@@ -106,7 +106,11 @@ pub struct GateArray {
     pub video_mode: u8,            // Mode vidéo actuel (0, 1, 2)
     pub hsync_counter: u32,        // Compteur 6 bits de lignes HSYNC générant les interruptions
     pub vsync_delay: u8,           // HSYNC restants avant le contrôle post-VSYNC (0 = inactif)
-    pub interrupt_requested: bool, // Indique si une interruption est en attente
+    pub interrupt_requested: bool, // Indicateur d'affichage seulement (voir write_register)
+    /// Le bit 4 du registre mode/ROM vient d'être écrit : la requête
+    /// d'interruption portée par le CPU doit être annulée. Relevé et remis à
+    /// zéro par `Machine::step` via `take_interrupt_cancel`.
+    interrupt_cancel_pending: bool,
 }
 
 impl GateArray {
@@ -119,6 +123,7 @@ impl GateArray {
             hsync_counter: 0,
             vsync_delay: 0,
             interrupt_requested: false,
+            interrupt_cancel_pending: false,
         };
         for i in 0..17 {
             ga.palette[i] = 13; // Blanc cassé / Gris
@@ -164,15 +169,33 @@ impl GateArray {
                 // - Bits 1-0 : Mode vidéo (0, 1, 2)
                 // - Bit 2     : ROM basse (0 = activée, 1 = désactivée)
                 // - Bit 3     : ROM haute (0 = activée, 1 = désactivée)
-                // - Bit 4     : Délai d'interruption (1 = reset du compteur HSYNC)
+                // - Bit 4     : "Retard d'interruption" — remet à zéro le
+                //   diviseur d'interruption ET annule la requête en attente.
                 self.video_mode = val & 0x03;
                 *rom_low_enabled = (val & 0x04) == 0;
                 *rom_high_enabled = (val & 0x08) == 0;
 
                 if (val & 0x10) != 0 {
+                    // Deux effets, et pas trois. Documenté par cpctech
+                    // ("the interrupt request is cleared and the 6-bit
+                    // counter is reset to 0") et par Quasar CPC n°18 ("vous
+                    // faites une remise à zéro du diviseur d'interruption
+                    // [...] la prochaine interruption aura lieu 52 lignes
+                    // plus bas"), et implémenté ainsi par Caprice32
+                    // (cap32.cpp : `z80.int_pending = 0; GateArray.sl_count = 0;`).
+                    //
+                    // Le compteur de retard du recalage VSYNC, lui, n'est PAS
+                    // touché : c'est une logique distincte du diviseur, et
+                    // Caprice32 ne la remet pas à zéro non plus. La remettre à
+                    // zéro ici annulait un recalage VSYNC en cours.
                     self.hsync_counter = 0;
-                    self.vsync_delay = 0;
                     self.interrupt_requested = false;
+                    // `interrupt_requested` n'est qu'un indicateur d'affichage
+                    // (fenêtre "machine status") : il ne coupe rien. C'est la
+                    // requête portée par le CPU qu'il faut réellement annuler,
+                    // et le Gate Array n'y a pas accès d'ici — on le signale à
+                    // `Machine::step`, qui le fera (voir `take_interrupt_cancel`).
+                    self.interrupt_cancel_pending = true;
                 }
             }
             // Bit 7=1, Bit 6=1 (valeur 3, seul cas restant puisque `val >> 6`
@@ -225,6 +248,12 @@ impl GateArray {
             self.interrupt_requested = true;
         }
         interrupt
+    }
+
+    /// Relève (et remet à zéro) la demande d'annulation posée par une
+    /// écriture du bit 4 du registre mode/ROM.
+    pub fn take_interrupt_cancel(&mut self) -> bool {
+        std::mem::take(&mut self.interrupt_cancel_pending)
     }
 
     /// Acquittement de l'interruption par le Z80.
@@ -379,6 +408,49 @@ mod tests {
             lines.contains(&(vsync_line + 2)),
             "aucune interruption 2 lignes après le VSYNC : {lines:?}"
         );
+    }
+
+    /// Bit 4 du registre mode/ROM : remet à zéro le diviseur d'interruption
+    /// ET demande l'annulation de la requête en attente — mais ne touche pas
+    /// au compteur de retard du recalage VSYNC, qui est une logique
+    /// distincte (le remettre à zéro ici annulait un recalage en cours).
+    #[test]
+    fn mode_rom_register_bit4_resets_the_divider_and_cancels_the_request() {
+        let mut ga = GateArray::new();
+        let (mut low, mut high) = (true, true);
+
+        ga.hsync_counter = 40;
+        ga.vsync_delay = 2; // recalage VSYNC en cours
+        ga.write_register(0x80 | 0x10, &mut low, &mut high);
+
+        assert_eq!(ga.hsync_counter, 0, "le diviseur doit etre remis a zero");
+        assert_eq!(
+            ga.vsync_delay, 2,
+            "le retard du recalage VSYNC ne doit pas etre touche"
+        );
+        assert!(
+            ga.take_interrupt_cancel(),
+            "l'annulation de la requete doit etre demandee"
+        );
+        assert!(
+            !ga.take_interrupt_cancel(),
+            "la demande ne doit etre relevee qu'une fois"
+        );
+    }
+
+    /// Sans le bit 4, une écriture du même registre ne touche ni au diviseur
+    /// ni à la requête en attente : seuls le mode vidéo et les ROMs changent.
+    #[test]
+    fn mode_rom_register_without_bit4_leaves_the_interrupts_alone() {
+        let mut ga = GateArray::new();
+        let (mut low, mut high) = (true, true);
+
+        ga.hsync_counter = 40;
+        ga.write_register(0x80 | 0x01, &mut low, &mut high); // mode 1, bit 4 a zero
+
+        assert_eq!(ga.video_mode, 1);
+        assert_eq!(ga.hsync_counter, 40, "le diviseur ne doit pas bouger");
+        assert!(!ga.take_interrupt_cancel());
     }
 
     /// Compteur < 32 au moment du contrôle : le VSYNC le remet à zéro sans

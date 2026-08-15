@@ -47,12 +47,68 @@ pub fn emulated_duration(ticks: u32) -> std::time::Duration {
 /// rapport au balayage vidéo et aux interruptions, ce qui déplace tout ce qui
 /// se joue à la scanline près.
 ///
-/// Nous arrondissons la durée totale de l'instruction, faute de connaître le
-/// découpage en cycles machine que la crate ne fournit pas. Les deux méthodes
-/// coïncident pour la grande majorité des instructions ; là où elles diffèrent,
-/// l'écart vaut un seul cycle machine, soit un quart de microseconde.
+/// Attention : arrondir la durée TOTALE ne suffit pas. Le Gate Array étire
+/// chaque cycle machine, pas l'instruction entière, et les deux méthodes ne
+/// coïncident que lorsque le découpage tombe juste. `PUSH BC` en est
+/// l'exemple type : 11 cycles nominaux, dont un M1 de 5 cycles, soit
+/// 8 + 4 + 4 = 16 sur un CPC — alors qu'arrondir 11 ne donne que 12. Un
+/// cycle machine entier de retard, soit une microseconde, sur une
+/// instruction omniprésente.
+///
+/// La crate ne fournissant pas le découpage, le complément est rétabli
+/// opcode par opcode par [`cpc_mcycle_extra`].
 pub fn cpc_instruction_time(nominal_ticks: u32) -> u32 {
     nominal_ticks.div_ceil(4) * 4
+}
+
+/// Complément de temps, en cycles d'horloge, pour les instructions dont
+/// l'arrondi du total (voir [`cpc_instruction_time`]) sous-estime la durée
+/// réelle sur CPC.
+///
+/// Le Gate Array étire chaque cycle machine à 4 cycles d'horloge. Pour la
+/// grande majorité des instructions, arrondir le total revient au même ;
+/// pour 51 opcodes il manque exactement un cycle machine, soit 4 cycles
+/// d'horloge. La liste a été établie en comparant, opcode par opcode, ce que
+/// produit notre arrondi avec les tables de temps CPC de Caprice32
+/// (`src/z80.cpp`, `cc_op` / `cc_ed` / `cc_xy`), et vérifiée par la mesure :
+/// sans ce complément, la routine de tracé de BMX Simulator s'exécutait
+/// environ 5 % trop vite, ce qui décalait ses interruptions et faisait
+/// clignoter un sprite (voir doc/sprite-flicker.md).
+///
+/// Les familles préfixées CB et DDCB/FDCB n'ont besoin d'aucune correction.
+fn cpc_mcycle_extra(first: u8, second: u8) -> u32 {
+    // Familles concernées : instructions dont un cycle machine dépasse
+    // 4 cycles d'horloge sans que le total ne le rattrape — essentiellement
+    // celles qui empilent (M1 allongé de PUSH et RST), celles qui lisent ou
+    // écrivent un mot en mémoire absolue, et les E/S préfixées ED.
+    const EXTRA: u32 = 4;
+    match first {
+        // CB et DDCB/FDCB : aucun écart.
+        0xCB => 0,
+        0xED => match second {
+            // IN r,(C) et OUT (C),r
+            0x40 | 0x48 | 0x50 | 0x58 | 0x60 | 0x68 | 0x78 => EXTRA,
+            // LD (nn),dd et LD dd,(nn)
+            0x43 | 0x4B | 0x53 | 0x5B | 0x63 | 0x6B | 0x73 | 0x7B => EXTRA,
+            // LDI / LDD / CPI / CPD (les formes à répétition passent par ici
+            // à chaque itération)
+            0xA0 | 0xA2 | 0xA8 | 0xAA => EXTRA,
+            _ => 0,
+        },
+        0xDD | 0xFD => match second {
+            0xCB => 0,
+            // Mêmes familles que sans préfixe, plus LD (IX+d),n
+            0x22 | 0x2A | 0x36 | 0xE3 => EXTRA,
+            0xC5 | 0xD5 | 0xE5 | 0xF5 => EXTRA, // PUSH
+            0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => EXTRA, // RST
+            _ => 0,
+        },
+        // LD (nn),HL / LD HL,(nn) / EX (SP),HL
+        0x22 | 0x2A | 0xE3 => EXTRA,
+        0xC5 | 0xD5 | 0xE5 | 0xF5 => EXTRA, // PUSH
+        0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => EXTRA, // RST
+        _ => 0,
+    }
 }
 const HELP: &str = "
 Emulator commands:
@@ -566,6 +622,15 @@ impl Machine {
             self.bus.gate_array.acknowledge_interrupt();
         }
 
+        // Une écriture du bit 4 du registre mode/ROM du Gate Array annule la
+        // requête d'interruption en attente (voir `GateArray::write_register`).
+        // Traité APRÈS la détection d'acquittement ci-dessus : l'annulation
+        // fait elle aussi disparaître la requête du CPU, et serait sinon prise
+        // à tort pour un acquittement — ce qui rognerait le compteur.
+        if self.bus.gate_array.take_interrupt_cancel() {
+            self.cpu.int_cancel();
+        }
+
         if let Some(addr) = self.bus.watchpoint_hit {
             self.bus.watchpoint_hit = None;
             self.stop();
@@ -578,7 +643,17 @@ impl Machine {
             return 0;
         }
 
-        let elapsed_ticks = cpc_instruction_time(if ticks == 0 { 4 } else { ticks });
+        // Durée réelle sur CPC : le total arrondi, plus le cycle machine que
+        // cet arrondi laisse parfois échapper (voir `cpc_mcycle_extra`). Les
+        // octets sont relus ici plutôt que mémorisés avant l'exécution :
+        // `current_pc` pointe toujours sur l'instruction qui vient de
+        // s'exécuter, et aucune d'elles ne se réécrit elle-même en cours de
+        // route.
+        let elapsed_ticks = cpc_instruction_time(if ticks == 0 { 4 } else { ticks })
+            + cpc_mcycle_extra(
+                self.bus.read_byte(current_pc),
+                self.bus.read_byte(current_pc.wrapping_add(1)),
+            );
         self.total_ticks += elapsed_ticks as u64;
 
         // La cassette avance en premier : un pulse dure souvent moins d'une
@@ -1799,6 +1874,111 @@ mod tests {
         }
 
         std::fs::remove_file(destination).ok();
+    }
+
+    /// Le Gate Array étire chaque cycle machine, pas l'instruction entière :
+    /// arrondir le total sous-estime 51 opcodes d'exactement un cycle
+    /// machine. Liste établie contre les tables de temps CPC de Caprice32,
+    /// et vérifiée par la mesure (voir `cpc_mcycle_extra`).
+    #[test]
+    fn the_cpc_stretches_each_machine_cycle_not_the_whole_instruction() {
+        // PUSH BC : 11 cycles nominaux dont un M1 de 5 -> 8 + 4 + 4 = 16 sur
+        // CPC, alors qu'arrondir 11 ne donne que 12.
+        assert_eq!(cpc_instruction_time(11), 12);
+        assert_eq!(cpc_mcycle_extra(0xC5, 0x00), 4, "PUSH BC");
+        assert_eq!(cpc_instruction_time(11) + cpc_mcycle_extra(0xC5, 0x00), 16);
+
+        assert_eq!(cpc_mcycle_extra(0xFF, 0x00), 4, "RST 38h");
+        assert_eq!(cpc_mcycle_extra(0x22, 0x00), 4, "LD (nn),HL");
+        assert_eq!(cpc_mcycle_extra(0xE3, 0x00), 4, "EX (SP),HL");
+        assert_eq!(cpc_mcycle_extra(0xED, 0x78), 4, "IN A,(C)");
+        assert_eq!(cpc_mcycle_extra(0xED, 0xB0), 0, "LDIR passe par LDI");
+        assert_eq!(cpc_mcycle_extra(0xED, 0xA0), 4, "LDI");
+        assert_eq!(cpc_mcycle_extra(0xDD, 0xE5), 4, "PUSH IX");
+        assert_eq!(cpc_mcycle_extra(0xDD, 0x36), 4, "LD (IX+d),n");
+
+        // Aucun ecart sur les familles CB et DDCB/FDCB, ni sur les
+        // instructions dont l'arrondi du total tombe deja juste.
+        assert_eq!(cpc_mcycle_extra(0xCB, 0xCE), 0, "SET 1,(HL)");
+        assert_eq!(cpc_mcycle_extra(0xDD, 0xCB), 0, "prefixe DDCB");
+        assert_eq!(cpc_mcycle_extra(0x00, 0x00), 0, "NOP");
+        assert_eq!(cpc_mcycle_extra(0xC1, 0x00), 0, "POP BC");
+    }
+
+    /// Non-régression du clignotement de sprite de BMX Simulator.
+    ///
+    /// 1 min 52 s après le lancement, le premier coureur franchit la ligne
+    /// d'arrivée et s'arrête. Il clignotait alors en permanence : la routine
+    /// de tracé du jeu démarrait trop tôt dans la trame, si bien que le
+    /// faisceau balayait le sprite pendant qu'il était effacé. La cause était
+    /// un CPU émulé environ 5 % trop rapide sur ce code (voir
+    /// `cpc_mcycle_extra` et doc/sprite-flicker.md).
+    ///
+    /// Le test compte les pixels qui oscillent A→B→A d'une trame à l'autre,
+    /// hors bandeau de score (le chronomètre y change normalement).
+    ///
+    /// Ignoré par défaut : il émule deux minutes de CPC.
+    /// Le lancer avec `cargo test --release bmx -- --ignored`.
+    #[test]
+    #[ignore]
+    fn bmx_simulator_finish_line_sprite_does_not_flicker() {
+        let mut machine = Machine::new();
+        if machine.load_roms().is_err() {
+            println!("ROMs absentes : test ignore");
+            return;
+        }
+        if machine.load_disk("bin/BMX_Simulator.dsk").is_err() {
+            println!("Disquette absente : test ignore");
+            return;
+        }
+
+        let mut typer = crate::autotype::AutoTyper::new(&crate::ensure_validated("RUN\"BMXSIM"));
+        let mut t = 0u64;
+        while !typer.is_done() {
+            let e = machine.step();
+            typer.advance(&mut machine.bus.psg, e);
+            t += e as u64;
+            assert!(t < 15 * 4_000_000, "la frappe automatique ne finit pas");
+        }
+        let mut tt = 0u64;
+        while tt < 112 * 4_000_000 {
+            tt += machine.step() as u64;
+        }
+
+        let px = crate::video::SCREEN_WIDTH * crate::video::SCREEN_HEIGHT * 3;
+        let mut frames: Vec<Vec<u8>> = Vec::new();
+        for _ in 0..60 {
+            machine.frame_ready = false;
+            let mut guard = 0u32;
+            while !machine.frame_ready && guard < 200_000 {
+                machine.step();
+                guard += 1;
+            }
+            let mut fb = vec![0u8; px];
+            crate::video::render(&machine, &mut fb);
+            frames.push(fb);
+        }
+
+        let mut total = 0u64;
+        for i in 2..frames.len() {
+            for p in (0..px).step_by(3) {
+                let y = (p / 3) / crate::video::SCREEN_WIDTH;
+                if y >= 460 {
+                    continue; // bandeau de score : le chronometre change a chaque trame
+                }
+                if frames[i - 2][p..p + 3] == frames[i][p..p + 3]
+                    && frames[i - 1][p..p + 3] != frames[i][p..p + 3]
+                {
+                    total += 1;
+                }
+            }
+        }
+
+        assert_eq!(
+            total, 0,
+            "{total} pixels clignotent sur 58 trames : le sprite disparait \
+             une trame sur deux (avant correctif : 6840)"
+        );
     }
 
     /// La commande `blank` doit écrire un .dsk formaté à l'emplacement

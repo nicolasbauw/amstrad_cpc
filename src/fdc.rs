@@ -199,9 +199,26 @@ const BYTE_TICKS: u64 = 128;
 
 /// Octets "de service" écrits autour des données de chaque secteur :
 /// synchronisation, en-tête d'identification et son CRC, marque de données,
-/// CRC des données et intervalle jusqu'au secteur suivant. Une soixantaine
-/// d'octets avec les valeurs d'intervalle habituelles du CPC.
-const SECTOR_OVERHEAD_BYTES: u64 = 62;
+/// CRC des données, et intervalle jusqu'au secteur suivant.
+///
+/// ATTENTION, constante empirique et fragile. La valeur que donne le format
+/// AMSDOS standard (22 pour l'en-tête d'identification, 22 d'intervalle
+/// GAP2, 18 autour du champ de données, 82 de GAP3, soit 144) ne convient
+/// pas : le relevé de piste de Discology ne dispose que d'environ 0,92 tour
+/// de disquette pour cartographier une piste (16 640 interrogations de son
+/// registre d'état, à 44 cycles chacune), et ne parviendrait donc jamais à
+/// voir les neuf secteurs d'une piste qui en occuperait 0,94. Les disquettes
+/// réelles s'en tirent parce que leur GAP3 est ajusté au nombre de secteurs
+/// — celle de Discology en loge dix sur sa piste 0.
+///
+/// Le comportement observé n'est de surcroît pas monotone en fonction de
+/// cette constante : 96 et 100 conviennent, mais 92, 98, 104, 115 et 144
+/// non, tandis que 108 et 130 si. Le nombre d'identifiants relevés bascule
+/// piste par piste, sans seuil net. 100 est une valeur vérifiée, pas un
+/// optimum — il n'existe pas de plage stable. Un modèle de rotation plus fidèle (position
+/// angulaire réelle de chaque secteur, lue dans l'image .dsk) rendrait ce
+/// réglage inutile — voir doc/discology-copie.md.
+const SECTOR_OVERHEAD_BYTES: u64 = 100;
 
 /// État propre à un lecteur de disquette physique : position de la tête,
 /// disque chargé, image `.dsk` en mémoire. Le CPC 6128 peut piloter jusqu'à
