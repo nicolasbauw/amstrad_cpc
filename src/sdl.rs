@@ -147,7 +147,7 @@ pub fn run(
     // police à charger depuis le disque, egui embarque la sienne.
     let mut debug_visible = false;
     let mut debug_window = video_subsystem
-        .window("Amstrad CPC 6128 - Machine Status", 800, 1000)
+        .window("Amstrad CPC 6128 - Machine Status", 900, 1250)
         .position_centered()
         .hidden()
         .resizable()
@@ -262,6 +262,27 @@ pub fn run(
                     ..
                 } if window_id == debug_window_id => {
                     status_panel.resize();
+                }
+                // Le pointeur système n'a aucun rôle dans l'émulation (le
+                // clavier et la manette suffisent) : il ne fait que masquer
+                // l'image quand il traîne dessus. `show_cursor` est global à
+                // SDL2 (pas par fenêtre), d'où la bascule sur Enter/Leave de
+                // la fenêtre principale plutôt qu'un simple réglage figé au
+                // démarrage — pour qu'il redevienne visible sur la fenêtre de
+                // statut (F12) ou en dehors de l'émulateur.
+                Event::Window {
+                    win_event: sdl2::event::WindowEvent::Enter,
+                    window_id,
+                    ..
+                } if window_id == main_window_id => {
+                    sdl_context.mouse().show_cursor(false);
+                }
+                Event::Window {
+                    win_event: sdl2::event::WindowEvent::Leave,
+                    window_id,
+                    ..
+                } if window_id == main_window_id => {
+                    sdl_context.mouse().show_cursor(true);
                 }
                 // Taille d'affichage : F1 normale, F2 x2, F3 x3, F4 plein
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,

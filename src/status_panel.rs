@@ -152,30 +152,36 @@ impl StatusPanel {
                         .inner_margin(10.0),
                 )
                 .show(ctx, |ui| {
-                    for line in text.lines() {
-                        let line = line.replace('\t', "    ");
-                        let (text_part, dot) = match line.strip_suffix('\u{25CF}') {
-                            Some(prefix) => (prefix, true),
-                            None => (line.as_str(), false),
-                        };
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.0;
-                            if !text_part.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(text_part)
-                                        .monospace()
-                                        .color(egui::Color32::from_rgb(220, 220, 225)),
-                                );
-                            }
-                            if dot {
-                                ui.label(
-                                    egui::RichText::new("\u{25CF}")
-                                        .monospace()
-                                        .color(egui::Color32::from_rgb(220, 40, 40)),
-                                );
-                            }
-                        });
-                    }
+                    // Le contenu (surtout la matrice clavier, activable en
+                    // config) peut dépasser la hauteur de la fenêtre : plutôt
+                    // que de rogner silencieusement les dernières lignes,
+                    // elles restent accessibles par défilement.
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for line in text.lines() {
+                            let line = line.replace('\t', "    ");
+                            let (text_part, dot) = match line.strip_suffix('\u{25CF}') {
+                                Some(prefix) => (prefix, true),
+                                None => (line.as_str(), false),
+                            };
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                if !text_part.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(text_part)
+                                            .monospace()
+                                            .color(egui::Color32::from_rgb(220, 220, 225)),
+                                    );
+                                }
+                                if dot {
+                                    ui.label(
+                                        egui::RichText::new("\u{25CF}")
+                                            .monospace()
+                                            .color(egui::Color32::from_rgb(220, 40, 40)),
+                                    );
+                                }
+                            });
+                        }
+                    });
                 });
         });
         self.egui_state
