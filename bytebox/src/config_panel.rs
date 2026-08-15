@@ -9,6 +9,7 @@
 //! champ pousse sur le même canal `MonitorCmd` que la console — `Machine`
 //! ne voit aucune différence entre les deux façades.
 
+use crate::renderer::CrtSettings;
 use bytebox_core::machine::Machine;
 use bytebox_core::monitor::{MonitorCmd, MonitorMessage};
 use std::sync::mpsc::Sender;
@@ -45,15 +46,21 @@ impl ConfigPanel {
 
     /// Dessine le panneau ; `open` reflète et contrôle sa visibilité (la
     /// petite croix de la fenêtre egui peut la fermer, en plus de F6).
-    /// Renvoie un changement de zoom demandé cette trame, s'il y en a un.
+    /// `crt_settings` est l'état courant du shader CRT (relu à chaque trame
+    /// depuis `Renderer`, comme `machine` pour l'état de la machine) ;
+    /// renvoie le zoom demandé cette trame s'il y en a un, et les réglages
+    /// CRT à jour — inchangés si l'utilisateur n'a touché aucun curseur,
+    /// donc toujours sûr à réappliquer sans condition (voir `sdl.rs`).
     pub fn ui(
         &mut self,
         ctx: &egui::Context,
         machine: &Machine,
         cmd_sender: &Sender<MonitorMessage>,
         open: &mut bool,
-    ) -> Option<ZoomChoice> {
+        crt_settings: CrtSettings,
+    ) -> (Option<ZoomChoice>, CrtSettings) {
         let mut zoom = None;
+        let mut crt_settings = crt_settings;
         egui::Window::new("Configuration")
             .open(open)
             .resizable(true)
@@ -70,8 +77,11 @@ impl ConfigPanel {
                 ui.separator();
                 ui.heading("Audio");
                 Self::audio_section(ui, machine, cmd_sender);
+                ui.separator();
+                ui.heading("Shader CRT (F5)");
+                Self::crt_section(ui, &mut crt_settings);
             });
-        zoom
+        (zoom, crt_settings)
     }
 
     fn media_section(
@@ -255,6 +265,31 @@ impl ConfigPanel {
                 *zoom = Some(ZoomChoice::Fullscreen);
             }
         });
+    }
+
+    /// Curseurs pour les six constantes de `renderer_crt.wgsl` — voir ses
+    /// commentaires pour ce que chacune contrôle visuellement. Pas de
+    /// `MonitorCmd` ici : ce sont des réglages de présentation, propres au
+    /// `Renderer` de la fenêtre principale, au même titre que le zoom.
+    fn crt_section(ui: &mut egui::Ui, settings: &mut CrtSettings) {
+        ui.add(
+            egui::Slider::new(&mut settings.mask_cell_px, 0.5..=4.0).text("Mask cell size (px)"),
+        );
+        ui.add(egui::Slider::new(&mut settings.mask_strength, 0.0..=1.0).text("Mask strength"));
+        ui.add(egui::Slider::new(&mut settings.mask_min, 0.0..=1.0).text("Mask min brightness"));
+        ui.add(
+            egui::Slider::new(&mut settings.scanline_beam, 1.0..=10.0).text("Scanline beam width"),
+        );
+        ui.add(
+            egui::Slider::new(&mut settings.scanline_strength, 0.0..=1.0)
+                .text("Scanline strength"),
+        );
+        ui.add(
+            egui::Slider::new(&mut settings.bright_boost, 1.0..=2.5).text("Brightness boost"),
+        );
+        if ui.button("Reset to defaults").clicked() {
+            *settings = CrtSettings::default();
+        }
     }
 
     fn audio_section(ui: &mut egui::Ui, machine: &Machine, cmd_sender: &Sender<MonitorMessage>) {

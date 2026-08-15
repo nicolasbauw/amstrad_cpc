@@ -31,16 +31,54 @@ use wgpu::util::DeviceExt;
 
 use bytebox_core::video;
 
-/// Paramètres du shader CRT (`renderer_crt.wgsl`) : juste la taille de
-/// l'image source, en pixels source — jamais en pixels de sortie, voir le
-/// commentaire du shader. Constante après construction (`SCREEN_WIDTH`/
-/// `HEIGHT` ne changent jamais en cours d'exécution) : écrite une seule
-/// fois, pas mise à jour à chaque trame.
+/// Paramètres du shader CRT (`renderer_crt.wgsl`), en mémoire tampon
+/// uniforme GPU : `source_size` (taille de l'image source, en pixels
+/// source — jamais en pixels de sortie, voir le commentaire du shader) ne
+/// change jamais après construction (`SCREEN_WIDTH`/`HEIGHT` sont fixes),
+/// mais les six derniers champs reflètent `CrtSettings` et sont réécrits à
+/// chaque changement depuis le panneau F6 (`set_crt_settings`).
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CrtParams {
     source_size: [f32; 2],
-    _padding: [f32; 2],
+    mask_cell_px: f32,
+    mask_min: f32,
+    mask_strength: f32,
+    scanline_beam: f32,
+    scanline_strength: f32,
+    bright_boost: f32,
+}
+
+/// Réglages ajustables du shader CRT (F5), exposés au panneau de
+/// configuration (F6, section "Shader CRT") — voir les commentaires de
+/// `renderer_crt.wgsl` pour ce que chaque champ contrôle visuellement. Pas
+/// persisté dans `config.toml` : comme l'activation même du shader (F5),
+/// c'est un réglage de session, pas une préférence durable.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct CrtSettings {
+    pub mask_cell_px: f32,
+    pub mask_min: f32,
+    pub mask_strength: f32,
+    pub scanline_beam: f32,
+    pub scanline_strength: f32,
+    pub bright_boost: f32,
+}
+
+impl Default for CrtSettings {
+    /// Valeurs choisies par itération visuelle (Plan V2.md, jalon M4) :
+    /// `mask_cell_px` et `scanline_beam` ont notamment été relevés pour
+    /// rester visibles sur un écran haute densité (4K), où l'unité "pixel de
+    /// sortie" est physiquement minuscule.
+    fn default() -> Self {
+        Self {
+            mask_cell_px: 1.3,
+            mask_min: 0.2,
+            mask_strength: 0.9,
+            scanline_beam: 5.0,
+            scanline_strength: 0.85,
+            bright_boost: 1.5,
+        }
+    }
 }
 
 /// # Sécurité
@@ -61,8 +99,10 @@ pub struct Renderer {
     /// ci-dessus (groupe 0, même disposition), ajoute `crt_params_bind_group`
     /// en groupe 1.
     crt_pipeline: wgpu::RenderPipeline,
+    crt_params_buffer: wgpu::Buffer,
     crt_params_bind_group: wgpu::BindGroup,
     crt_enabled: bool,
+    crt_settings: CrtSettings,
     frame_texture: wgpu::Texture,
     /// Buffer de conversion RGB24 (produit par `video::render`) vers
     /// RGBA8 (seul format que wgpu accepte en texture couleur usuelle) :
@@ -255,14 +295,23 @@ impl Renderer {
         // le pipeline net ci-dessus (texture + échantillonneur, disposition
         // identique — `bind_group` est donc réutilisé tel quel), plus un
         // groupe 1 pour la taille de l'image source.
+        let crt_settings = CrtSettings::default();
         let crt_params = CrtParams {
             source_size: [video::SCREEN_WIDTH as f32, video::SCREEN_HEIGHT as f32],
-            _padding: [0.0, 0.0],
+            mask_cell_px: crt_settings.mask_cell_px,
+            mask_min: crt_settings.mask_min,
+            mask_strength: crt_settings.mask_strength,
+            scanline_beam: crt_settings.scanline_beam,
+            scanline_strength: crt_settings.scanline_strength,
+            bright_boost: crt_settings.bright_boost,
         };
+        // COPY_DST : contrairement à `source_size`, ces réglages sont
+        // réécrits en direct depuis le panneau F6 (`set_crt_settings`), pas
+        // seulement lus une fois à la construction.
         let crt_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("crt params buffer"),
             contents: bytemuck::bytes_of(&crt_params),
-            usage: wgpu::BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let crt_params_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("crt params bind group layout"),
@@ -343,8 +392,10 @@ impl Renderer {
             pipeline,
             bind_group,
             crt_pipeline,
+            crt_params_buffer,
             crt_params_bind_group,
             crt_enabled: false,
+            crt_settings,
             frame_texture,
             rgba: vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 4],
             egui_ctx: egui::Context::default(),
@@ -386,6 +437,29 @@ impl Renderer {
     /// bascule F1-F12 de ce fichier.
     pub fn toggle_crt(&mut self) {
         self.crt_enabled = !self.crt_enabled;
+    }
+
+    pub fn crt_settings(&self) -> CrtSettings {
+        self.crt_settings
+    }
+
+    /// Réécrit les réglages du shader CRT, immédiatement effectifs (le
+    /// panneau F6 appelle ceci à chaque trame où il est ouvert). Coût
+    /// négligeable : `write_buffer` sur 32 octets, comme la texture de trame
+    /// CPC elle-même à chaque `present`.
+    pub fn set_crt_settings(&mut self, settings: CrtSettings) {
+        self.crt_settings = settings;
+        let params = CrtParams {
+            source_size: [video::SCREEN_WIDTH as f32, video::SCREEN_HEIGHT as f32],
+            mask_cell_px: settings.mask_cell_px,
+            mask_min: settings.mask_min,
+            mask_strength: settings.mask_strength,
+            scanline_beam: settings.scanline_beam,
+            scanline_strength: settings.scanline_strength,
+            bright_boost: settings.bright_boost,
+        };
+        self.queue
+            .write_buffer(&self.crt_params_buffer, 0, bytemuck::bytes_of(&params));
     }
 
     /// Calcule le rectangle (en pixels physiques) où dessiner l'image

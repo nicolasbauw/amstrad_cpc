@@ -18,11 +18,11 @@
 
     F1 / F2 / F3   window size x1 / x2 / x3
     F4             toggle fullscreen
-    F5             toggle the CRT shader (scanlines, rounded pixels — only
-                   visible above x1, see below)
+    F5             toggle the CRT shader (RGB phosphor mask, scanlines —
+                   see below)
     F6             toggle the configuration/media panel (disks, tape,
-                   drive B, extra RAM, zoom, volume — all with an
-                   immediate effect, no restart needed)
+                   drive B, extra RAM, zoom, volume, CRT shader tuning —
+                   all with an immediate effect, no restart needed)
     F8             step to next Z80 instruction
     F9             step to next video line
     F10            toggle the quick command bar (one input line, overlaid
@@ -38,14 +38,20 @@ like launching from a terminal.
 
 ## CRT shader
 
-`F5` overlays scanlines and rounds off each pixel's corners, computed in
-source-pixel space so the effect keeps the same proportions at every zoom
-level rather than a fixed number of screen pixels per scanline. One
-consequence: at `x1` (the emulated screen at its native 800×600, one CPC
-pixel per screen pixel) there's no spare resolution left to draw the
-gradient into, so the shader has essentially nothing to show — this is
-expected, not a bug. The effect becomes visible from `x2` up, and is most
-convincing at `x3` or fullscreen on a high-resolution display.
+`F5` reconstructs the image the way a real tube would: an RGB phosphor mask
+(each screen pixel belongs to a red, green or blue column, staggered every
+other row) plus a proper electron-beam profile (soft horizontal blending
+between neighboring columns, a real dark gap between scanlines rather than
+just a darkened pixel). The beam reconstruction is computed in source-pixel
+space, so it keeps the same proportions at every zoom level; the phosphor
+mask is sized in real output pixels (a property of the simulated tube, not
+of the source image), so it stays visible at `x1` too, not just from `x2` up.
+
+Every constant behind this effect — mask cell size, mask/scanline strength,
+scanline beam width, brightness boost — is a slider in the "Shader CRT"
+section of the configuration panel (`F6`), with a "Reset to defaults"
+button. The shipped defaults are tuned for a high-density (4K) display;
+lower-DPI screens will likely want smaller values.
 
 ## Emulator commands:
     disk d.dsk          Loads the d.dsk disk image on drive A

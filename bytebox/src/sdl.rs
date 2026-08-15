@@ -10,7 +10,7 @@ use crate::console_log::ConsoleLog;
 use crate::console_panel::QuickCommandBar;
 use crate::console_window::ConsoleWindow;
 use bytebox_core::machine::{self, Machine};
-use crate::renderer::Renderer;
+use crate::renderer::{CrtSettings, Renderer};
 use bytebox_core::video;
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
@@ -689,6 +689,13 @@ pub fn run(
             .show_cursor(!mouse_over_main_window || quick_bar_visible || config_panel_visible);
 
         let mut requested_zoom: Option<ZoomChoice> = None;
+        let mut requested_crt_settings: Option<CrtSettings> = None;
+        // Lu avant de créer la fermeture ci-dessous, pour la même raison que
+        // `show_overlay` juste en dessous : une fois la fermeture construite,
+        // elle emprunte `config_panel_visible` en mutable, donc plus moyen de
+        // relire quoi que ce soit de `renderer` (qui la borrow aussi via
+        // `present`) entre les deux.
+        let crt_settings = renderer.crt_settings();
         // Décidé avant de créer la fermeture ci-dessous : elle emprunte
         // `config_panel_visible` en mutable (`ConfigPanel::ui` peut la
         // remettre à faux via la croix de la fenêtre egui), la relire une
@@ -699,8 +706,15 @@ pub fn run(
                 quick_bar.ui(ctx, &cmd_sender, &mut console_log);
             }
             if config_panel_visible {
-                requested_zoom =
-                    config_panel.ui(ctx, &machine, &cmd_sender, &mut config_panel_visible);
+                let (zoom, crt) = config_panel.ui(
+                    ctx,
+                    &machine,
+                    &cmd_sender,
+                    &mut config_panel_visible,
+                    crt_settings,
+                );
+                requested_zoom = zoom;
+                requested_crt_settings = Some(crt);
             }
         };
         let overlay: Option<&mut dyn FnMut(&egui::Context)> = if show_overlay {
@@ -720,6 +734,13 @@ pub fn run(
                     ZoomChoice::Fullscreen => DisplayMode::Fullscreen,
                 },
             );
+        }
+        // Toujours réappliqué sans détection de changement : `crt_settings`
+        // ci-dessus vaut déjà les réglages courants si l'utilisateur n'a
+        // touché aucun curseur cette trame, donc réécrire les 32 octets du
+        // tampon uniforme est un no-op fonctionnel, pas juste bon marché.
+        if let Some(settings) = requested_crt_settings {
+            renderer.set_crt_settings(settings);
         }
 
         if debug_visible {

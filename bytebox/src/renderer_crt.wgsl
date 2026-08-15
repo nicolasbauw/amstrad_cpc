@@ -40,9 +40,18 @@
 // sens qu'après avoir défait la correction gamma de la source), avant de
 // ré-encoder en sortie.
 
+// Les six derniers champs sont réglables en direct depuis le panneau de
+// configuration (F6, section "Shader CRT") : voir `CrtSettings` côté Rust
+// (`renderer.rs`) pour leurs valeurs par défaut, et les commentaires plus
+// bas pour ce que chacun contrôle visuellement.
 struct CrtParams {
     source_size: vec2<f32>,
-    _padding: vec2<f32>,
+    mask_cell_px: f32,
+    mask_min: f32,
+    mask_strength: f32,
+    scanline_beam: f32,
+    scanline_strength: f32,
+    bright_boost: f32,
 };
 
 @group(0) @binding(0)
@@ -86,21 +95,22 @@ const HALF_PI: f32 = 1.57079633;
 const GAMMA_IN: f32 = 2.4;
 const GAMMA_OUT: f32 = 2.2;
 
-// Exposant du profil de faisceau (cos² à une puissance) : plus grand = bande
-// de balayage plus fine et plus contrastée, plus petit = plus douce.
-const SCANLINE_BEAM: f32 = 2.5;
-// Force du creux entre deux lignes : 0 = pas de bande visible, 1 = creux
-// complet (obscurité totale entre deux lignes de balayage).
-const SCANLINE_STRENGTH: f32 = 0.7;
-
-// Luminosité résiduelle des deux sous-pixels "éteints" d'une triade de
-// masque (0 = uniquement la couleur dominante, 1 = pas de masque du tout).
-const MASK_MIN: f32 = 0.25;
-const MASK_STRENGTH: f32 = 0.85;
-
-// Compense la perte de luminosité moyenne entraînée par les bandes de
-// balayage et le masque.
-const BRIGHT_BOOST: f32 = 1.4;
+// SCANLINE_BEAM (exposant du profil de faisceau, cos² à une puissance) :
+// plus grand = pic lumineux plus étroit, donc creux plus large entre deux
+// lignes. SCANLINE_STRENGTH : force de ce creux, 0 = pas de bande visible,
+// 1 = obscurité totale entre deux lignes de balayage. MASK_MIN : luminosité
+// résiduelle des deux sous-pixels "éteints" d'une triade de masque (0 =
+// uniquement la couleur dominante, 1 = pas de masque du tout). MASK_STRENGTH :
+// force globale du masque. MASK_CELL_PX : largeur d'une colonne de la triade,
+// en pixels de SORTIE réels — donc la triade complète (3 colonnes) fait
+// 3 x MASK_CELL_PX de large à l'écran ; sur un écran haute densité (4K), une
+// seule colonne de sortie par sous-pixel (1.0) est trop fine pour rester
+// visible, d'où un défaut plus grand. BRIGHT_BOOST : compense la perte de
+// luminosité moyenne entraînée par les bandes de balayage et le masque.
+// Toutes réglables en direct depuis F6 (voir le commentaire de `CrtParams`
+// ci-dessus) : les valeurs ci-dessous ne servent que si le panneau n'a
+// jamais touché les réglages, elles doivent rester synchronisées avec
+// `CrtSettings::default()` côté Rust.
 
 fn to_linear(c: vec3<f32>) -> vec3<f32> {
     return pow(max(c, vec3<f32>(0.0)), vec3<f32>(GAMMA_IN));
@@ -122,9 +132,9 @@ fn ease(frac: f32) -> f32 {
 // ligne source, retombe à 0.0 à mi-chemin de la ligne voisine. Volontairement
 // NON normalisé par l'appelant (voir fs_main) : c'est cette absence de
 // normalisation entre deux lignes qui creuse la bande sombre du balayage.
-fn scan_weight(dist_lines: f32) -> f32 {
+fn scan_weight(dist_lines: f32, beam: f32) -> f32 {
     let c = cos(clamp(dist_lines, -1.0, 1.0) * HALF_PI);
-    return pow(max(c, 0.0), SCANLINE_BEAM);
+    return pow(max(c, 0.0), beam);
 }
 
 // Couleur d'une ligne source `row`, ré-échantillonnée horizontalement entre
@@ -149,33 +159,33 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let texel = in.uv * params.source_size;
     let row0 = floor(texel.y - 0.5);
     let dist0 = (texel.y - 0.5) - row0;
-    let w0 = scan_weight(dist0);
-    let w1 = scan_weight(dist0 - 1.0);
+    let w0 = scan_weight(dist0, params.scanline_beam);
+    let w1 = scan_weight(dist0 - 1.0, params.scanline_beam);
 
     let color_scanned = sample_row(texel.x, row0) * w0 + sample_row(texel.x, row0 + 1.0) * w1;
     // Un mélange linéaire non pondéré (sans creux de balayage) sert de plancher
-    // de luminosité : SCANLINE_STRENGTH règle l'intensité du seul effet de
+    // de luminosité : scanline_strength règle l'intensité du seul effet de
     // bande, indépendamment de GAMMA_IN/OUT ou du reste du pipeline.
     let color_flat = mix(sample_row(texel.x, row0), sample_row(texel.x, row0 + 1.0), dist0);
-    let color = mix(color_flat, color_scanned, SCANLINE_STRENGTH);
+    let color = mix(color_flat, color_scanned, params.scanline_strength);
 
     // Masque phosphore : triade RVB, en pixels de SORTIE réels (propriété du
     // tube, sans rapport avec la résolution de l'image source) — décalée
     // d'une colonne sur les lignes impaires, comme un vrai masque perforé.
-    let out_x = i32(floor(in.clip_position.x));
-    let out_y = i32(floor(in.clip_position.y));
+    let out_x = i32(floor(in.clip_position.x / params.mask_cell_px));
+    let out_y = i32(floor(in.clip_position.y / params.mask_cell_px));
     let stagger = out_y % 2;
     let phase = (out_x + stagger) % 3;
     var mask_color: vec3<f32>;
     if (phase == 0) {
-        mask_color = vec3<f32>(1.0, MASK_MIN, MASK_MIN);
+        mask_color = vec3<f32>(1.0, params.mask_min, params.mask_min);
     } else if (phase == 1) {
-        mask_color = vec3<f32>(MASK_MIN, 1.0, MASK_MIN);
+        mask_color = vec3<f32>(params.mask_min, 1.0, params.mask_min);
     } else {
-        mask_color = vec3<f32>(MASK_MIN, MASK_MIN, 1.0);
+        mask_color = vec3<f32>(params.mask_min, params.mask_min, 1.0);
     }
-    let mask = mix(vec3<f32>(1.0), mask_color, MASK_STRENGTH);
+    let mask = mix(vec3<f32>(1.0), mask_color, params.mask_strength);
 
-    let final_color = to_display(color * mask) * BRIGHT_BOOST;
+    let final_color = to_display(color * mask) * params.bright_boost;
     return vec4<f32>(final_color, 1.0);
 }
