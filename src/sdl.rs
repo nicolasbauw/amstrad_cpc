@@ -3,6 +3,7 @@
 //! rendu de la trame et régulation de la cadence. `main.rs` ne fait
 //! qu'assembler une `Machine` prête à tourner et l'y confier via `run`.
 
+use crate::app_log;
 use crate::autotype::AutoTyper;
 use crate::console_log::ConsoleLog;
 use crate::console_panel::QuickCommandBar;
@@ -58,8 +59,8 @@ impl DisplayMode {
             Some("x3") => DisplayMode::X3,
             Some("fullscreen") => DisplayMode::Fullscreen,
             Some(other) => {
-                println!(
-                    "Config: display.default_zoom='{other}' non reconnu (attendu x1, x2, x3 ou fullscreen), x1 utilise."
+                app_log!(
+                    "Config: display.default_zoom='{other}' not recognized (expected x1, x2, x3 or fullscreen), using x1."
                 );
                 DisplayMode::Normal
             }
@@ -124,10 +125,10 @@ pub fn run(
                 if subsystem.is_game_controller(i) {
                     match subsystem.open(i) {
                         Ok(c) => {
-                            println!("Controller opened: {}", c.name());
+                            app_log!("Controller opened: {}", c.name());
                             return Some(c);
                         }
-                        Err(e) => println!("Failed to open controller {}: {}", i, e),
+                        Err(e) => app_log!("Failed to open controller {}: {}", i, e),
                     }
                 }
             }
@@ -140,7 +141,7 @@ pub fn run(
     let mut audio = match crate::audio::Audio::new(&sdl_context) {
         Ok(a) => Some(a),
         Err(e) => {
-            println!("Audio disabled: {e}");
+            app_log!("Audio disabled: {e}");
             None
         }
     };
@@ -160,7 +161,7 @@ pub fn run(
     // de fenêtres retombe sur son icône par défaut (le logo Wayland sous
     // KDE/Wayland) pour cette fenêtre-ci uniquement.
     if let Err(e) = set_window_icon(&mut debug_window) {
-        println!("Can't set debug window icon: {e}");
+        app_log!("Can't set debug window icon: {e}");
     }
     let debug_window_id = debug_window.id();
     let mut status_panel = crate::status_panel::StatusPanel::new(debug_window)?;
@@ -178,7 +179,7 @@ pub fn run(
         .metal_view()
         .build()?;
     if let Err(e) = set_window_icon(&mut console_win) {
-        println!("Can't set console window icon: {e}");
+        app_log!("Can't set console window icon: {e}");
     }
     let console_window_id = console_win.id();
     let mut console_window = ConsoleWindow::new(console_win)?;
@@ -205,7 +206,7 @@ pub fn run(
     // l'émulateur de démarrer, la fenêtre garde alors l'icône par défaut du
     // système de fenêtrage.
     if let Err(e) = set_window_icon(&mut window) {
-        println!("Can't set window icon: {e}");
+        app_log!("Can't set window icon: {e}");
     }
     let mut renderer = Renderer::new(window)?;
     apply_display_mode(
@@ -222,6 +223,13 @@ pub fn run(
     let mut quick_bar = QuickCommandBar::new();
     let mut console_log = ConsoleLog::new();
     let cmd_sender = machine.command_sender();
+    // Tout ce qui a été journalisé avant l'ouverture des fenêtres (bannière
+    // de démarrage, config invalide, --disk/--tape en ligne de commande...)
+    // attendait dans la file globale (voir applog.rs) : on le récupère ici,
+    // rien n'est perdu.
+    for line in crate::applog::drain() {
+        console_log.push_output(&line);
+    }
 
     let mut frame_buffer = vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 3];
     // Deux fois la durée d'une trame standard (312 lignes de 256 ticks) : simple
@@ -372,7 +380,7 @@ pub fn run(
                     keycode: Some(sdl2::keyboard::Keycode::F8),
                     ..
                 } => {
-                    println!(
+                    app_log!(
                         "{}",
                         (zilog_z80::dasm::dasm(&machine.bus, machine.cpu.reg.pc)).0
                     );
@@ -390,7 +398,7 @@ pub fn run(
                             break;
                         }
                     }
-                    println!(
+                    app_log!(
                         "Stepped to next video line (Line {}).",
                         machine.current_line
                     );
@@ -541,10 +549,10 @@ pub fn run(
                     if active_controller.is_none() {
                         match controller_subsystem.open(which) {
                             Ok(c) => {
-                                println!("Controller opened: {}", c.name());
+                                app_log!("Controller opened: {}", c.name());
                                 active_controller = Some(c);
                             }
-                            Err(e) => println!("Failed to open controller {which}: {e}"),
+                            Err(e) => app_log!("Failed to open controller {which}: {e}"),
                         }
                     }
                 }
@@ -553,7 +561,7 @@ pub fn run(
                         .as_ref()
                         .is_some_and(|c| c.instance_id() == which);
                     if was_active {
-                        println!("Controller disconnected");
+                        app_log!("Controller disconnected");
                         active_controller = None;
                         // Une direction ou un tir resté "enfoncé" au moment
                         // du débranchement resterait sinon bloqué indéfiniment
@@ -605,6 +613,13 @@ pub fn run(
         {
             console_log.push_output(&output);
         }
+        // Idem pour tout ce que le reste de l'application a journalisé cette
+        // trame (voir applog.rs) : connexion de manette, disquette éjectée,
+        // avertissement de régulation audio... Rien de tout cela ne doit
+        // atteindre le terminal qui a lancé l'émulateur.
+        for line in crate::applog::drain() {
+            console_log.push_output(&line);
+        }
 
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
@@ -645,7 +660,7 @@ pub fn run(
             if let Some(audio) = audio.as_mut().filter(|_| machine.report_audio_regulation()) {
                 let (refills, padded_ms, dropped) = audio.take_stats();
                 if refills > 0 || dropped > 0 {
-                    println!(
+                    app_log!(
                         "Audio: {refills} refill(s) ({padded_ms:.0} ms of silence inserted), \
                          {dropped} frame(s) dropped, queue {} samples",
                         audio.queued_samples()

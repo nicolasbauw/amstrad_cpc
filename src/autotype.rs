@@ -7,6 +7,7 @@
 //! de débogage — plus besoin de retaper la même commande à la main à chaque
 //! lancement.
 
+use crate::app_log;
 use crate::psg::Psg;
 use std::collections::VecDeque;
 
@@ -127,7 +128,7 @@ impl AutoTyper {
             }
         }
         if !skipped.is_empty() {
-            println!("Autocmd: caractere(s) ignore(s), sans equivalent clavier : {skipped:?}");
+            app_log!("Autocmd: character(s) skipped, no keyboard equivalent: {skipped:?}");
         }
         Self {
             keys,

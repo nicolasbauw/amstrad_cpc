@@ -1,3 +1,5 @@
+use crate::app_log;
+
 /// Nombre standard de banques de 16 Ko d'un 6128 non étendu (128 Ko).
 const STANDARD_RAM_BANKS: usize = 8;
 
@@ -39,8 +41,8 @@ impl Memory {
     /// valeur trop généreuse dans config.toml).
     pub fn new(extra_ram_banks: u32) -> Self {
         let extra_ram_banks = if extra_ram_banks > MAX_EXTRA_RAM_GROUPS {
-            println!(
-                "Config: memory.extra_ram_banks={extra_ram_banks} depasse le maximum adressable ({MAX_EXTRA_RAM_GROUPS}), plafonne."
+            app_log!(
+                "Config: memory.extra_ram_banks={extra_ram_banks} exceeds the addressable maximum ({MAX_EXTRA_RAM_GROUPS}), capped."
             );
             MAX_EXTRA_RAM_GROUPS
         } else {

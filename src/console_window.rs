@@ -75,7 +75,7 @@ impl ConsoleWindow {
                             egui::TextEdit::singleline(input)
                                 .desired_width(f32::INFINITY)
                                 .font(egui::TextStyle::Monospace)
-                                .hint_text("commande (h pour l'aide)"),
+                                .hint_text("command (h for help)"),
                         );
                         if *request_focus {
                             response.request_focus();

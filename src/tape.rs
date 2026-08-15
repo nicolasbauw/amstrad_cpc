@@ -1,3 +1,4 @@
+use crate::app_log;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Read;
@@ -68,7 +69,7 @@ struct CdtImage {
 fn read_u8(data: &[u8], offset: usize) -> Result<u8, String> {
     data.get(offset)
         .copied()
-        .ok_or_else(|| format!("CDT tronqué à l'octet {offset}"))
+        .ok_or_else(|| format!("Truncated CDT at byte {offset}"))
 }
 
 fn read_u16le(data: &[u8], offset: usize) -> Result<u16, String> {
@@ -93,7 +94,7 @@ fn read_u32le(data: &[u8], offset: usize) -> Result<u32, String> {
 fn read_slice(data: &[u8], offset: usize, len: usize) -> Result<Vec<u8>, String> {
     data.get(offset..offset + len)
         .map(|s| s.to_vec())
-        .ok_or_else(|| format!("CDT tronqué : {len} octets attendus à l'offset {offset}"))
+        .ok_or_else(|| format!("Truncated CDT: {len} bytes expected at offset {offset}"))
 }
 
 impl CdtImage {
@@ -103,7 +104,7 @@ impl CdtImage {
     fn parse(data: &[u8]) -> Result<Self, String> {
         const SIGNATURE: &[u8] = b"ZXTape!\x1A";
         if data.len() < SIGNATURE.len() + 2 || &data[..SIGNATURE.len()] != SIGNATURE {
-            return Err("Signature CDT absente ou invalide (attendu \"ZXTape!\")".to_string());
+            return Err("Missing or invalid CDT signature (expected \"ZXTape!\")".to_string());
         }
         // data[7] = 0x1A, data[8]/data[9] = version majeure/mineure : non
         // utilisées, la structure des blocs ne dépend pas de la version.
@@ -258,8 +259,8 @@ impl CdtImage {
             }
             0x5A => Ok((Block::Meta, 9)),
             other => Err(format!(
-                "Bloc CDT inconnu (ID {other:#04X} à l'offset {pos}) : \
-                 lecture arrêtée pour ne pas désynchroniser le flux"
+                "Unknown CDT block (ID {other:#04X} at offset {pos}): \
+                 reading stopped to avoid desyncing the stream"
             )),
         }
     }
@@ -325,7 +326,7 @@ impl Tape {
         self.current_level = false;
         self.stopped = false;
         self.current_filename = Some(filename.to_string());
-        println!("Tape CDT Loaded: {filename}");
+        app_log!("Tape CDT Loaded: {filename}");
         Ok(())
     }
 
@@ -337,7 +338,7 @@ impl Tape {
         self.current_level = false;
         self.stopped = true;
         self.current_filename = None;
-        println!("Tape Ejected");
+        app_log!("Tape Ejected");
     }
 
     /// Niveau actuel du signal cassette, tel que vu par le bit 6 du port B

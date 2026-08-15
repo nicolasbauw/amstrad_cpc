@@ -13,6 +13,7 @@
 //! La disposition de l'en-tête suit `t_SNA_header` de Caprice32 (256 octets,
 //! structure compactée), puisque c'est lui qui devra relire nos fichiers.
 
+use crate::app_log;
 use crate::machine::Machine;
 use std::fs::File;
 use std::io::Write;
@@ -154,7 +155,7 @@ pub fn save(machine: &Machine, filename: &str) -> Result<(), String> {
     let ram = &machine.bus.memory.ram;
     if ram.len() < STANDARD_RAM {
         return Err(format!(
-            "RAM trop petite pour un instantané ({} octets)",
+            "RAM too small for a snapshot ({} bytes)",
             ram.len()
         ));
     }
@@ -164,7 +165,7 @@ pub fn save(machine: &Machine, filename: &str) -> Result<(), String> {
     f.write_all(&header).map_err(|e| e.to_string())?;
     f.write_all(&ram[..STANDARD_RAM])
         .map_err(|e| e.to_string())?;
-    println!("Snapshot saved: {filename}");
+    app_log!("Snapshot saved: {filename}");
     Ok(())
 }
 

@@ -1,3 +1,4 @@
+mod applog;
 mod audio;
 mod autotype;
 mod bus;
@@ -59,7 +60,7 @@ fn ensure_validated(command: &str) -> String {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Amstrad CPC 6128 ===");
+    app_log!("=== Amstrad CPC 6128 ===");
 
     // 1. Analyse des arguments de la ligne de commande pour le choix du mode
     let args: Vec<String> = env::args().collect();
@@ -93,13 +94,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(path) = &disk
         && let Err(e) = machine.load_disk(path)
     {
-        println!("Can't load disk '{path}': {e}");
+        app_log!("Can't load disk '{path}': {e}");
     }
 
     if let Some(path) = &tape
         && let Err(e) = machine.load_tape(path)
     {
-        println!("Can't load tape '{path}': {e}");
+        app_log!("Can't load tape '{path}': {e}");
     }
 
     let autotyper = autocmd

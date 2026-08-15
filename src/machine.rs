@@ -1,3 +1,4 @@
+use crate::app_log;
 use crate::bus::CpcBus;
 use crate::config;
 use crate::gate_array::{GateArray, GateArrayState};
@@ -264,7 +265,7 @@ impl Machine {
         // mal formé), une configuration par défaut (tout désactivé) est
         // utilisée.
         let config = config::load_config_file().unwrap_or_else(|_| {
-            println!("Config file not found or invalid: drive B disabled by default.");
+            app_log!("Config file not found or invalid: drive B disabled by default.");
             config::Config {
                 drives: config::DriveConfig { drive_b: false },
                 debugger: config::Debugger {
@@ -314,7 +315,7 @@ impl Machine {
             .borrow_mut()
             .set_drive_b_enabled(m.config.drives.drive_b);
         if m.config.drives.drive_b {
-            println!("Drive B enabled (config.toml)");
+            app_log!("Drive B enabled (config.toml)");
         }
 
         m
@@ -381,7 +382,7 @@ impl Machine {
     /// fenêtre SDL ni quitter l'émulateur.
     pub fn power_off(&mut self) {
         self.stop();
-        println!("Power off.");
+        app_log!("Power off.");
     }
 
     /// Rallume la machine : réinitialise le CPU, la RAM et les périphériques
@@ -439,7 +440,7 @@ impl Machine {
 
         self.load_roms()?;
         self.start();
-        println!("Power on.");
+        app_log!("Power on.");
         Ok(())
     }
 
@@ -491,9 +492,9 @@ impl Machine {
     pub fn power_cycle(&mut self) {
         self.power_off();
         if let Err(e) = self.power_on() {
-            println!("Power cycle failed: {e}");
+            app_log!("Power cycle failed: {e}");
         } else {
-            println!("Power cycle complete.");
+            app_log!("Power cycle complete.");
         }
     }
 
@@ -566,9 +567,10 @@ impl Machine {
         if self.breakpoints.contains(&self.cpu.reg.pc) && !self.stopped_at_breakpoint {
             self.stop();
             self.stopped_at_breakpoint = true;
-            print!(
-                "\nBreakpoint reached at {:#06X} (Total Ticks: {})\n",
-                current_pc, self.total_ticks
+            app_log!(
+                "Breakpoint reached at {:#06X} (Total Ticks: {})",
+                current_pc,
+                self.total_ticks
             );
             return 0;
         }
@@ -602,12 +604,9 @@ impl Machine {
         {
             self.unimplemented_reported += 1;
             let (text, _) = zilog_z80::dasm::dasm(&self.bus, u.address);
-            println!(
-                "\nUnimplemented instruction at {:#06X}: {}",
-                u.address, text
-            );
+            app_log!("Unimplemented instruction at {:#06X}: {}", u.address, text);
             if self.unimplemented_reported == 10 {
-                println!("(further occurrences silenced, see the hardware status)");
+                app_log!("(further occurrences silenced, see the hardware status)");
             }
         }
         if int_pending_before && !self.cpu.has_pending_int() {
@@ -626,11 +625,12 @@ impl Machine {
         if let Some(addr) = self.bus.watchpoint_hit {
             self.bus.watchpoint_hit = None;
             self.stop();
-            println!(
-                "\nWatchpoint hit: write to {:#06X} at PC {:#06X}",
-                addr, current_pc
+            app_log!(
+                "Watchpoint hit: write to {:#06X} at PC {:#06X}",
+                addr,
+                current_pc
             );
-            println!("{}", (zilog_z80::dasm::dasm(&self.bus, current_pc)).0);
+            app_log!("{}", (zilog_z80::dasm::dasm(&self.bus, current_pc)).0);
             self.print_registers();
             return 0;
         }
@@ -795,7 +795,7 @@ impl Machine {
     }
 
     pub fn print_registers(&mut self) {
-        print!("{}", self.get_registers_string());
+        app_log!("{}", self.get_registers_string());
     }
 
     pub fn get_hardware_string(&mut self, show_kb: bool) -> String {

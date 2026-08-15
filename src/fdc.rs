@@ -1,3 +1,4 @@
+use crate::app_log;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -39,7 +40,7 @@ pub struct DskImage {
 impl DskImage {
     pub fn parse(data: &[u8]) -> Result<Self, String> {
         if data.len() < 0x100 {
-            return Err("Fichier DSK trop court".to_string());
+            return Err("DSK file too short".to_string());
         }
 
         let signature = std::str::from_utf8(&data[0..8]).unwrap_or("");
@@ -49,7 +50,7 @@ impl DskImage {
         } else if signature.starts_with("EXTENDED") {
             Self::parse_extended(data)
         } else {
-            Err("Format DSK non reconnu (signature invalide)".to_string())
+            Err("Unrecognized DSK format (invalid signature)".to_string())
         }
     }
 
@@ -57,7 +58,7 @@ impl DskImage {
     fn get_u8(data: &[u8], offset: usize) -> Result<u8, String> {
         data.get(offset).copied().ok_or_else(|| {
             format!(
-                "DSK corrompu : lecture hors limites à l'offset {:#X}",
+                "Corrupt DSK: out-of-bounds read at offset {:#X}",
                 offset
             )
         })
@@ -70,7 +71,7 @@ impl DskImage {
             u16::from_le_bytes([Self::get_u8(data, 0x32)?, Self::get_u8(data, 0x33)?]) as usize;
 
         if track_size == 0 {
-            return Err("Taille de piste nulle dans l'en-tête DSK".to_string());
+            return Err("Zero track size in DSK header".to_string());
         }
 
         let mut tracks = Vec::new();
@@ -407,15 +408,15 @@ impl Fdc {
 
     /// Charge un fichier disquette .dsk sur le lecteur A.
     ///
-    /// N'imprime que le message : réafficher le prompt "> " qui suit est la
+    /// N'ajoute que le message au journal applicatif (`app_log!`, jamais sur
+    /// le terminal) : réafficher le prompt "> " qui suit est la
     /// responsabilité de l'appelant, qui seul sait s'il s'agit d'une
-    /// commande console (déjà couverte par le réaffichage de `sdl::run`
-    /// après `Machine::console_handle`) ou d'un chargement hors-bande (voir
-    /// `console::notice`, utilisée par exemple au démarrage pour `--disk`).
+    /// commande console ou d'un chargement hors-bande (voir `main.rs`, par
+    /// exemple au démarrage pour `--disk`).
     pub fn load_disk(&mut self, filename: &str) -> Result<(), String> {
         Self::load_disk_into(&mut self.drive_a, filename)?;
         self.reset_transient_state();
-        println!("Floppy DSK Loaded on drive A: {}", filename);
+        app_log!("Floppy DSK Loaded on drive A: {}", filename);
         Ok(())
     }
 
@@ -424,13 +425,13 @@ impl Fdc {
     pub fn load_disk_b(&mut self, filename: &str) -> Result<(), String> {
         if !self.drive_b_enabled {
             return Err(
-                "Le lecteur B n'est pas activé dans la configuration (config.toml : [drives] drive_b = true)"
+                "Drive B is not enabled in the configuration (config.toml: [drives] drive_b = true)"
                     .to_string(),
             );
         }
         Self::load_disk_into(&mut self.drive_b, filename)?;
         self.reset_transient_state();
-        println!("Floppy DSK Loaded on drive B: {}", filename);
+        app_log!("Floppy DSK Loaded on drive B: {}", filename);
         Ok(())
     }
 
@@ -440,20 +441,20 @@ impl Fdc {
         self.drive_a.disk_loaded = false;
         self.drive_a.current_filename = "None".to_string();
         self.reset_transient_state();
-        println!("Floppy DSK Ejected from drive A");
+        app_log!("Floppy DSK Ejected from drive A");
     }
 
     /// Éjecte la disquette du lecteur B.
     pub fn eject_disk_b(&mut self) {
         if !self.drive_b_enabled {
-            println!("Le lecteur B n'est pas activé dans la configuration (config.toml)");
+            app_log!("Drive B is not enabled in the configuration (config.toml)");
             return;
         }
         self.drive_b.dsk = None;
         self.drive_b.disk_loaded = false;
         self.drive_b.current_filename = "None".to_string();
         self.reset_transient_state();
-        println!("Floppy DSK Ejected from drive B");
+        app_log!("Floppy DSK Ejected from drive B");
     }
 
     /// Crée une disquette vierge, formatée AMSDOS standard (40 pistes, une
@@ -1111,10 +1112,7 @@ impl Fdc {
         if let Some(ref dsk) = drv.dsk
             && let Err(e) = Self::write_dsk_file(dsk, &drv.current_filename)
         {
-            println!(
-                "Erreur d'ecriture de '{}' : {e}",
-                drv.current_filename
-            );
+            app_log!("Error writing '{}': {e}", drv.current_filename);
         }
     }
 

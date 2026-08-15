@@ -61,7 +61,7 @@ impl QuickCommandBar {
                         egui::TextEdit::singleline(&mut self.input)
                             .desired_width(f32::INFINITY)
                             .font(egui::TextStyle::Monospace)
-                            .hint_text("commande rapide — F11 pour la console complète"),
+                            .hint_text("quick command — F11 for the full console"),
                     );
                     if self.request_focus {
                         response.request_focus();

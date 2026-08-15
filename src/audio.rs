@@ -5,6 +5,7 @@
 //! passage du flux émulé vers le matériel réel, avec ce que cela suppose de
 //! régulation de latence et de mise en forme du signal.
 
+use crate::app_log;
 use crate::sound::SAMPLE_RATE;
 use sdl2::audio::{AudioQueue, AudioSpecDesired};
 
@@ -138,11 +139,11 @@ impl Audio {
                         // En-tête WAV provisoire, complété à la fermeture.
                         use std::io::Write;
                         let _ = f.write_all(&wav_header(0));
-                        println!("Recording the audio output to {path}");
+                        app_log!("Recording the audio output to {path}");
                         Some((f, 0))
                     }
                     Err(e) => {
-                        println!("Can't record the audio output: {e}");
+                        app_log!("Can't record the audio output: {e}");
                         None
                     }
                 }
@@ -261,9 +262,9 @@ impl Drop for Audio {
             let _ = file.write_all(&wav_header(*count));
             let sound = *count as f32 / SAMPLE_RATE as f32;
             let wall = elapsed;
-            println!(
+            app_log!(
                 "Audio recording closed: {sound:.2} s of sound for {wall:.2} s of real time \
-                 (ratio {:.4} — 1.0000 means the sound is not stretched)",
+                 (ratio {:.4} - 1.0000 means the sound is not stretched)",
                 sound / wall
             );
         }
