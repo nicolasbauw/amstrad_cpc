@@ -192,7 +192,19 @@ impl ConfigPanel {
                     String::new(),
                 ));
             }
-            ui.label("(applies at the next power cycle)");
+        });
+
+        let mut diagnostic_mode = machine.diagnostic_mode;
+        if ui
+            .checkbox(&mut diagnostic_mode, "Diagnostic ROM at slot 0F")
+            .changed()
+        {
+            let arg = if diagnostic_mode { "on" } else { "off" };
+            let _ = cmd_sender.send((MonitorCmd::DiagnosticMode, arg.to_string(), String::new()));
+        }
+
+        ui.horizontal(|ui| {
+            ui.label("Extra RAM banks and the Diagnostic ROM only apply at the next power cycle:");
             if ui.button("Power cycle now").clicked() {
                 let _ = cmd_sender.send((MonitorCmd::PowerCycle, String::new(), String::new()));
             }

@@ -237,6 +237,8 @@ pub fn run(
     // ci-dessus, même canal MonitorCmd.
     let mut config_panel_visible = false;
     let mut config_panel = ConfigPanel::new();
+    // Voir le commentaire sur les évènements Enter/Leave plus bas.
+    let mut mouse_over_main_window = false;
     // Tout ce qui a été journalisé avant l'ouverture des fenêtres (bannière
     // de démarrage, config invalide, --disk/--tape en ligne de commande...)
     // attendait dans la file globale (voir applog.rs) : on le récupère ici,
@@ -342,26 +344,27 @@ pub fn run(
                 } if window_id == console_window_id => {
                     console_window.resize();
                 }
-                // Le pointeur système n'a aucun rôle dans l'émulation (le
-                // clavier et la manette suffisent) : il ne fait que masquer
-                // l'image quand il traîne dessus. `show_cursor` est global à
-                // SDL2 (pas par fenêtre), d'où la bascule sur Enter/Leave de
-                // la fenêtre principale plutôt qu'un simple réglage figé au
-                // démarrage — pour qu'il redevienne visible sur la fenêtre de
-                // statut (F12) ou en dehors de l'émulateur.
+                // Le pointeur système n'a aucun rôle dans l'émulation elle-
+                // même (le clavier et la manette suffisent) : il ne fait que
+                // masquer l'image quand il traîne dessus. Mais F6/F10 posent
+                // des boutons et des curseurs qu'il faut bien pouvoir viser :
+                // ce simple booléen ne décide donc pas seul, il est combiné
+                // chaque trame avec la visibilité des overlays (voir plus
+                // bas, juste avant le rendu) pour obtenir la visibilité
+                // réelle du pointeur.
                 Event::Window {
                     win_event: sdl2::event::WindowEvent::Enter,
                     window_id,
                     ..
                 } if window_id == main_window_id => {
-                    sdl_context.mouse().show_cursor(false);
+                    mouse_over_main_window = true;
                 }
                 Event::Window {
                     win_event: sdl2::event::WindowEvent::Leave,
                     window_id,
                     ..
                 } if window_id == main_window_id => {
-                    sdl_context.mouse().show_cursor(true);
+                    mouse_over_main_window = false;
                 }
                 // Taille d'affichage : F1 normale, F2 x2, F3 x3, F4 plein
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
@@ -666,6 +669,17 @@ pub fn run(
         // `ZoomChoice`) : `ConfigPanel::ui` le renvoie plutôt que de
         // l'appliquer lui-même, pour rester composée dans la même fermeture
         // que la barre rapide sans avoir à connaître `Renderer`.
+        // Le pointeur redevient visible dès qu'un overlay cliquable (F6, et
+        // par cohérence F10) est ouvert et que la souris est sur la fenêtre
+        // principale : sinon les boutons du panneau de configuration
+        // seraient quasiment impossibles à viser à l'aveugle. Recalculé
+        // chaque trame plutôt qu'à chaque évènement individuel (Enter/Leave,
+        // F6, F10...) : plus simple, et 60 fois par seconde est largement
+        // assez réactif pour un simple show/hide de curseur.
+        sdl_context
+            .mouse()
+            .show_cursor(!mouse_over_main_window || quick_bar_visible || config_panel_visible);
+
         let mut requested_zoom: Option<ZoomChoice> = None;
         // Décidé avant de créer la fermeture ci-dessous : elle emprunte
         // `config_panel_visible` en mutable (`ConfigPanel::ui` peut la

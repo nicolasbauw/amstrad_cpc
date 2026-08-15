@@ -54,6 +54,9 @@ like launching from a terminal.
     ram 16              Sets extra RAM banks to 16 (applied at the next
                         power cycle, "pc" — RAM is sized at construction)
     tapevol 10          Sets the tape signal level in the audio mix to 10 %
+    diag on             Enables the Diagnostic ROM at slot 0F (applied at
+                        the next power cycle, "pc")
+    diag off            Disables it
 
 All of the above are also available from the configuration/media panel
 (**`F6`**) as clickable fields, with a native file picker for disk and tape

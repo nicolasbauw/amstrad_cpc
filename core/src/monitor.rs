@@ -61,6 +61,7 @@ pub fn parse_command(line: &str) -> MonitorMessage {
         "driveb" => MonitorCmd::DriveB,
         "ram" => MonitorCmd::ExtraRamBanks,
         "tapevol" => MonitorCmd::TapeAmplitude,
+        "diag" => MonitorCmd::DiagnosticMode,
         _ => MonitorCmd::Unknown,
     };
 
@@ -109,4 +110,10 @@ pub enum MonitorCmd {
     /// ("tapevol <0-100>"), reprise du TODO v1 comme réglage F6 (Plan V2.md
     /// jalon M3). Distincte du volume de sortie global ("vol").
     TapeAmplitude,
+    /// Active/désactive la ROM de Diagnostic Amstrad, en ROM haute 15
+    /// ("0F") ("diag on"/"diag off"). Comme `ExtraRamBanks`, ne peut
+    /// s'appliquer qu'au prochain cycle d'alimentation : les ROMs sont
+    /// chargées par `Machine::load_roms`, appelée depuis `power_on`, pas à
+    /// la volée pendant que le Z80 tourne.
+    DiagnosticMode,
 }

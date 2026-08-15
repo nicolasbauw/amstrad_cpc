@@ -131,6 +131,9 @@ Emulator commands:
     ram 16              Sets extra RAM banks to 16 (applied at the next
                         power cycle, \"pc\" — RAM is sized at construction)
     tapevol 10          Sets the tape signal level in the audio mix to 10 %
+    diag on             Enables the Diagnostic ROM at slot 0F (applied at
+                        the next power cycle, \"pc\")
+    diag off            Disables it
 
 Monitor commands:
     d 0x0000            disassembles code at 0x0000 and the 20 next
@@ -1456,6 +1459,17 @@ impl Machine {
                     println!("Extra RAM banks set to {capped} (applies at the next power cycle, \"pc\").");
                 }
                 Err(_) => println!("Usage: ram <0-{}>", crate::memory::MAX_EXTRA_RAM_GROUPS),
+            },
+            MonitorCmd::DiagnosticMode => match arg.as_str() {
+                "on" => {
+                    self.diagnostic_mode = true;
+                    println!("Diagnostic ROM enabled (applies at the next power cycle, \"pc\").");
+                }
+                "off" => {
+                    self.diagnostic_mode = false;
+                    println!("Diagnostic ROM disabled (applies at the next power cycle, \"pc\").");
+                }
+                _ => println!("Usage: diag on | diag off"),
             },
             MonitorCmd::TapeAmplitude => {
                 if !arg.is_empty() {
