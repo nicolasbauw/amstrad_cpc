@@ -6,11 +6,17 @@ license = "MIT"
 
 [dependencies]
 zilog_z80 = "1.0.0"
-sdl2 = { version = "0.38.0", features = ["ttf"] }
+sdl2 = { version = "0.38.0", features = ["ttf", "raw-window-handle"] }
 toml = "1.1.4"
 serde = { version = "1.0.229", features = ["derive"] }
 directories = "6.0.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Version alignee sur celle utilisee par l'exemple officiel
+# raw-window-handle-with-wgpu de la crate sdl2, seule combinaison balisee
+# (voir Plan V2.md, jalon M0).
+wgpu = "0.20"
+pollster = "0.2"
+bytemuck = { version = "1.19", features = ["derive"] }
 
 [profile.release]
 panic = "abort"

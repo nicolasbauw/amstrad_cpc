@@ -5,6 +5,7 @@
 
 use crate::autotype::AutoTyper;
 use crate::machine::{self, Machine};
+use crate::renderer::Renderer;
 use crate::video;
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
@@ -65,13 +66,12 @@ impl DisplayMode {
 
 /// Applique un niveau de zoom à la fenêtre d'affichage principale.
 ///
-/// La taille logique du canvas (fixée une fois pour toutes à
-/// `video::SCREEN_WIDTH`/`HEIGHT`, voir `run`) fait que SDL2 met toujours
-/// à l'échelle en conservant le ratio d'aspect, avec des bandes noires plutôt
-/// qu'une image étirée : il suffit ici de choisir la taille de fenêtre ou le
-/// plein écran, sans recalculer aucun rectangle de destination.
-fn apply_display_mode(canvas: &mut sdl2::render::WindowCanvas, mode: DisplayMode) {
-    let window = canvas.window_mut();
+/// Le letterboxing/pillarboxing qui conserve le ratio d'aspect (4:3) n'est
+/// plus automatique comme au temps de `Canvas::set_logical_size` : c'est
+/// désormais `Renderer::present` qui recalcule un viewport à chaque trame
+/// (voir `renderer.rs`). Cette fonction ne fait donc plus que choisir la
+/// taille de fenêtre ou le plein écran.
+fn apply_display_mode(window: &mut sdl2::video::Window, mode: DisplayMode) {
     match mode {
         DisplayMode::Fullscreen => {
             let _ = window.set_fullscreen(sdl2::video::FullscreenType::Desktop);
@@ -190,6 +190,9 @@ pub fn run(
             video::SCREEN_HEIGHT as u32,
         )
         .position_centered()
+        // Sans effet hors macOS ; là-bas, condition requise pour que wgpu
+        // puisse créer une surface à partir du handle de cette fenêtre.
+        .metal_view()
         .build()?;
     // Non bloquant : une icône manquante ou illisible ne doit pas empêcher
     // l'émulateur de démarrer, la fenêtre garde alors l'icône par défaut du
@@ -197,23 +200,12 @@ pub fn run(
     if let Err(e) = set_window_icon(&mut window) {
         println!("Can't set window icon: {e}");
     }
-    let mut canvas = window.into_canvas().build()?;
-    // Taille logique fixe : quelle que soit la taille réelle de la fenêtre
-    // (zoom x2/x3, plein écran...), SDL2 met alors automatiquement à
-    // l'échelle en conservant le ratio d'aspect, avec des bandes noires
-    // (letterboxing/pillarboxing) plutôt que d'étirer l'image.
-    canvas.set_logical_size(video::SCREEN_WIDTH as u32, video::SCREEN_HEIGHT as u32)?;
+    let mut renderer = Renderer::new(window)?;
     apply_display_mode(
-        &mut canvas,
+        renderer.window_mut(),
         DisplayMode::from_config(machine.default_zoom()),
     );
-    let main_window_id = canvas.window().id();
-    let texture_creator = canvas.texture_creator();
-    let mut texture = texture_creator.create_texture_streaming(
-        PixelFormatEnum::RGB24,
-        video::SCREEN_WIDTH as u32,
-        video::SCREEN_HEIGHT as u32,
-    )?;
+    let main_window_id = renderer.window().id();
     let mut event_pump = sdl_context.event_pump()?;
 
     let mut frame_buffer = vec![0u8; video::SCREEN_WIDTH * video::SCREEN_HEIGHT * 3];
@@ -255,6 +247,20 @@ pub fn run(
                         running = false;
                     }
                 }
+                // wgpu ne suit pas tout seul le redimensionnement de la
+                // fenêtre (contrairement à `Canvas::set_logical_size`,
+                // disparu avec lui) : il faut reconfigurer la surface à sa
+                // nouvelle taille, sous peine de la dessiner étirée ou
+                // tronquée jusqu'à la trame suivante.
+                Event::Window {
+                    win_event:
+                        sdl2::event::WindowEvent::SizeChanged(..)
+                        | sdl2::event::WindowEvent::Resized(..),
+                    window_id,
+                    ..
+                } if window_id == main_window_id => {
+                    renderer.resize();
+                }
                 // Taille d'affichage : F1 normale, F2 x2, F3 x3, F4 plein
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
                 // pour ne jamais y rester coincé sans savoir comment en
@@ -262,25 +268,25 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F1),
                     ..
-                } => apply_display_mode(&mut canvas, DisplayMode::Normal),
+                } => apply_display_mode(renderer.window_mut(), DisplayMode::Normal),
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F2),
                     ..
-                } => apply_display_mode(&mut canvas, DisplayMode::X2),
+                } => apply_display_mode(renderer.window_mut(), DisplayMode::X2),
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F3),
                     ..
-                } => apply_display_mode(&mut canvas, DisplayMode::X3),
+                } => apply_display_mode(renderer.window_mut(), DisplayMode::X3),
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F4),
                     ..
                 } => {
                     // Bascule : F4 quitte le plein écran s'il est deja actif
                     // (par F4 ou par default_zoom = "fullscreen").
-                    let currently_fullscreen =
-                        canvas.window().fullscreen_state() != sdl2::video::FullscreenType::Off;
+                    let currently_fullscreen = renderer.window().fullscreen_state()
+                        != sdl2::video::FullscreenType::Off;
                     apply_display_mode(
-                        &mut canvas,
+                        renderer.window_mut(),
                         if currently_fullscreen {
                             DisplayMode::Normal
                         } else {
@@ -484,10 +490,7 @@ pub fn run(
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
-        let _ = texture.update(None, &frame_buffer, video::SCREEN_WIDTH * 3);
-        canvas.clear();
-        let _ = canvas.copy(&texture, None, None);
-        canvas.present();
+        renderer.present(&frame_buffer);
 
         if debug_visible {
             // Rendu en temps réel du debugger sur la deuxième fenêtre

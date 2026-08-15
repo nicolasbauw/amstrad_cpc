@@ -12,6 +12,7 @@ mod memory;
 mod monitor;
 mod ppi;
 mod psg;
+mod renderer;
 mod sdl;
 mod snapshot;
 mod sound;
