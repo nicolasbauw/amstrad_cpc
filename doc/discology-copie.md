@@ -85,12 +85,63 @@ Dans `fdc.rs` :
   tour, quel que soit le temps de traitement du logiciel entre deux
   commandes.
 - **Espacement réel des secteurs.** Ce n'est pas un tour divisé par le nombre
-  de secteurs : au format CPC habituel, les secteurs n'occupent qu'environ
-  85 % du tour, le reste étant l'intervalle final avant le trou d'index.
+  de secteurs : au format CPC habituel, les secteurs n'occupent qu'une partie
+  du tour, le reste étant l'intervalle final avant le trou d'index.
   L'espacement est donc calculé à partir de la taille des secteurs
   (`sector_pitch_ticks`, 128 cycles par octet à 250 kbit/s), plafonné à un
   tour. Une valeur trop grande fait manquer des secteurs au relevé (copie
   incomplète), une valeur trop petite en fait relever en double.
+
+## L'espacement des secteurs est un réglage empirique, et il est fragile
+
+`SECTOR_OVERHEAD_BYTES` (`fdc.rs`) chiffre les octets de service autour de
+chaque secteur : synchronisation, en-tête d'identification et son CRC,
+marque de données, CRC des données, intervalle jusqu'au secteur suivant.
+
+**La valeur physiquement exacte ne convient pas.** Le format AMSDOS standard
+donne 144 (22 pour l'en-tête d'identification, 22 de GAP2, 18 autour du champ
+de données, 82 de GAP3) — et avec elle, la copie échoue. La raison : le
+relevé de Discology ne dispose que d'environ 0,92 tour de disquette pour
+cartographier une piste (16 640 interrogations du registre d'état, à 44
+cycles chacune), et ne peut donc pas voir les neuf secteurs d'une piste qui
+en occuperait 0,94. Les disquettes réelles s'en tirent parce que leur GAP3
+est ajusté au nombre de secteurs — celle de Discology en loge dix sur sa
+piste 0.
+
+**Et le comportement n'est pas monotone.** Balayage mesuré : 96 et 100
+conviennent ; 92, 98, 104, 115 et 144 non ; 108 et 130 si. Le nombre
+d'identifiants relevés bascule piste par piste, sans seuil net. La valeur
+retenue (100) est une valeur *vérifiée*, pas un optimum : il n'existe pas de
+plage stable.
+
+### Effet de bord assumé, découvert en corrigeant le CPU
+
+Ce réglage dépend directement de la vitesse du CPU émulé, puisque Discology
+mesure le temps en comptant des tours de boucle. Quand la correction du
+temps machine du Gate Array a été apportée (voir
+`doc/sprite-flicker.md` : le CPC étire chaque cycle machine, pas
+l'instruction entière), la boucle de sondage de Discology s'est allongée —
+elle contient un `IN A,(C)`, passé de 12 à 16 cycles. Son budget a donc
+changé, et `SECTOR_OVERHEAD_BYTES` a dû être recalé de 62 à 100 pour que la
+copie reste fidèle.
+
+C'est le signe que ce paramètre compense l'imprécision du modèle de rotation
+plutôt qu'il ne décrit une réalité physique : toute modification du temps
+CPU le remettra en cause.
+
+### À faire un jour : un vrai modèle de rotation
+
+Le correctif de fond serait de donner à chaque secteur sa **position
+angulaire réelle** sur la piste, lue dans l'image `.dsk` (ordre physique des
+secteurs, tailles réelles, et pour l'Extended DSK les tailles non standard),
+plutôt que de déduire un espacement uniforme d'une constante globale. Le
+temps d'attente d'un Read ID deviendrait alors « temps jusqu'à ce que le
+prochain identifiant passe sous la tête », sans paramètre à régler, et le
+test de Discology cesserait d'être un équilibre instable.
+
+Tant qu'aucun autre logiciel n'en souffre, ça reste un chantier de finition
+(V3), pas un correctif urgent : la copie fonctionne, et le réglage actuel est
+verrouillé par le test de bout en bout.
 
 ## Vérification
 

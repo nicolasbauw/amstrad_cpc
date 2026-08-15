@@ -210,6 +210,18 @@ au refus explicite d'aller vers "le délire des keymaps".
 effet que la touche physique correspondante (test croisé avec les tests
 `autotype` existants, qui connaissent déjà cette correspondance).
 
+### Hors périmètre : les finitions de la V3
+
+Plusieurs approximations connues du cœur émulé (écriture disquette par image
+entière plutôt que par secteur, modèle de rotation du FDC, marques "Deleted
+Data", capture VRAM par ligne plutôt que par caractère, lecture vidéo à
+travers la commutation de banques) sont volontairement laissées en l'état :
+aucune ne nuit au fonctionnement, elles sont documentées et regroupées sous
+« V3 : finitions » dans `TODO.txt`. Elles ne font pas partie de ce plan, qui
+ne touche que la couche de présentation — à une exception près, signalée
+là-bas : l'amplitude du sifflement cassette a sa place dans la fenêtre de
+configuration du jalon M3.
+
 ### M6 — Packaging (indépendant, peut se faire à tout moment)
 
 PKGBUILD AUR, et correction des chemins en dur dans
