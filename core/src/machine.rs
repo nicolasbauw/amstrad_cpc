@@ -125,6 +125,12 @@ Emulator commands:
     pc                  Performs a power cycle
     vol                 Displays the audio output volume
     vol 30              Sets the audio output volume to 30 %
+    driveb on           Enables drive B (immediate, unlike config.toml's
+                        [drives] drive_b, which only applies at startup)
+    driveb off          Disables drive B
+    ram 16              Sets extra RAM banks to 16 (applied at the next
+                        power cycle, \"pc\" — RAM is sized at construction)
+    tapevol 10          Sets the tape signal level in the audio mix to 10 %
 
 Monitor commands:
     d 0x0000            disassembles code at 0x0000 and the 20 next
@@ -359,6 +365,14 @@ impl Machine {
     /// Volume de la sortie audio, dans [0, 1].
     pub fn volume(&self) -> f32 {
         self.volume
+    }
+
+    /// Nombre de banques de RAM étendue actuellement configuré. N'est pas
+    /// forcément ce que `Memory` a effectivement alloué : une valeur changée
+    /// via la commande "ram" (ou le panneau F6) ne s'applique qu'au
+    /// prochain cycle d'alimentation (`power_cycle`), voir `MonitorCmd::ExtraRamBanks`.
+    pub fn extra_ram_banks(&self) -> u32 {
+        self.config.memory.extra_ram_banks
     }
 
     /// Renseigne la cadence mesurée par la boucle principale : vitesse en %
@@ -1418,6 +1432,46 @@ impl Machine {
                     }
                 }
                 println!("Audio volume: {} %", (self.volume * 100.0).round());
+            }
+            MonitorCmd::DriveB => match arg.as_str() {
+                "on" => {
+                    self.bus.fdc.borrow_mut().set_drive_b_enabled(true);
+                    println!("Drive B enabled");
+                }
+                "off" => {
+                    self.bus.fdc.borrow_mut().set_drive_b_enabled(false);
+                    println!("Drive B disabled");
+                }
+                _ => println!("Usage: driveb on | driveb off"),
+            },
+            MonitorCmd::ExtraRamBanks => match arg.parse::<u32>() {
+                Ok(banks) => {
+                    let capped = banks.min(crate::memory::MAX_EXTRA_RAM_GROUPS);
+                    self.config.memory.extra_ram_banks = capped;
+                    if capped != banks {
+                        println!(
+                            "Extra RAM banks capped to the addressable maximum ({capped})."
+                        );
+                    }
+                    println!("Extra RAM banks set to {capped} (applies at the next power cycle, \"pc\").");
+                }
+                Err(_) => println!("Usage: ram <0-{}>", crate::memory::MAX_EXTRA_RAM_GROUPS),
+            },
+            MonitorCmd::TapeAmplitude => {
+                if !arg.is_empty() {
+                    match arg.parse::<f32>() {
+                        Ok(percent) => self
+                            .bus
+                            .psg
+                            .sound
+                            .set_tape_amplitude((percent / 100.0).clamp(0.0, 1.0)),
+                        Err(_) => println!("Usage: tapevol [0-100]"),
+                    }
+                }
+                println!(
+                    "Tape signal level: {} %",
+                    (self.bus.psg.sound.tape_amplitude() * 100.0).round()
+                );
             }
             MonitorCmd::ReadRam => {
                 // Vidage de la RAM brute, sans le banking ROM : sur CPC le code

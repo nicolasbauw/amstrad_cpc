@@ -18,6 +18,9 @@
 
     F1 / F2 / F3   window size x1 / x2 / x3
     F4             toggle fullscreen
+    F6             toggle the configuration/media panel (disks, tape,
+                   drive B, extra RAM, zoom, volume — all with an
+                   immediate effect, no restart needed)
     F8             step to next Z80 instruction
     F9             step to next video line
     F10            toggle the quick command bar (one input line, overlaid
@@ -44,6 +47,17 @@ like launching from a terminal.
     pc                  Performs a power cycle
     vol                 Displays the audio output volume
     vol 30              Sets the audio output volume to 30 %
+    driveb on           Enables drive B, with immediate effect (unlike
+                        config.toml's [drives] drive_b, which only
+                        applies at startup)
+    driveb off          Disables drive B
+    ram 16              Sets extra RAM banks to 16 (applied at the next
+                        power cycle, "pc" — RAM is sized at construction)
+    tapevol 10          Sets the tape signal level in the audio mix to 10 %
+
+All of the above are also available from the configuration/media panel
+(**`F6`**) as clickable fields, with a native file picker for disk and tape
+images — no need to type a path.
 
 ## Tape drive
 

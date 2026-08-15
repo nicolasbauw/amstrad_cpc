@@ -58,6 +58,9 @@ pub fn parse_command(line: &str) -> MonitorMessage {
         "t" => MonitorCmd::Trace,
         "mr" => MonitorCmd::ReadRam,
         "vol" | "volume" => MonitorCmd::Volume,
+        "driveb" => MonitorCmd::DriveB,
+        "ram" => MonitorCmd::ExtraRamBanks,
+        "tapevol" => MonitorCmd::TapeAmplitude,
         _ => MonitorCmd::Unknown,
     };
 
@@ -92,4 +95,18 @@ pub enum MonitorCmd {
     Trace,
     ReadRam,
     Volume,
+    /// Active/désactive le lecteur B à chaud ("driveb on"/"driveb off") —
+    /// contrairement à `config.toml [drives] drive_b`, effet immédiat, sans
+    /// redémarrage. Introduite pour le panneau de configuration (F6, Plan
+    /// V2.md jalon M3).
+    DriveB,
+    /// Change le nombre de banques de RAM étendue ("ram <n>"). Ne peut pas
+    /// avoir d'effet immédiat : `Memory` est dimensionnée à la construction
+    /// (voir `Machine::power_on`), donc la nouvelle valeur ne s'applique
+    /// qu'au prochain cycle d'alimentation (`pc`).
+    ExtraRamBanks,
+    /// Amplitude du signal cassette réinjecté dans le mixage audio
+    /// ("tapevol <0-100>"), reprise du TODO v1 comme réglage F6 (Plan V2.md
+    /// jalon M3). Distincte du volume de sortie global ("vol").
+    TapeAmplitude,
 }

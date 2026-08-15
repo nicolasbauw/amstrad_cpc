@@ -5,6 +5,7 @@
 
 use bytebox_core::app_log;
 use bytebox_core::autotype::AutoTyper;
+use crate::config_panel::{ConfigPanel, ZoomChoice};
 use crate::console_log::ConsoleLog;
 use crate::console_panel::QuickCommandBar;
 use crate::console_window::ConsoleWindow;
@@ -230,6 +231,12 @@ pub fn run(
     let mut quick_bar = QuickCommandBar::new();
     let mut console_log = ConsoleLog::new();
     let cmd_sender = machine.command_sender();
+
+    // Panneau de configuration/médias (F6, config_panel.rs, Plan V2.md
+    // jalon M3) : superposé à la fenêtre principale comme la barre rapide
+    // ci-dessus, même canal MonitorCmd.
+    let mut config_panel_visible = false;
+    let mut config_panel = ConfigPanel::new();
     // Tout ce qui a été journalisé avant l'ouverture des fenêtres (bannière
     // de démarrage, config invalide, --disk/--tape en ligne de commande...)
     // attendait dans la file globale (voir applog.rs) : on le récupère ici,
@@ -271,16 +278,17 @@ pub fn run(
             // principale (jouer, taper au BASIC...) ne les atteint jamais.
             status_panel.handle_event(&event);
             console_window.handle_event(&event);
-            // La barre rapide F10, elle, est superposée à la fenêtre
-            // PRINCIPALE (même wgpu, voir renderer.rs) : ce filtre par
-            // fenêtre ne la protège donc de rien, toute frappe faite en
-            // jouant a le même identifiant de fenêtre qu'elle. Sans la
-            // condition ci-dessous, ces frappes s'accumulaient en silence
-            // dans la file d'entrée d'egui tant que F10 restait fermée (rien
-            // ne la vidait, `Renderer::present` ne traitant cette file que
-            // lorsque la barre est affichée) et se déversaient d'un coup, à
-            // l'ouverture, dans son champ de saisie.
-            if quick_bar_visible {
+            // La barre rapide F10 et le panneau de configuration F6, eux,
+            // sont superposés à la fenêtre PRINCIPALE (même wgpu, voir
+            // renderer.rs) : ce filtre par fenêtre ne les protège donc de
+            // rien, toute frappe faite en jouant a le même identifiant de
+            // fenêtre qu'eux. Sans la condition ci-dessous, ces frappes
+            // s'accumulaient en silence dans la file d'entrée d'egui tant
+            // qu'aucun des deux n'était affiché (rien ne la vidait,
+            // `Renderer::present` ne traitant cette file que lorsqu'un
+            // overlay est actif) et se déversaient d'un coup, à
+            // l'ouverture, dans le premier champ de saisie venu.
+            if quick_bar_visible || config_panel_visible {
                 renderer.handle_event(&event);
             }
             match event {
@@ -437,6 +445,15 @@ pub fn run(
                         quick_bar.request_focus();
                     }
                 }
+                // Panneau de configuration/médias (F6, Plan V2.md jalon M3) :
+                // même mécanisme que la barre rapide F10 ci-dessus (overlay
+                // sur la fenêtre principale, pas de fenêtre séparée).
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F6),
+                    ..
+                } => {
+                    config_panel_visible = !config_panel_visible;
+                }
                 // Console complète (F11) : fenêtre séparée, sur le même
                 // modèle que le statut machine (F12).
                 Event::KeyDown {
@@ -463,7 +480,7 @@ pub fn run(
                     }
                 }
                 // La barre rapide absorbe le clavier tant qu'elle est
-                // ouverte, et cette entrée globale ne doit de toute façon
+                // ouverte(s), et cette entrée globale ne doit de toute façon
                 // s'appliquer qu'à la fenêtre principale : sans le filtre
                 // sur `window_id`, taper dans la console complète (F11,
                 // fenêtre séparée) ou dans la fenêtre de statut (F12)
@@ -474,7 +491,10 @@ pub fn run(
                     keymod,
                     window_id,
                     ..
-                } if window_id == main_window_id && !quick_bar_visible => {
+                } if window_id == main_window_id
+                    && !quick_bar_visible
+                    && !config_panel_visible =>
+                {
                     let shift_held = keymod.intersects(
                         sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
                     );
@@ -641,13 +661,44 @@ pub fn run(
         // Appel au module vidéo déporté pour le rendu VRAM
         video::render(&machine, &mut frame_buffer);
 
-        let mut quick_bar_ui = |ctx: &egui::Context| quick_bar.ui(ctx, &cmd_sender, &mut console_log);
-        let overlay: Option<&mut dyn FnMut(&egui::Context)> = if quick_bar_visible {
-            Some(&mut quick_bar_ui)
+        // Le panneau F6 est un état de la machine émulée (MonitorCmd) sauf
+        // pour le zoom, un état de présentation (la fenêtre SDL2, voir
+        // `ZoomChoice`) : `ConfigPanel::ui` le renvoie plutôt que de
+        // l'appliquer lui-même, pour rester composée dans la même fermeture
+        // que la barre rapide sans avoir à connaître `Renderer`.
+        let mut requested_zoom: Option<ZoomChoice> = None;
+        // Décidé avant de créer la fermeture ci-dessous : elle emprunte
+        // `config_panel_visible` en mutable (`ConfigPanel::ui` peut la
+        // remettre à faux via la croix de la fenêtre egui), la relire une
+        // fois la fermeture construite serait rejeté par l'emprunteur.
+        let show_overlay = quick_bar_visible || config_panel_visible;
+        let mut draw_overlay = |ctx: &egui::Context| {
+            if quick_bar_visible {
+                quick_bar.ui(ctx, &cmd_sender, &mut console_log);
+            }
+            if config_panel_visible {
+                requested_zoom =
+                    config_panel.ui(ctx, &machine, &cmd_sender, &mut config_panel_visible);
+            }
+        };
+        let overlay: Option<&mut dyn FnMut(&egui::Context)> = if show_overlay {
+            Some(&mut draw_overlay)
         } else {
             None
         };
         renderer.present(&frame_buffer, overlay);
+
+        if let Some(zoom) = requested_zoom {
+            apply_display_mode(
+                renderer.window_mut(),
+                match zoom {
+                    ZoomChoice::X1 => DisplayMode::Normal,
+                    ZoomChoice::X2 => DisplayMode::X2,
+                    ZoomChoice::X3 => DisplayMode::X3,
+                    ZoomChoice::Fullscreen => DisplayMode::Fullscreen,
+                },
+            );
+        }
 
         if debug_visible {
             let registers = machine.get_registers_string();

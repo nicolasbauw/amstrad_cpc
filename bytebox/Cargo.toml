@@ -29,3 +29,7 @@ bytemuck = { version = "1.19", features = ["derive"] }
 egui = "0.33.3"
 egui-wgpu = "0.33.3"
 egui-sdl2-event = "1.33.3"
+# Sélecteur de fichier natif (Plan V2.md, jalon M3) : agnostique du système
+# (portail XDG/GTK sous Linux, natif sous Windows et macOS), pas de
+# dépendance graphique supplémentaire à embarquer.
+rfd = "0.17.2"

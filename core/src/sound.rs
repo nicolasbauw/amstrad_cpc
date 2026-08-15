@@ -38,7 +38,8 @@ const MAX_BUFFERED_SAMPLES: usize = SAMPLE_RATE as usize;
 /// chargement. Volontairement discret par rapport au PSG (dont un canal
 /// saturé vaut 1.0 avant division par 3) : assez présent pour être
 /// reconnaissable, assez bas pour ne pas couvrir la musique d'un jeu qui
-/// chargerait en fond.
+/// chargerait en fond. Valeur par défaut seulement : réglable à l'exécution
+/// via `Sound::set_tape_amplitude` ("tapevol", ou le panneau F6).
 const TAPE_AMPLITUDE: f32 = 0.10;
 
 pub const VOLUME_TABLE: [f32; 16] = [
@@ -88,6 +89,11 @@ pub struct Sound {
     /// `Machine::step` a partir du lecteur, et melange tel quel a la sortie
     /// du PSG.
     tape_level: f32,
+    /// Amplitude du signal cassette réinjecté dans le mixage audio (voir la
+    /// constante `TAPE_AMPLITUDE` ci-dessus pour la justification de la
+    /// valeur par défaut) — réglable depuis la commande console "tapevol"
+    /// et le panneau de configuration (F6, Plan V2.md jalon M3).
+    tape_amplitude: f32,
     samples: VecDeque<f32>,
 }
 
@@ -151,6 +157,7 @@ impl Sound {
             sample_sum: 0.0,
             sample_len: 0,
             tape_level: 0.0,
+            tape_amplitude: TAPE_AMPLITUDE,
             samples: VecDeque::new(),
         }
     }
@@ -319,7 +326,17 @@ impl Sound {
     /// plusieurs centaines de cycles, cette résolution est donc largement
     /// suffisante.
     pub fn set_tape_level(&mut self, playing_high: bool) {
-        self.tape_level = if playing_high { TAPE_AMPLITUDE } else { 0.0 };
+        self.tape_level = if playing_high { self.tape_amplitude } else { 0.0 };
+    }
+
+    /// Amplitude actuelle du signal cassette dans le mixage, dans [0, 1].
+    pub fn tape_amplitude(&self) -> f32 {
+        self.tape_amplitude
+    }
+
+    /// Règle l'amplitude du signal cassette dans le mixage, sur [0, 1].
+    pub fn set_tape_amplitude(&mut self, amplitude: f32) {
+        self.tape_amplitude = amplitude.clamp(0.0, 1.0);
     }
 
     pub fn take_samples(&mut self) -> Vec<f32> {

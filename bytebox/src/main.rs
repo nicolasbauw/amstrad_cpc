@@ -1,4 +1,5 @@
 mod audio;
+mod config_panel;
 mod console_log;
 mod console_panel;
 mod console_window;
