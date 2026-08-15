@@ -318,6 +318,37 @@ crate `zilog_z80` : `SET 1,(HL)`, `SET 3,(HL)`, `SET 5,(HL)` et `SET 7,(HL)`
 étaient à 8 cycles au lieu de 15 (les quatre autres `SET b,(HL)` et tous les
 `RES b,(HL)` étaient corrects). Corrigé côté crate.
 
+### Le correctif de Cauldron reste-t-il pertinent ?
+
+Question légitime une fois la cause de BMX trouvée : le clignotement de
+Cauldron venait-il lui aussi du CPU trop rapide, auquel cas la capture de la
+VRAM ligne par ligne (voir « Correctif » plus haut) ne serait qu'un
+pansement ?
+
+Mesuré, plutôt que raisonné. Cauldron lancé jusqu'en jeu (chauves-souris et
+sorcière animées), 58 trames comparées, avec le CPU désormais correct :
+
+| | pixels oscillants |
+|---|---|
+| Capture ligne par ligne (code actuel) | **0** |
+| Capture désactivée (modèle d'avant le correctif) | **8488** |
+
+Le correctif de Cauldron reste donc indispensable : la correction du CPU ne
+le rend pas caduc, les deux causes étaient bien distinctes.
+
+Et il ne nuit pas à la fidélité — c'est l'inverse. Un tube cathodique peint
+chaque ligne avec le contenu de la VRAM tel qu'il est à l'instant où le
+faisceau la balaie ; prendre un instantané unique pour toute la trame est
+l'approximation, pas le contraire. La capture ligne par ligne est donc le
+modèle juste, et il le restera quelle que soit la précision du CPU.
+
+Il reste d'ailleurs perfectible dans le même sens : nous capturons les
+octets d'une ligne au moment où elle *commence* à être balayée, alors que le
+CRTC les lit au fil de la ligne, deux octets par position de caractère. Une
+écriture survenant en milieu de ligne n'est donc pas reflétée sur sa moitié
+droite. Per-ligne est déjà bien plus fidèle que per-trame ; per-caractère le
+serait davantage.
+
 ### Effet de bord : le copieur de Discology a dû être recalé
 
 Discology chronomètre le contrôleur de disquette en comptant ses
