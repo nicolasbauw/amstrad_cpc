@@ -38,7 +38,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(window: Window) -> Result<Self, String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
@@ -59,16 +59,16 @@ impl Renderer {
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
         }))
-        .ok_or("Aucun adaptateur graphique compatible (wgpu)")?;
+        .map_err(|e| e.to_string())?;
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("bytebox device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-            },
-            None,
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("bytebox device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+        }))
         .map_err(|e| e.to_string())?;
 
         let (draw_w, draw_h) = window.drawable_size();
@@ -181,13 +181,13 @@ impl Renderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: None,
@@ -207,6 +207,7 @@ impl Renderer {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache: None,
         });
 
         Ok(Self {
@@ -264,14 +265,14 @@ impl Renderer {
         }
 
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.frame_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &self.rgba,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * video::SCREEN_WIDTH as u32),
                 rows_per_image: Some(video::SCREEN_HEIGHT as u32),
@@ -305,6 +306,9 @@ impl Renderer {
                 label: Some("frame pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
+                    // Sans effet pour une texture 2D classique : ne s'applique
+                    // qu'aux textures 3D, absentes ici.
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         // Noir, comme la couleur de tracé par défaut du
