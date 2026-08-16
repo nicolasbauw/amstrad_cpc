@@ -36,6 +36,10 @@ command and every message goes through the quick command bar (`F10`) or the
 full console window (`F11`), so launching from a desktop icon works exactly
 like launching from a terminal.
 
+This function key table, along with the "Emulator commands" and "Emulator
+monitor commands" sections further down, are also available in-app, without
+alt-tabbing to this file: the "Help" tab of the configuration panel (`F6`).
+
 ## CRT shader
 
 `F5` reconstructs the image the way a real tube would: an RGB phosphor mask

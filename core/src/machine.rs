@@ -111,7 +111,10 @@ fn cpc_mcycle_extra(first: u8, second: u8) -> u32 {
         _ => 0,
     }
 }
-const HELP: &str = "
+/// Texte de la commande console `help` — aussi affiché tel quel dans
+/// l'onglet "Help" du panneau F6 (`config_panel.rs`, côté binaire) : une
+/// seule source pour ces deux façades, pas deux textes à tenir synchronisés.
+pub const HELP: &str = "
 Emulator commands:
     disk d.dsk          Loads the d.dsk disk image on drive A
     disk d.dsk b        Loads the d.dsk disk image on drive B (if enabled in config.toml)

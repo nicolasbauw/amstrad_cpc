@@ -36,7 +36,25 @@ pub enum ZoomChoice {
 enum Tab {
     General,
     Crt,
+    Help,
 }
+
+/// Touches de fonction : sans équivalent côté machine émulée (contrairement
+/// aux commandes ci-dessous), donc pas de constante partagée à réutiliser —
+/// seul le README en gardait la liste jusqu'ici. À tenir en phase avec sa
+/// section "Function keys" si l'une des deux change.
+const FUNCTION_KEYS: &str = "\
+F1 / F2 / F3   Window size x1 / x2 / x3
+F4             Toggle fullscreen
+F5             Toggle the CRT shader (RGB phosphor mask, scanlines)
+F6             Toggle this configuration panel
+F8             Step to next Z80 instruction
+F9             Step to next video line
+F10            Toggle the quick command bar (one input line, overlaid
+               on the emulator window)
+F11            Toggle the full console window (scrollable history,
+               same commands as the quick command bar)
+F12            Toggle the machine status window";
 
 pub struct ConfigPanel {
     /// Nom de fichier pour une nouvelle disquette vierge ("blank") : pure
@@ -83,6 +101,7 @@ impl ConfigPanel {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.tab, Tab::General, "General");
                     ui.selectable_value(&mut self.tab, Tab::Crt, "Shader CRT (F5)");
+                    ui.selectable_value(&mut self.tab, Tab::Help, "Help");
                 });
                 ui.separator();
                 match self.tab {
@@ -100,6 +119,7 @@ impl ConfigPanel {
                         Self::audio_section(ui, machine, cmd_sender);
                     }
                     Tab::Crt => Self::crt_section(ui, &mut crt_settings),
+                    Tab::Help => Self::help_section(ui),
                 }
             });
         (zoom, crt_settings)
@@ -337,6 +357,28 @@ impl ConfigPanel {
                 }
             }
         });
+    }
+
+    /// Réunit ce que le README garde par ailleurs éclaté en plusieurs
+    /// sections (touches de fonction, commandes console, commandes du
+    /// moniteur) : pratique pour l'utilisateur, inutile de quitter
+    /// l'émulateur — mais toujours du texte destiné à être lu, pas à être
+    /// cliqué, donc pas sa place dans l'onglet "General".
+    ///
+    /// `bytebox_core::machine::HELP` fournit déjà les deux dernières
+    /// sections telles quelles : c'est le même texte que la commande console
+    /// `help` (F10/F11), une seule source pour les deux façades.
+    fn help_section(ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .max_height(420.0)
+            .show(ui, |ui| {
+                ui.heading("Function keys");
+                ui.label(egui::RichText::new(FUNCTION_KEYS).monospace());
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(bytebox_core::machine::HELP.trim_start()).monospace(),
+                );
+            });
     }
 
     fn audio_section(ui: &mut egui::Ui, machine: &Machine, cmd_sender: &Sender<MonitorMessage>) {
