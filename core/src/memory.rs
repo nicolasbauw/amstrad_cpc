@@ -128,19 +128,36 @@ impl Memory {
             return (STANDARD_RAM_BANKS * 16384) + extended * 16384 + offset;
         }
 
-        let bank = match self.ram_config & 0x07 {
-            0 => [0, 1, 2, 3][page],
-            1 => [0, 1, 2, 7][page],
-            2 => [4, 5, 6, 7][page],
-            3 => [0, 3, 2, 7][page],
-            4 => [0, 4, 2, 3][page],
-            5 => [0, 5, 2, 3][page],
-            6 => [0, 6, 2, 3][page],
-            7 => [0, 7, 2, 3][page],
-            _ => [0, 1, 2, 3][page],
-        };
+        let bank = self.standard_bank_mapping()[page];
 
-        (bank * 16384) + offset
+        (bank as usize * 16384) + offset
+    }
+
+    /// Correspondance page logique (0..4, 16 Ko chacune) -> banque physique
+    /// pour la configuration RAM standard courante (`ram_config`) — la même
+    /// table que `get_ram_physical_address` ci-dessus, ordonnée pareil.
+    /// Utilisée aussi par le panneau de statut (F12) pour afficher un
+    /// mapping lisible plutôt que le seul numéro de config brut.
+    pub fn standard_bank_mapping(&self) -> [u8; 4] {
+        match self.ram_config & 0x07 {
+            0 => [0, 1, 2, 3],
+            1 => [0, 1, 2, 7],
+            2 => [4, 5, 6, 7],
+            3 => [0, 3, 2, 7],
+            4 => [0, 4, 2, 3],
+            5 => [0, 5, 2, 3],
+            6 => [0, 6, 2, 3],
+            7 => [0, 7, 2, 3],
+            _ => [0, 1, 2, 3],
+        }
+    }
+
+    /// Sous-banque étendue actuellement mappée en page 1 (0x4000-0x7FFF),
+    /// voir le champ `extended_page1_bank` — `None` si la page 1 suit
+    /// simplement `ram_config` (comportement standard, pas d'extension
+    /// active).
+    pub fn extended_page1_bank(&self) -> Option<usize> {
+        self.extended_page1_bank
     }
 
     /// Traite une écriture au registre MMU (bits 7-6 de la valeur à 1, voir

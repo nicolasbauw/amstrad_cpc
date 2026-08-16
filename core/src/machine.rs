@@ -869,6 +869,23 @@ impl Machine {
         app_log!("{}", self.get_registers_string());
     }
 
+    fn high_rom_name(index: u8, present: bool) -> &'static str {
+        // Slots réellement chargés par `load_roms` (voir plus haut) : 0 =
+        // BASIC, 7 = AMSDOS, 15 = ROM de diagnostic. Tout autre slot est un
+        // slot d'extension jamais peuplé par cet émulateur (pas de support
+        // cartouche/ROM board) — "present" vient malgré tout de
+        // `rom_high_present`, pas d'une simple table figée, pour rester
+        // correct si `load_high_rom` finit par être appelé pour un slot
+        // inattendu.
+        match index {
+            0 if present => "BASIC",
+            7 if present => "AMSDOS",
+            15 if present => "Diagnostic",
+            _ if present => "unrecognized ROM",
+            _ => "unassigned",
+        }
+    }
+
     pub fn get_hardware_string(&mut self, show_kb: bool) -> String {
         use std::fmt::Write;
         let mut s = String::new();
@@ -907,15 +924,29 @@ impl Machine {
             "  High ROM Enabled   : {:<5}",
             self.bus.memory.rom_high_enabled
         );
+        let selected_high_rom = self.bus.memory.selected_high_rom;
         let _ = writeln!(
             s,
-            "  Selected High ROM  : {}",
-            self.bus.memory.selected_high_rom
+            "  Selected High ROM  : {} ({})",
+            selected_high_rom,
+            Self::high_rom_name(
+                selected_high_rom,
+                self.bus.memory.rom_high_present[selected_high_rom as usize]
+            )
+        );
+        let mapping = self.bus.memory.standard_bank_mapping();
+        let _ = writeln!(
+            s,
+            "  RAM Configuration  : Bank Config {} (0000:{} 4000:{} 8000:{} C000:{})",
+            self.bus.memory.ram_config, mapping[0], mapping[1], mapping[2], mapping[3]
         );
         let _ = writeln!(
             s,
-            "  RAM Configuration  : Bank Config {}",
-            self.bus.memory.ram_config
+            "  Extended RAM       : {}",
+            match self.bus.memory.extended_page1_bank() {
+                Some(bank) => format!("bank {bank} mapped at 4000-7FFF"),
+                None => "none (standard paging)".to_string(),
+            }
         );
 
         // Affichage de la palette du Gate Array
