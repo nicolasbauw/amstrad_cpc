@@ -147,7 +147,7 @@ impl Default for CrtSettings {
             scanline_strength: 0.6,
             beam_bloom: 0.66,
             bright_boost: 1.6,
-            horizontal_blur: 0.5,
+            horizontal_blur: 0.75,
         }
     }
 }

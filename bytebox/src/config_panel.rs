@@ -27,6 +27,17 @@ pub enum ZoomChoice {
     Fullscreen,
 }
 
+/// Onglet actif du panneau. Le shader CRT s'est retrouvé avec assez de
+/// curseurs pour faire à lui seul déborder la fenêtre en x1 (voir Plan V2.md)
+/// — le séparer du reste, qu'on ajuste rarement une fois réglé une bonne
+/// fois, remet le panneau principal à une taille raisonnable sans rien
+/// retirer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tab {
+    General,
+    Crt,
+}
+
 pub struct ConfigPanel {
     /// Nom de fichier pour une nouvelle disquette vierge ("blank") : pure
     /// saisie utilisateur, sans état côté machine dont le repartir — les
@@ -35,6 +46,7 @@ pub struct ConfigPanel {
     /// à chaque trame.
     blank_disk_name: String,
     blank_disk_drive_b: bool,
+    tab: Tab,
 }
 
 impl ConfigPanel {
@@ -42,6 +54,7 @@ impl ConfigPanel {
         Self {
             blank_disk_name: String::new(),
             blank_disk_drive_b: false,
+            tab: Tab::General,
         }
     }
 
@@ -67,20 +80,27 @@ impl ConfigPanel {
             .resizable(true)
             .default_width(420.0)
             .show(ctx, |ui| {
-                ui.heading("Media");
-                self.media_section(ui, machine, cmd_sender);
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.tab, Tab::General, "General");
+                    ui.selectable_value(&mut self.tab, Tab::Crt, "Shader CRT (F5)");
+                });
                 ui.separator();
-                ui.heading("Hardware");
-                Self::hardware_section(ui, machine, cmd_sender);
-                ui.separator();
-                ui.heading("Display");
-                Self::display_section(ui, &mut zoom);
-                ui.separator();
-                ui.heading("Audio");
-                Self::audio_section(ui, machine, cmd_sender);
-                ui.separator();
-                ui.heading("Shader CRT (F5)");
-                Self::crt_section(ui, &mut crt_settings);
+                match self.tab {
+                    Tab::General => {
+                        ui.heading("Media");
+                        self.media_section(ui, machine, cmd_sender);
+                        ui.separator();
+                        ui.heading("Hardware");
+                        Self::hardware_section(ui, machine, cmd_sender);
+                        ui.separator();
+                        ui.heading("Display");
+                        Self::display_section(ui, &mut zoom);
+                        ui.separator();
+                        ui.heading("Audio");
+                        Self::audio_section(ui, machine, cmd_sender);
+                    }
+                    Tab::Crt => Self::crt_section(ui, &mut crt_settings),
+                }
             });
         (zoom, crt_settings)
     }

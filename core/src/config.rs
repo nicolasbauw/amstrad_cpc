@@ -316,7 +316,7 @@ mod tests {
             scanline_strength: Some(0.6),
             beam_bloom: Some(0.66),
             bright_boost: Some(1.6),
-            horizontal_blur: Some(0.5),
+            horizontal_blur: Some(0.75),
         };
         let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
         let body = toml::to_string(&crt).expect("serialisation refusee");
