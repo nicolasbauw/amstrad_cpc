@@ -86,7 +86,7 @@ scanline_beam = 9.0
 mask_cell_px = 2.0
 ```
 
-## Emulator commands:
+## Emulator commands
     disk d.dsk          Loads the d.dsk disk image on drive A
     disk d.dsk b        Loads the d.dsk disk image on drive B (if enabled in config.toml)
     disk eject          Ejects the disk image from drive A
@@ -132,7 +132,7 @@ key", after which the emulated datacorder starts feeding the firmware.
 
 ![Screenshot](assets/tape.png)
   
-## Emulator monitor commands:
+## Emulator monitor commands
   
     d 0x0000          disassembles code at 0x0000 and the 20 next
                       instructions
