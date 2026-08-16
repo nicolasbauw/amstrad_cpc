@@ -10,6 +10,7 @@
 //! ne voit aucune différence entre les deux façades.
 
 use crate::renderer::CrtSettings;
+use bytebox_core::app_log;
 use bytebox_core::machine::Machine;
 use bytebox_core::monitor::{MonitorCmd, MonitorMessage};
 use std::sync::mpsc::Sender;
@@ -294,9 +295,21 @@ impl ConfigPanel {
         ui.add(
             egui::Slider::new(&mut settings.bright_boost, 1.0..=2.5).text("Brightness boost"),
         );
-        if ui.button("Reset to defaults").clicked() {
-            *settings = CrtSettings::default();
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Reset to defaults").clicked() {
+                *settings = CrtSettings::default();
+            }
+            // Le seul réglage de ce panneau qui survive à la fermeture de
+            // l'émulateur : tout le reste est soit un état de la machine
+            // (rejoué par config.toml au prochain démarrage), soit un choix
+            // de session assumé comme tel (zoom, activation du shader).
+            if ui.button("Save to config.toml").clicked() {
+                match bytebox_core::config::save_crt_config(&settings.to_config()) {
+                    Ok(()) => app_log!("CRT settings saved to config.toml"),
+                    Err(e) => app_log!("Could not save CRT settings: {e}"),
+                }
+            }
+        });
     }
 
     fn audio_section(ui: &mut egui::Ui, machine: &Machine, cmd_sender: &Sender<MonitorMessage>) {

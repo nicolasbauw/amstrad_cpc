@@ -29,6 +29,7 @@ use egui_sdl2_event::EguiSDL2State;
 use sdl2::video::Window;
 use wgpu::util::DeviceExt;
 
+use bytebox_core::config::CrtConfig;
 use bytebox_core::video;
 
 /// Paramètres du shader CRT (`renderer_crt.wgsl`), en mémoire tampon
@@ -91,27 +92,56 @@ pub struct CrtSettings {
     pub bright_boost: f32,
 }
 
+impl CrtSettings {
+    /// Applique les valeurs enregistrées dans `config.toml` par-dessus les
+    /// valeurs par défaut, champ par champ : une section `[crt]` partielle
+    /// (ou absente) reste donc parfaitement valable.
+    pub fn from_config(crt: &CrtConfig) -> Self {
+        let d = Self::default();
+        Self {
+            mask_cell_px: crt.mask_cell_px.unwrap_or(d.mask_cell_px),
+            mask_min: crt.mask_min.unwrap_or(d.mask_min),
+            mask_strength: crt.mask_strength.unwrap_or(d.mask_strength),
+            scanline_beam: crt.scanline_beam.unwrap_or(d.scanline_beam),
+            scanline_strength: crt.scanline_strength.unwrap_or(d.scanline_strength),
+            beam_bloom: crt.beam_bloom.unwrap_or(d.beam_bloom),
+            bright_boost: crt.bright_boost.unwrap_or(d.bright_boost),
+        }
+    }
+
+    /// Réciproque de [`CrtSettings::from_config`], pour l'enregistrement :
+    /// tous les champs sont renseignés, même ceux restés à leur valeur par
+    /// défaut. Enregistrer, c'est figer un rendu — si une version ultérieure
+    /// change les valeurs par défaut, l'utilisateur doit retrouver le sien.
+    pub fn to_config(self) -> CrtConfig {
+        CrtConfig {
+            mask_cell_px: Some(self.mask_cell_px),
+            mask_min: Some(self.mask_min),
+            mask_strength: Some(self.mask_strength),
+            scanline_beam: Some(self.scanline_beam),
+            scanline_strength: Some(self.scanline_strength),
+            beam_bloom: Some(self.beam_bloom),
+            bright_boost: Some(self.bright_boost),
+        }
+    }
+}
+
 impl Default for CrtSettings {
     /// Valeurs choisies par itération visuelle (Plan V2.md, jalon M4),
     /// réglées en plein écran sur un écran haute densité (4K), où l'unité
     /// "pixel de sortie" est physiquement minuscule.
     ///
-    /// Les trois réglages de masque viennent du réglage validé par
-    /// l'utilisateur. Ceux de balayage ont dû être recalibrés : la période
-    /// des scanlines a doublé (elle suit maintenant les vraies lignes de
-    /// balayage CPC, pas les lignes du tampon — voir `line_height`) et
-    /// `beam_bloom` remplace `bright_boost` dans son rôle de compensation de
-    /// luminosité, si bien que les anciennes valeurs poussées à fond n'ont
-    /// plus le même sens.
+    /// Un `config.toml` qui porte une section `[crt]` les outrepasse, champ
+    /// par champ — voir [`CrtSettings::from_config`].
     fn default() -> Self {
         Self {
-            mask_cell_px: 2.9,
+            mask_cell_px: 2.0,
             mask_min: 0.6,
-            mask_strength: 0.6,
-            scanline_beam: 6.0,
-            scanline_strength: 1.0,
-            beam_bloom: 0.35,
-            bright_boost: 1.3,
+            mask_strength: 0.35,
+            scanline_beam: 9.0,
+            scanline_strength: 0.6,
+            beam_bloom: 0.66,
+            bright_boost: 1.6,
         }
     }
 }

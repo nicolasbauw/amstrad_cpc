@@ -1,5 +1,5 @@
 use directories::UserDirs;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +20,37 @@ pub struct Config {
     pub memory: MemoryConfig,
     #[serde(default)]
     pub rom: RomConfig,
+    #[serde(default)]
+    pub crt: CrtConfig,
+}
+
+/// Réglages du shader CRT (F5) enregistrés depuis le panneau F6.
+///
+/// Tout est `Option` : un champ absent laisse la valeur par défaut compilée
+/// dans le shader (`CrtSettings::default`, côté binaire), un champ présent
+/// l'outrepasse. C'est ce qui permet d'enregistrer un réglage partiel, et
+/// surtout de faire évoluer les valeurs par défaut sans écraser silencieusement
+/// le choix d'un utilisateur qui, lui, ne verrait rien changer.
+///
+/// `Serialize` en plus de `Deserialize`, contrairement au reste de ce
+/// fichier : c'est la seule section que l'émulateur réécrit lui-même
+/// (`save_crt_config`), le reste restant à la main de l'utilisateur.
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
+pub struct CrtConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_cell_px: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_min: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_strength: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanline_beam: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanline_strength: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beam_bloom: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bright_boost: Option<f32>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -139,23 +170,84 @@ pub struct Debugger {
     pub audio: bool,
 }
 
-pub fn load_config_file() -> Result<Config, MachineError> {
-    let user_dirs = UserDirs::new().ok_or(MachineError::ConfigFile);
-    let mut cfg = user_dirs?.home_dir().to_path_buf();
+/// Emplacement du fichier de configuration. En release (production) il vit
+/// dans le répertoire personnel ; en debug, on prend celui du dépôt. On garde
+/// un `PathBuf` de bout en bout plutôt que de repasser par une chaîne :
+/// `to_str()` échoue sur un chemin qui n'est pas de l'UTF-8 valide, ce qui
+/// faisait paniquer l'émulateur au démarrage pour un répertoire personnel
+/// exotique.
+pub fn config_path() -> Result<PathBuf, MachineError> {
+    if cfg!(debug_assertions) {
+        return Ok(PathBuf::from("config/config.toml"));
+    }
+    let user_dirs = UserDirs::new().ok_or(MachineError::ConfigFile)?;
+    let mut cfg = user_dirs.home_dir().to_path_buf();
     cfg.push(".config/bytebox/config.toml");
-    // En release (production), le fichier vit dans le répertoire personnel ;
-    // en debug, on prend celui du dépôt. On garde un `PathBuf` de bout en
-    // bout plutôt que de repasser par une chaîne : `to_str()` échoue sur un
-    // chemin qui n'est pas de l'UTF-8 valide, ce qui faisait paniquer
-    // l'émulateur au démarrage pour un répertoire personnel exotique.
-    let config_path = if cfg!(debug_assertions) {
-        PathBuf::from("config/config.toml")
-    } else {
-        cfg
-    };
-    let buf = fs::read_to_string(config_path)?;
+    Ok(cfg)
+}
+
+pub fn load_config_file() -> Result<Config, MachineError> {
+    let buf = fs::read_to_string(config_path()?)?;
     let config: Config = toml::from_str(&buf).map_err(|_e| MachineError::ConfigFileFmt)?;
     Ok(config)
+}
+
+/// Réécrit la seule section `[crt]` du fichier de configuration, en laissant
+/// tout le reste — y compris les commentaires — intact.
+///
+/// Sérialiser `Config` en entier serait plus court, mais réécrirait le
+/// fichier de l'utilisateur de bout en bout : commentaires perdus, sections
+/// réordonnées, valeurs par défaut soudain écrites en dur. Pour un fichier
+/// que l'utilisateur édite à la main, c'est un prix trop élevé.
+pub fn save_crt_config(crt: &CrtConfig) -> Result<(), MachineError> {
+    let path = config_path()?;
+    // Fichier absent : on repart d'un contenu vide plutôt que d'échouer —
+    // enregistrer ses réglages doit marcher même au tout premier lancement.
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let body = toml::to_string(crt).map_err(|_e| MachineError::ConfigFileFmt)?;
+    fs::write(&path, replace_section(&existing, "crt", &body))?;
+    Ok(())
+}
+
+/// Remplace le corps de la section TOML `section` par `body`, ou l'ajoute si
+/// elle est absente. La section réécrite est toujours placée en fin de
+/// fichier (l'ordre des sections n'a aucune importance en TOML) ; seul effet
+/// de bord notable, un commentaire qui précédait immédiatement l'ancienne
+/// section se retrouve rattaché à ce qui la suivait.
+fn replace_section(content: &str, section: &str, body: &str) -> String {
+    let header = format!("[{section}]");
+    let mut kept: Vec<&str> = Vec::new();
+    let mut skipping = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == header {
+            skipping = true;
+            continue;
+        }
+        // Toute autre en-tête de section met fin au saut : on ne supprime que
+        // le corps de celle qui nous intéresse.
+        if skipping {
+            if trimmed.starts_with('[') {
+                skipping = false;
+            } else {
+                continue;
+            }
+        }
+        kept.push(line);
+    }
+    while kept.last().is_some_and(|l| l.trim().is_empty()) {
+        kept.pop();
+    }
+
+    let mut out = kept.join("\n");
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&header);
+    out.push('\n');
+    out.push_str(body.trim_end());
+    out.push('\n');
+    out
 }
 
 #[cfg(test)]
@@ -188,6 +280,72 @@ mod tests {
             config.rom.system.is_none(),
             "sans section [rom], les chemins doivent rester absents (secours code en dur)"
         );
+        assert_eq!(
+            config.crt,
+            CrtConfig::default(),
+            "sans section [crt], aucun reglage ne doit outrepasser ceux du shader"
+        );
+    }
+
+    /// Une section `[crt]` partielle doit rester valable : seuls les champs
+    /// présents outrepassent les valeurs par défaut du shader, les autres
+    /// restent absents (et donc à leur valeur compilée).
+    #[test]
+    fn a_partial_crt_section_only_overrides_what_it_names() {
+        let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n\n[crt]\nscanline_beam = 9.0\nmask_cell_px = 2.0\n";
+        let config: Config = toml::from_str(file).expect("fichier refuse");
+        assert_eq!(config.crt.scanline_beam, Some(9.0));
+        assert_eq!(config.crt.mask_cell_px, Some(2.0));
+        assert_eq!(config.crt.beam_bloom, None);
+        assert_eq!(config.crt.bright_boost, None);
+    }
+
+    /// Le tour complet enregistrement -> relecture : ce qui sort de
+    /// `replace_section` doit rester un TOML valide qui redonne exactement
+    /// les mêmes réglages. C'est ce test qui rattraperait l'oubli d'un champ
+    /// dans `CrtConfig` si un réglage venait à s'ajouter au shader.
+    #[test]
+    fn a_saved_crt_section_reads_back_identically() {
+        let crt = CrtConfig {
+            mask_cell_px: Some(2.0),
+            mask_min: Some(0.6),
+            mask_strength: Some(0.35),
+            scanline_beam: Some(9.0),
+            scanline_strength: Some(0.6),
+            beam_bloom: Some(0.66),
+            bright_boost: Some(1.6),
+        };
+        let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
+        let body = toml::to_string(&crt).expect("serialisation refusee");
+        let updated = replace_section(original, "crt", &body);
+        let reread: Config = toml::from_str(&updated).expect("fichier reecrit invalide");
+        assert_eq!(reread.crt, crt);
+        assert!(reread.drives.drive_b, "le reste du fichier doit survivre");
+    }
+
+    /// Enregistrer deux fois de suite ne doit pas empiler deux sections
+    /// `[crt]` (TOML refuserait le fichier), ni toucher aux commentaires que
+    /// l'utilisateur a écrits ailleurs.
+    #[test]
+    fn saving_twice_replaces_the_section_and_keeps_comments() {
+        let original =
+            "# mon commentaire\n[drives]\ndrive_b = true\n\n[crt]\nmask_cell_px = 1.0\n\n[debugger]\nkeyboard = true\n";
+        let once = replace_section(original, "crt", "mask_cell_px = 2.0\n");
+        let twice = replace_section(&once, "crt", "mask_cell_px = 3.0\n");
+        assert_eq!(
+            twice.matches("[crt]").count(),
+            1,
+            "une seule section [crt] doit subsister"
+        );
+        assert!(twice.contains("mask_cell_px = 3.0"));
+        assert!(!twice.contains("mask_cell_px = 1.0"));
+        assert!(twice.contains("# mon commentaire"));
+        assert!(
+            twice.contains("keyboard = true"),
+            "la section qui suivait [crt] ne doit pas etre emportee"
+        );
+        let reread: Config = toml::from_str(&twice).expect("fichier reecrit invalide");
+        assert_eq!(reread.crt.mask_cell_px, Some(3.0));
     }
 
     #[test]
@@ -231,6 +389,7 @@ mod tests {
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),
             rom: RomConfig::default(),
+            crt: CrtConfig::default(),
         };
         assert_eq!(config.resolve_new_disk_path("d.dsk"), "bin/d.dsk");
 
@@ -258,3 +417,4 @@ mod tests {
         assert!(!config.drives.drive_b);
     }
 }
+

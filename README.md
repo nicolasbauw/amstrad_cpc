@@ -60,9 +60,22 @@ flattens the very scanline contrast it was meant to restore.
 
 Every constant behind this effect — mask cell size, mask/scanline strength,
 scanline beam width, beam bloom, brightness boost — is a slider in the
-"Shader CRT" section of the configuration panel (`F6`), with a "Reset to
-defaults" button. The shipped defaults are tuned for a high-density (4K)
-display; lower-DPI screens will likely want smaller values.
+"Shader CRT" section of the configuration panel (`F6`), with "Reset to
+defaults" and "Save to config.toml" buttons. The shipped defaults are tuned
+for a high-density (4K) display; lower-DPI screens will likely want smaller
+values.
+
+Saving writes a `[crt]` section holding every slider's current value, and
+only that section — the rest of your `config.toml`, comments included, is
+left untouched, and saving twice replaces the section rather than stacking
+a second one. Each field read back at startup overrides the corresponding
+built-in default on its own, so a hand-written partial section is fine:
+
+```toml
+[crt]
+scanline_beam = 9.0
+mask_cell_px = 2.0
+```
 
 ## Emulator commands:
     disk d.dsk          Loads the d.dsk disk image on drive A

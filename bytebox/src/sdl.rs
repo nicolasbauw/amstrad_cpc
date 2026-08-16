@@ -217,6 +217,9 @@ pub fn run(
         app_log!("Can't set window icon: {e}");
     }
     let mut renderer = Renderer::new(window)?;
+    // Une section [crt] dans config.toml (écrite par le bouton du panneau F6)
+    // outrepasse les valeurs par défaut du shader, champ par champ.
+    renderer.set_crt_settings(CrtSettings::from_config(machine.crt_config()));
     apply_display_mode(
         renderer.window_mut(),
         DisplayMode::from_config(machine.default_zoom()),

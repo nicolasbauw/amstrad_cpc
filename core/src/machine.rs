@@ -291,6 +291,7 @@ impl Machine {
                 display: config::DisplayConfig::default(),
                 memory: config::MemoryConfig::default(),
                 rom: config::RomConfig::default(),
+                crt: config::CrtConfig::default(),
             }
         });
 
@@ -371,6 +372,14 @@ impl Machine {
     /// bon endroit plutôt que dans le répertoire courant du processus.
     pub fn dsk_path(&self) -> Option<&str> {
         self.config.file.dsk_path.as_deref()
+    }
+
+    /// Réglages du shader CRT lus dans `config.toml`. Purement de la
+    /// présentation, sans effet sur la machine émulée : `Machine` ne fait ici
+    /// que porter la configuration jusqu'au `Renderer`, faute d'autre chemin
+    /// entre le fichier et lui.
+    pub fn crt_config(&self) -> &crate::config::CrtConfig {
+        &self.config.crt
     }
 
     /// Volume de la sortie audio, dans [0, 1].
