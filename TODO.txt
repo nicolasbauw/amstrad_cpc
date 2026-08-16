@@ -1,0 +1,5 @@
+Quand le clavier virtuel est terminé et que la branche est mergée:
+
+- Scaler la fenêtre de paramétrage (F6) selon le niveau de zoom (X1, X2, X3, ou fullscreen)
+- dans la fenêtre de paramétrage, ne pas afficher le chemin complet de l'image insérée (dsk ou cdt), mais juste le nom de l'image
+- quand une manette est connectée, faire apparaître un message d'information (le même que celui qui apparaît sur la console) pendant deux secondes
