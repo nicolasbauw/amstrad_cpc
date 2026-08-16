@@ -6,3 +6,13 @@ Quand le clavier virtuel est terminé et que la branche est mergée:
 Informations OSD:
 - quand une manette est connectée, faire apparaître un message d'information (le même que celui qui apparaît sur la console) pendant deux secondes
 - même chose pour le shader CRT quand il est activé/désactivé
+
+
+Emplacements des fichiers:
+j'ai créé une nouvelle arborescence ~/.bytebox qui contient des sous-dossiers:
+- ROM
+- DSK
+- CDT
+- assets
+
+j'ai l'impression que dans config.toml il n'aime pas les paths ayant un ~/, et que par défaut il revient aux dossiers "par défaut", ceux de mon dossier de dev. Cela doit changer.
