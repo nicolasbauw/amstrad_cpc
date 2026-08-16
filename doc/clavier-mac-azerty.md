@@ -177,3 +177,37 @@ vrai 6128 français.
 
 les indications trouvées sur ce site semblent claires et confirment un point:
 le "@" est un "à" en azerty. https://cpcrulez.fr/applications-a_la_decouverte_du_clavier.htm
+
+## Retour du même phénomène, via une porte différente : le clavier virtuel (F7)
+
+Le bug 2 ci-dessus ("SHIFT+@ donnait ">" au lieu de "#") est réapparu après
+l'ajout du clavier virtuel (F7, Plan V2.md jalon M5) — même symptôme
+exactement : premier clic SHIFT-puis-touche donnant le mauvais caractère,
+clics suivants corrects.
+
+Ce n'est pas une régression du correctif d'origine (`core/src/psg.rs`,
+`Scancode::Grave`/`RightBracket`/`NonUsBackslash`, inchangé) : c'est le même
+bug de fond (saut simultané de deux bits sur la même ligne matricielle, voir
+plus haut), réintroduit par un chemin de code différent.
+
+**Cause** : `KeyboardPanel::ui` (`bytebox/src/keyboard_panel.rs`) relâche
+SHIFT/CONTROL (des loquets) automatiquement dès qu'une autre touche est
+cliquée, dans la MÊME trame que l'enfoncement de cette touche. `sdl.rs`
+appliquait ce diff via deux boucles `Psg::set_matrix_bit` immédiates —
+aucune des deux ne savait que l'autre venait de changer une position sur la
+même ligne (2, celle de SHIFT et de `#`/`$`/`*`/`<`/`>`). Contrairement au
+clavier physique, où chaque évènement SDL arrive dans son propre appel
+(jamais groupé), le clavier virtuel regroupe naturellement "relâche SHIFT" +
+"enfonce #" dans une seule trame dès qu'on clique.
+
+**Correctif** : nouvelle méthode `Psg::apply_matrix_diff` (remplace les deux
+boucles `set_matrix_bit` de `sdl.rs`), qui reçoit relâchements et appuis de
+la trame ensemble. Elle détecte les lignes où les deux se croisent et y
+diffère l'appui (`set_bit_deferred`, même mécanisme que `Scancode::Grave`)
+au lieu de l'appliquer immédiatement — les autres lignes (lettres, chiffres…)
+restent immédiates, aucune latence introduite là où le risque n'existe pas.
+
+Deux tests de régression dans `psg.rs`
+(`virtual_keyboard_shift_release_and_hash_press_never_collide`,
+`virtual_keyboard_unrelated_lines_apply_immediately`) — le premier confirmé
+en échec sans le correctif avant de conclure.

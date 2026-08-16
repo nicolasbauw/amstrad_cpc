@@ -1,5 +1,6 @@
 use crate::sound::Sound;
 use sdl2::keyboard::{Keycode, Scancode};
+use std::collections::HashSet;
 
 /// Largeur réelle de chaque registre du PSG. Les bits en trop sont perdus à
 /// l'écriture, et une relecture ne les rend donc jamais : du code qui teste la
@@ -96,6 +97,51 @@ impl Psg {
     /// le ferait la touche physique correspondante.
     pub fn set_matrix_bit(&mut self, line: usize, bit: u8, pressed: bool) {
         self.set_bit_now(line, bit, pressed);
+    }
+
+    /// Applique en une seule fois le relâchement d'un loquet (SHIFT/CONTROL,
+    /// F7) et l'appui d'une nouvelle touche — le cas d'une trame où le
+    /// clavier virtuel relâche SHIFT et enfonce une autre touche
+    /// *simultanément* (voir `KeyboardPanel::ui`, `ONE_SHOT_LATCHES`), plutôt
+    /// que le clavier physique, où chaque évènement SDL arrive dans son
+    /// propre appel, jamais groupé.
+    ///
+    /// Sans précaution, un relâchement et un appui sur la MÊME ligne
+    /// matricielle dans le même appel reproduit exactement le saut simultané
+    /// de deux bits documenté sur `deferred` ci-dessus (SHIFT vit en ligne 2,
+    /// comme `#`/`$`/`*`/`<`/`>` — bug constaté sur clavier virtuel :
+    /// SHIFT-clic puis clic sur `#`/`>` donnait `>` au lieu de `#` au premier
+    /// essai). Sur une ligne où les deux se croisent, l'appui est donc
+    /// différé (`set_bit_deferred`) au lieu d'immédiat, exactement comme pour
+    /// les touches ISO Mac plus bas. Les autres lignes (lettres, chiffres...)
+    /// ne courent pas ce risque : SHIFT et elles sont lues via des
+    /// sélections de ligne distinctes, jamais dans la même scrutation.
+    pub fn apply_matrix_diff(
+        &mut self,
+        released: impl IntoIterator<Item = (usize, u8)>,
+        pressed: impl IntoIterator<Item = (usize, u8)>,
+    ) {
+        let released: Vec<(usize, u8)> = released.into_iter().collect();
+        let pressed: Vec<(usize, u8)> = pressed.into_iter().collect();
+
+        let risky_lines: HashSet<usize> = released
+            .iter()
+            .map(|&(line, _)| line)
+            .filter(|line| pressed.iter().any(|&(l, _)| l == *line))
+            .collect();
+
+        for &(line, bit) in &released {
+            self.cancel_deferred(line, bit);
+            self.set_bit_now(line, bit, false);
+        }
+        for &(line, bit) in &pressed {
+            self.cancel_deferred(line, bit);
+            if risky_lines.contains(&line) {
+                self.set_bit_deferred(line, bit, true);
+            } else {
+                self.set_bit_now(line, bit, true);
+            }
+        }
     }
 
     /// Pose ou relâche un bit de la matrice immédiatement.
@@ -611,6 +657,65 @@ mod tests {
             psg.keyboard_matrix[2] & (1 << 5),
             1 << 5,
             "le SHIFT CPC doit rester relache"
+        );
+    }
+
+    /// Retour du même phénomène que ci-dessus, mais via le clavier virtuel
+    /// (F7) : `sdl.rs` relâche un loquet SHIFT et enfonce une nouvelle touche
+    /// dans le MÊME appel (`Psg::apply_matrix_diff`), pas deux évènements SDL
+    /// séparés dans le temps comme un clavier physique — reproduit donc le
+    /// saut simultané de deux bits sur la ligne 2, avec le même symptôme :
+    /// SHIFT-clic puis clic sur "#/>" (2,3) donnait ">" au lieu de "#" au
+    /// premier essai, corrigé après coup au deuxième.
+    #[test]
+    fn virtual_keyboard_shift_release_and_hash_press_never_collide() {
+        let mut psg = Psg::new();
+
+        // Trame 1 : SHIFT seul, latché par un premier clic (F7).
+        psg.apply_matrix_diff([], [(2, 5)]);
+        assert_eq!(psg.keyboard_matrix[2] & (1 << 5), 0, "SHIFT CPC pose");
+
+        // Trame 2 : le loquet SHIFT se relâche ET la position "#/>" s'enfonce
+        // dans le MÊME appel (voir `KeyboardPanel::ui`, `release_one_shot_latches`).
+        psg.apply_matrix_diff([(2, 5)], [(2, 3)]);
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC doit etre relache immediatement"
+        );
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 3),
+            1 << 3,
+            "la position ne doit PAS encore etre posee, le temps qu'une scrutation propre s'intercale"
+        );
+
+        psg.tick(DEFER_TICKS);
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 3),
+            0,
+            "la position doit etre posee une fois le delai ecoule"
+        );
+        assert_eq!(
+            psg.keyboard_matrix[2] & (1 << 5),
+            1 << 5,
+            "le SHIFT CPC doit rester relache"
+        );
+    }
+
+    /// Une ligne matricielle sans conflit (aucune position relâchée ET
+    /// enfoncée dans le même appel) ne doit jamais être différée : ce serait
+    /// une latence perceptible sans aucune raison, pour la quasi-totalité des
+    /// touches du clavier virtuel.
+    #[test]
+    fn virtual_keyboard_unrelated_lines_apply_immediately() {
+        let mut psg = Psg::new();
+
+        // Ligne 5 (lettre), aucun relâchement ailleurs cette trame.
+        psg.apply_matrix_diff([], [(5, 7)]);
+        assert_eq!(
+            psg.keyboard_matrix[5] & (1 << 7),
+            0,
+            "doit etre pose immediatement, sans attendre un tick"
         );
     }
 

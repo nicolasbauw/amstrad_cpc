@@ -899,12 +899,15 @@ pub fn run(
         // cet instant — sinon une touche cliquée puis le panneau refermé
         // sans relâcher le bouton resterait bloquée enfoncée côté CPC.
         let new_pressed_keys = requested_keys.unwrap_or_default();
-        for &(line, bit) in pressed_keys.difference(&new_pressed_keys) {
-            machine.bus.psg.set_matrix_bit(line, bit, false);
-        }
-        for &(line, bit) in new_pressed_keys.difference(&pressed_keys) {
-            machine.bus.psg.set_matrix_bit(line, bit, true);
-        }
+        // `apply_matrix_diff` (pas deux boucles `set_matrix_bit`) : un
+        // relâchement de loquet (SHIFT/CONTROL) et un appui peuvent tomber
+        // dans la même trame ici (contrairement au clavier physique, un
+        // évènement par appel) — voir son commentaire pour pourquoi ça
+        // reproduit sinon le bug déjà connu sur "#/@" et consorts.
+        machine.bus.psg.apply_matrix_diff(
+            pressed_keys.difference(&new_pressed_keys).copied(),
+            new_pressed_keys.difference(&pressed_keys).copied(),
+        );
         pressed_keys = new_pressed_keys;
 
         if debug_visible {
