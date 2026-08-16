@@ -238,9 +238,14 @@ pub fn run(
 
     // Panneau de configuration/médias (F6, config_panel.rs, Plan V2.md
     // jalon M3) : superposé à la fenêtre principale comme la barre rapide
-    // ci-dessus, même canal MonitorCmd.
+    // ci-dessus, même canal MonitorCmd. `config_panel_generation` change à
+    // chaque redimensionnement confirmé de la fenêtre CPC pendant qu'il est
+    // ouvert (même mécanisme que `keyboard_panel_generation` plus bas, voir
+    // son commentaire) : sans ça, sa taille — proportionnelle au zoom —
+    // resterait celle calculée pour l'ancienne taille de fenêtre.
     let mut config_panel_visible = false;
     let mut config_panel = ConfigPanel::new();
+    let mut config_panel_generation: u64 = 0;
 
     // Clavier virtuel (F7, keyboard_panel.rs, Plan V2.md jalon M5) : même
     // mécanisme d'overlay que les deux panneaux ci-dessus. `pressed_keys`
@@ -366,6 +371,12 @@ pub fn run(
                     // confirmé.
                     if keyboard_panel_visible {
                         keyboard_panel_generation += 1;
+                    }
+                    // Même raisonnement pour le panneau de configuration
+                    // (F6), dont la largeur par défaut suit elle aussi le
+                    // zoom — voir `ConfigPanel::ui`.
+                    if config_panel_visible {
+                        config_panel_generation += 1;
                     }
                 }
                 Event::Window {
@@ -506,6 +517,14 @@ pub fn run(
                     ..
                 } => {
                     config_panel_visible = !config_panel_visible;
+                    // Couvre le cas "redimensionné pendant que F6 était
+                    // fermé" : le gestionnaire de redimensionnement plus bas
+                    // ne peut la faire changer que pendant qu'il est déjà
+                    // visible — voir son commentaire, et celui du F7
+                    // équivalent juste en dessous.
+                    if config_panel_visible {
+                        config_panel_generation += 1;
+                    }
                 }
                 // Clavier virtuel (F7, Plan V2.md jalon M5) : même mécanisme
                 // que F6 ci-dessus. La réouverture (pas la fermeture) fait
@@ -780,6 +799,8 @@ pub fn run(
                     &mut config_panel_visible,
                     crt_settings,
                     keyboard_settings,
+                    window_size,
+                    config_panel_generation,
                 );
                 requested_zoom = zoom;
                 requested_crt_settings = Some(crt);

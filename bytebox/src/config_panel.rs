@@ -14,6 +14,7 @@ use crate::renderer::CrtSettings;
 use bytebox_core::app_log;
 use bytebox_core::machine::Machine;
 use bytebox_core::monitor::{MonitorCmd, MonitorMessage};
+use std::path::Path;
 use std::sync::mpsc::Sender;
 
 /// Niveau de zoom demandé depuis le panneau. Le zoom est un état de
@@ -85,6 +86,7 @@ impl ConfigPanel {
     /// le zoom demandé cette trame s'il y en a un, et les réglages CRT/
     /// clavier à jour — inchangés si l'utilisateur n'a touché aucun curseur,
     /// donc toujours sûrs à réappliquer sans condition (voir `sdl.rs`).
+    #[allow(clippy::too_many_arguments)]
     pub fn ui(
         &mut self,
         ctx: &egui::Context,
@@ -93,14 +95,25 @@ impl ConfigPanel {
         open: &mut bool,
         crt_settings: CrtSettings,
         keyboard_settings: KeyboardSettings,
+        window_size: egui::Vec2,
+        generation: u64,
     ) -> (Option<ZoomChoice>, CrtSettings, KeyboardSettings) {
         let mut zoom = None;
         let mut crt_settings = crt_settings;
         let mut keyboard_settings = keyboard_settings;
+        // Proportionnelle à la fenêtre CPC plutôt qu'une constante : à
+        // 420px fixes, le panneau paraissait minuscule en plein écran 4K, et
+        // un peu large en x1. `generation` (incrémentée par `sdl.rs` sur
+        // confirmation d'un redimensionnement réel — même mécanisme que
+        // `KeyboardPanel`, voir son commentaire) fait partie de l'id de la
+        // fenêtre pour que ce calcul se refasse à chaque changement de zoom,
+        // pas seulement à la toute première ouverture.
+        let default_width = (window_size.x * 0.5).clamp(400.0, 900.0);
         egui::Window::new("Configuration")
+            .id(egui::Id::new(("config_panel_window", generation)))
             .open(open)
             .resizable(true)
-            .default_width(420.0)
+            .default_width(default_width)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.tab, Tab::General, "General");
@@ -178,7 +191,11 @@ impl ConfigPanel {
 
         ui.separator();
         let tape = machine.bus.tape.borrow();
-        let tape_label = tape.current_filename.as_deref().unwrap_or("(empty)");
+        let tape_label = tape
+            .current_filename
+            .as_deref()
+            .map(Self::display_name)
+            .unwrap_or("(empty)");
         ui.horizontal(|ui| {
             ui.label(format!("Tape: {tape_label}"));
             if ui.button("Insert…").clicked()
@@ -214,7 +231,11 @@ impl ConfigPanel {
         cmd_sender: &Sender<MonitorMessage>,
     ) {
         let loaded = current_filename != "None";
-        let shown = if loaded { current_filename } else { "(empty)" };
+        let shown = if loaded {
+            Self::display_name(current_filename)
+        } else {
+            "(empty)"
+        };
         ui.horizontal(|ui| {
             ui.label(format!("{label}: {shown}"));
             if ui.button("Insert…").clicked()
@@ -236,6 +257,20 @@ impl ConfigPanel {
                 ));
             }
         });
+    }
+
+    /// Nom affiché pour un chemin de disquette/cassette chargée : le seul
+    /// nom de fichier, pas le chemin complet — trop long une fois résolu via
+    /// `dsk_path`/`cdt_path` (`~/.bytebox/DSK/...`), et sans intérêt pour
+    /// l'utilisateur ici, contrairement au sélecteur de fichier natif où le
+    /// chemin complet reste affiché (rôle différent : y naviguer). Le chemin
+    /// complet, lui, continue d'être ce que porte `current_filename` et ce
+    /// qui est effectivement chargé — seul l'AFFICHAGE change.
+    fn display_name(path: &str) -> &str {
+        Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(path)
     }
 
     /// Sélecteur de fichier natif, ouvert par défaut dans `[file] dsk_path`
