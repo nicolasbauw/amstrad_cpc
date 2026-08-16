@@ -100,7 +100,7 @@ impl ConfigPanel {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.tab, Tab::General, "General");
-                    ui.selectable_value(&mut self.tab, Tab::Crt, "Shader CRT (F5)");
+                    ui.selectable_value(&mut self.tab, Tab::Crt, "CRT Shader");
                     ui.selectable_value(&mut self.tab, Tab::Help, "Help");
                 });
                 ui.separator();

@@ -71,7 +71,7 @@ you get the original sharp pixels back.
 
 Every constant behind this effect — mask cell size, mask/scanline strength,
 scanline beam width, beam bloom, brightness boost, horizontal blur — is a
-slider in the "Shader CRT (F5)" tab of the configuration panel (`F6`), with
+slider in the "CRT Shader" tab of the configuration panel (`F6`), with
 "Reset to defaults" and "Save to config.toml" buttons. It's a separate tab
 from the rest of the panel (media, hardware, display, audio) because eight
 sliders together no longer fit an `x1` window. The shipped defaults are tuned
