@@ -79,6 +79,12 @@ pub struct FileConfig {
     /// répertoire courant garde toujours la priorité.
     #[serde(default)]
     pub dsk_path: Option<String>,
+    /// Même rôle que `dsk_path` ci-dessus, mais pour les images cassette
+    /// (console `tape`) — un répertoire séparé plutôt que réutiliser
+    /// `dsk_path` : les deux types d'images vivent dans des dossiers
+    /// distincts (`~/.bytebox/DSK` et `~/.bytebox/CDT`).
+    #[serde(default)]
+    pub cdt_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -189,6 +195,22 @@ impl Config {
         }
         if let Some(dir) = &self.file.dsk_path {
             return expand_tilde(dir).join(filename).to_string_lossy().into_owned();
+        }
+        filename.to_string()
+    }
+
+    /// Résout un nom d'image cassette en un chemin utilisable — même logique
+    /// que [`Config::resolve_disk_path`], mais via `cdt_path` plutôt que
+    /// `dsk_path` : les deux types d'images ont chacun leur répertoire.
+    pub fn resolve_tape_path(&self, filename: &str) -> String {
+        if Path::new(filename).is_file() {
+            return filename.to_string();
+        }
+        if let Some(dir) = &self.file.cdt_path {
+            let candidate = expand_tilde(dir).join(filename);
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
         }
         filename.to_string()
     }
@@ -491,6 +513,7 @@ mod tests {
             },
             file: FileConfig {
                 dsk_path: Some("bin".to_string()),
+                cdt_path: None,
             },
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),
@@ -512,6 +535,64 @@ mod tests {
             config.resolve_new_disk_path("other/d.dsk"),
             "other/d.dsk",
             "un chemin qui contient deja un repertoire ne doit pas etre recompose"
+        );
+    }
+
+    /// `cdt_path` doit avoir son propre repertoire, distinct de `dsk_path`
+    /// (avant l'introduction de `cdt_path`, `load_tape` reutilisait
+    /// `resolve_disk_path`/`dsk_path` — regression a eviter).
+    #[test]
+    fn resolve_tape_path_uses_cdt_path_not_dsk_path() {
+        let config = Config {
+            drives: DriveConfig { drive_b: false },
+            debugger: Debugger {
+                keyboard: false,
+                audio: false,
+            },
+            file: FileConfig {
+                dsk_path: Some("bin".to_string()),
+                cdt_path: Some("dossier_cdt_qui_n_existe_pas".to_string()),
+            },
+            display: DisplayConfig::default(),
+            memory: MemoryConfig::default(),
+            rom: RomConfig::default(),
+            crt: CrtConfig::default(),
+            keyboard: KeyboardConfig::default(),
+        };
+        // AmstradDiag.cdt existe bien dans bin/ (dsk_path), mais
+        // resolve_tape_path ne doit chercher que dans cdt_path : le nom doit
+        // etre renvoye tel quel, pas recompose via dsk_path.
+        assert_eq!(
+            config.resolve_tape_path("AmstradDiag.cdt"),
+            "AmstradDiag.cdt",
+            "dsk_path ne doit pas servir de repli pour les cassettes"
+        );
+    }
+
+    /// `bin/AmstradDiag.cdt` est suivi par git (contrairement au reste de
+    /// `bin/`, ignore) : verifie la resolution contre un fichier reellement
+    /// present sur toute machine qui clone le depot.
+    #[test]
+    fn resolve_tape_path_finds_a_real_file_via_cdt_path() {
+        let config = Config {
+            drives: DriveConfig { drive_b: false },
+            debugger: Debugger {
+                keyboard: false,
+                audio: false,
+            },
+            file: FileConfig {
+                dsk_path: None,
+                cdt_path: Some("bin".to_string()),
+            },
+            display: DisplayConfig::default(),
+            memory: MemoryConfig::default(),
+            rom: RomConfig::default(),
+            crt: CrtConfig::default(),
+            keyboard: KeyboardConfig::default(),
+        };
+        assert_eq!(
+            config.resolve_tape_path("AmstradDiag.cdt"),
+            "bin/AmstradDiag.cdt"
         );
     }
 
@@ -548,6 +629,7 @@ mod tests {
             },
             file: FileConfig {
                 dsk_path: Some("~/.bytebox/DSK".to_string()),
+                cdt_path: None,
             },
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),

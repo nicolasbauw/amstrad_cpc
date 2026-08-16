@@ -370,12 +370,18 @@ impl Machine {
         self.config.display.default_zoom.as_deref()
     }
 
-    /// Répertoire par défaut où chercher/créer une image disque ou cassette
+    /// Répertoire par défaut où chercher/créer une image disque
     /// (config.toml, `[file] dsk_path`) — utile à toute façade proposant un
     /// sélecteur de fichier (le panneau F6, notamment), pour l'ouvrir au
     /// bon endroit plutôt que dans le répertoire courant du processus.
     pub fn dsk_path(&self) -> Option<&str> {
         self.config.file.dsk_path.as_deref()
+    }
+
+    /// Équivalent de [`Machine::dsk_path`] pour les images cassette
+    /// (config.toml, `[file] cdt_path`).
+    pub fn cdt_path(&self) -> Option<&str> {
+        self.config.file.cdt_path.as_deref()
     }
 
     /// Réglages du shader CRT lus dans `config.toml`. Purement de la
@@ -510,12 +516,11 @@ impl Machine {
     }
 
     /// Charge un fichier .cdt dans le lecteur de cassettes, en résolvant le
-    /// nom donné via `[file] dsk_path` (partagé avec les disquettes)
-    /// s'il ne désigne pas déjà un fichier existant. Utilisée aussi bien par
-    /// la commande console `tape` que par l'option de ligne de commande
-    /// `--tape`.
+    /// nom donné via `[file] cdt_path` s'il ne désigne pas déjà un fichier
+    /// existant. Utilisée aussi bien par la commande console `tape` que par
+    /// l'option de ligne de commande `--tape`.
     pub fn load_tape(&mut self, filename: &str) -> Result<(), String> {
-        let path = self.config.resolve_disk_path(filename);
+        let path = self.config.resolve_tape_path(filename);
         self.bus.tape.borrow_mut().load_tape(&path)
     }
 

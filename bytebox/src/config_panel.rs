@@ -182,7 +182,7 @@ impl ConfigPanel {
         ui.horizontal(|ui| {
             ui.label(format!("Tape: {tape_label}"));
             if ui.button("Insert…").clicked()
-                && let Some(path) = Self::file_dialog(machine.dsk_path())
+                && let Some(path) = Self::file_dialog(machine.cdt_path())
                     .add_filter("Tape image", &["cdt"])
                     .pick_file()
             {

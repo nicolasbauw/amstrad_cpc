@@ -25,6 +25,10 @@ audio = false
 # already a valid path as given. A full or relative path still takes
 # priority over this default.
 dsk_path = "~/.bytebox/DSK"
+# Same role as dsk_path above, but for tape images (console "tape" command,
+# or --tape) — a separate directory rather than reusing dsk_path, since disk
+# and tape images live in different folders.
+cdt_path = "~/.bytebox/CDT"
 
 [display]
 # Window zoom level at startup: "x1", "x2", "x3" or "fullscreen". Same
