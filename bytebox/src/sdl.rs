@@ -343,6 +343,30 @@ pub fn run(
                     ..
                 } if window_id == main_window_id => {
                     renderer.resize();
+                    // Le clavier virtuel (F7), s'il est ouvert, calcule sa
+                    // position/taille par défaut une seule fois par
+                    // ouverture (voir `KeyboardPanel::ui`) : sans le faire
+                    // suivre ici, un changement d'échelle en cours de
+                    // session le laisserait à la taille calculée pour
+                    // l'ancienne fenêtre. Faire changer
+                    // `keyboard_panel_generation` force egui à le traiter
+                    // comme une réouverture fraîche (nouvel id, donc
+                    // nouveau calcul de position/taille) — l'équivalent
+                    // visuel d'un F7/F7 mais sans le clignotement d'un vrai
+                    // cycle fermé/rouvert.
+                    //
+                    // Fait ICI plutôt que dans les gestionnaires F1-F4 :
+                    // `window.set_size()` (appelé par `apply_display_mode`)
+                    // ne garantit pas que le redimensionnement SDL/OS soit
+                    // déjà effectif au retour de l'appel — le lire
+                    // immédiatement après pouvait encore donner l'ancienne
+                    // taille pendant une trame, plaçant le clavier comme si
+                    // la fenêtre n'avait pas changé. Cet évènement, lui, ne
+                    // se déclenche qu'une fois le redimensionnement réel
+                    // confirmé.
+                    if keyboard_panel_visible {
+                        keyboard_panel_generation += 1;
+                    }
                 }
                 Event::Window {
                     win_event:
@@ -388,43 +412,18 @@ pub fn run(
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
                 // pour ne jamais y rester coincé sans savoir comment en
                 // sortir.
-                //
-                // Le clavier virtuel (F7), s'il est ouvert, calcule sa
-                // position/taille par défaut une seule fois par ouverture
-                // (voir `KeyboardPanel::ui`) : sans le faire suivre ici, un
-                // changement d'échelle en cours de session le laisserait à
-                // la taille calculée pour l'ancienne fenêtre. Faire changer
-                // `keyboard_panel_generation` force egui à le traiter comme
-                // une réouverture fraîche (nouvel id, donc nouveau calcul de
-                // position/taille) — l'équivalent visuel d'un F7/F7 mais
-                // sans le clignotement d'un vrai cycle fermé/rouvert.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F1),
                     ..
-                } => {
-                    apply_display_mode(renderer.window_mut(), DisplayMode::Normal);
-                    if keyboard_panel_visible {
-                        keyboard_panel_generation += 1;
-                    }
-                }
+                } => apply_display_mode(renderer.window_mut(), DisplayMode::Normal),
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F2),
                     ..
-                } => {
-                    apply_display_mode(renderer.window_mut(), DisplayMode::X2);
-                    if keyboard_panel_visible {
-                        keyboard_panel_generation += 1;
-                    }
-                }
+                } => apply_display_mode(renderer.window_mut(), DisplayMode::X2),
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F3),
                     ..
-                } => {
-                    apply_display_mode(renderer.window_mut(), DisplayMode::X3);
-                    if keyboard_panel_visible {
-                        keyboard_panel_generation += 1;
-                    }
-                }
+                } => apply_display_mode(renderer.window_mut(), DisplayMode::X3),
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F4),
                     ..
@@ -441,9 +440,6 @@ pub fn run(
                             DisplayMode::Fullscreen
                         },
                     );
-                    if keyboard_panel_visible {
-                        keyboard_panel_generation += 1;
-                    }
                 }
                 // Shader CRT (F5, Plan V2.md jalon M4) : scanlines +
                 // aperture arrondie des pixels, voir renderer_crt.wgsl.
