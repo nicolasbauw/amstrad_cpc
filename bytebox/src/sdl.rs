@@ -789,7 +789,7 @@ pub fn run(
         let show_overlay = quick_bar_visible || config_panel_visible || keyboard_panel_visible;
         let mut draw_overlay = |ctx: &egui::Context| {
             if quick_bar_visible {
-                quick_bar.ui(ctx, &cmd_sender, &mut console_log);
+                quick_bar.ui(ctx, &cmd_sender, &mut console_log, window_size);
             }
             if config_panel_visible {
                 let (zoom, crt, keyboard) = config_panel.ui(

@@ -32,16 +32,31 @@ impl QuickCommandBar {
         self.request_focus = true;
     }
 
-    pub fn ui(&mut self, ctx: &egui::Context, cmd_sender: &Sender<MonitorMessage>, log: &mut ConsoleLog) {
+    /// `window_size` : taille réelle de la fenêtre CPC (`sdl.rs`), pour
+    /// grossir police/espacements avec le zoom (F1-F4) — même mécanisme que
+    /// `ConfigPanel` (F6), voir `crate::ui_scale`. Un `TopBottomPanel`
+    /// recalcule sa hauteur à chaque trame (contrairement à un
+    /// `egui::Window`, dont `default_width`/`default_pos` ne s'appliquent
+    /// qu'à la toute première apparition) : pas besoin ici d'un id changeant
+    /// à chaque redimensionnement pour rester à jour.
+    pub fn ui(
+        &mut self,
+        ctx: &egui::Context,
+        cmd_sender: &Sender<MonitorMessage>,
+        log: &mut ConsoleLog,
+        window_size: egui::Vec2,
+    ) {
+        let scale = crate::ui_scale::content_scale(window_size);
         egui::TopBottomPanel::bottom("quick_command_bar")
             .resizable(false)
-            .exact_height(if log.last_line().is_some() { 56.0 } else { 34.0 })
+            .exact_height(if log.last_line().is_some() { 56.0 } else { 34.0 } * scale)
             .frame(
                 egui::Frame::default()
                     .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 25, 235))
-                    .inner_margin(6.0),
+                    .inner_margin(6.0 * scale),
             )
             .show(ctx, |ui| {
+                ui.set_style(crate::ui_scale::scaled_style(ui.style(), scale));
                 // Jamais plus d'une ligne de retour : c'est ce qui distingue
                 // cette barre de la console complète (F11).
                 if let Some(last) = log.last_line() {

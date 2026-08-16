@@ -105,17 +105,15 @@ impl ConfigPanel {
         // le panneau sans grossir police/boutons/curseurs ne sert à rien —
         // c'est justement leur petitesse en plein écran 4K qui gênait, pas
         // le manque de largeur. `scale` grossit tout le contenu (voir
-        // `scaled_style` plus bas) ; `default_width` en découle, pour rester
-        // cohérente avec un contenu qui a lui-même grossi. Plafonnée à 2.5x
-        // plutôt que de suivre le zoom sans limite : au-delà, le texte
-        // devient disproportionné même sur un grand écran.
+        // `ui_scale::scaled_style`) ; `default_width` en découle, pour
+        // rester cohérente avec un contenu qui a lui-même grossi.
         //
         // `generation` (incrémentée par `sdl.rs` sur confirmation d'un
         // redimensionnement réel — même mécanisme que `KeyboardPanel`, voir
         // son commentaire) fait partie de l'id de la fenêtre pour que ce
         // calcul se refasse à chaque changement de zoom, pas seulement à la
         // toute première ouverture.
-        let scale = (window_size.x / 800.0).clamp(1.0, 2.5);
+        let scale = crate::ui_scale::content_scale(window_size);
         let default_width = 420.0 * scale;
         egui::Window::new("Configuration")
             .id(egui::Id::new(("config_panel_window", generation)))
@@ -123,7 +121,7 @@ impl ConfigPanel {
             .resizable(true)
             .default_width(default_width)
             .show(ctx, |ui| {
-                ui.set_style(Self::scaled_style(ui.style(), scale));
+                ui.set_style(crate::ui_scale::scaled_style(ui.style(), scale));
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.tab, Tab::General, "General");
                     ui.selectable_value(&mut self.tab, Tab::Crt, "CRT Shader");
@@ -280,32 +278,6 @@ impl ConfigPanel {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or(path)
-    }
-
-    /// Grossit tout ce qui détermine la taille visuelle du contenu — tailles
-    /// de police et espacements — plutôt que la seule largeur de la fenêtre.
-    /// `egui::Context::set_pixels_per_point` ferait la même chose, mais pour
-    /// TOUS les panneaux en même temps (un seul contexte egui partagé par
-    /// F6/F7/F10, voir `renderer.rs`) : une bascule propre à ce panneau
-    /// passe donc par le style de son propre `Ui`, qui ne fuit pas vers les
-    /// autres.
-    fn scaled_style(base: &egui::Style, scale: f32) -> egui::Style {
-        let mut style = base.clone();
-        for font_id in style.text_styles.values_mut() {
-            font_id.size *= scale;
-        }
-        let spacing = &mut style.spacing;
-        spacing.item_spacing *= scale;
-        spacing.button_padding *= scale;
-        spacing.interact_size *= scale;
-        spacing.slider_width *= scale;
-        spacing.combo_width *= scale;
-        spacing.text_edit_width *= scale;
-        spacing.icon_width *= scale;
-        spacing.icon_width_inner *= scale;
-        spacing.icon_spacing *= scale;
-        spacing.indent *= scale;
-        style
     }
 
     /// Sélecteur de fichier natif, ouvert par défaut dans `[file] dsk_path`

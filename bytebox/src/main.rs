@@ -8,6 +8,7 @@ mod keyboard_panel;
 mod renderer;
 mod sdl;
 mod status_panel;
+mod ui_scale;
 
 use bytebox_core::app_log;
 use bytebox_core::autotype;
