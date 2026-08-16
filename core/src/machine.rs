@@ -560,7 +560,7 @@ impl Machine {
             .system
             .clone()
             .unwrap_or_else(|| "bin/OS6128-AZERTY.rom".to_string());
-        let mut f = File::open(&system_path)?;
+        let mut f = File::open(config::expand_tilde(&system_path))?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
         if buf.len() >= 32 * 1024 {
@@ -576,7 +576,7 @@ impl Machine {
                 .basic
                 .clone()
                 .unwrap_or_else(|| "bin/BASIC1-1-AZERTY.ROM".to_string());
-            let mut f = File::open(&basic_path)?;
+            let mut f = File::open(config::expand_tilde(&basic_path))?;
             let mut buf = Vec::new();
             f.read_to_end(&mut buf)?;
             self.bus.memory.load_high_rom(0, &buf);
@@ -589,7 +589,7 @@ impl Machine {
             .amsdos
             .clone()
             .unwrap_or_else(|| "bin/AMSDOS.ROM".to_string());
-        let mut f = File::open(&amsdos_path)?;
+        let mut f = File::open(config::expand_tilde(&amsdos_path))?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
         self.bus.memory.load_high_rom(7, &buf);
@@ -602,7 +602,7 @@ impl Machine {
                 .diagnostic_upper
                 .clone()
                 .unwrap_or_else(|| "bin/AmstradDiagUpper.rom".to_string());
-            let mut f = File::open(&diag_path)?;
+            let mut f = File::open(config::expand_tilde(&diag_path))?;
             let mut buf = Vec::new();
             f.read_to_end(&mut buf)?;
             self.bus.memory.load_high_rom(15, &buf);

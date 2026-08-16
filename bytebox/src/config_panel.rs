@@ -246,7 +246,10 @@ impl ConfigPanel {
     fn file_dialog(dsk_path: Option<&str>) -> rfd::FileDialog {
         let dialog = rfd::FileDialog::new();
         match dsk_path {
-            Some(dir) => dialog.set_directory(dir),
+            // `set_directory` attend un chemin réel : un `~` de tête n'y
+            // serait pas plus compris que par `File::open`, voir
+            // `bytebox_core::config::expand_tilde`.
+            Some(dir) => dialog.set_directory(bytebox_core::config::expand_tilde(dir)),
             None => dialog,
         }
     }

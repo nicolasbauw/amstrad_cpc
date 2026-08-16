@@ -126,6 +126,29 @@ pub struct MemoryConfig {
     pub extra_ram_banks: u32,
 }
 
+/// Étend un `~` ou `~/...` en tête de chemin vers le répertoire personnel de
+/// l'utilisateur. Rust ne le fait pas tout seul, contrairement au shell :
+/// `File::open("~/foo")` cherche littéralement un dossier nommé `~`, qui
+/// n'existe jamais, et échoue en silence vers les valeurs par défaut du
+/// programme — piège classique en configurant `config.toml` à la main.
+/// `~utilisateur` (un autre utilisateur que soi) n'est volontairement pas
+/// géré : bien plus rare, et demanderait une dépendance système
+/// supplémentaire pour résoudre son répertoire personnel.
+pub fn expand_tilde(path: &str) -> PathBuf {
+    let Some(rest) = path.strip_prefix('~') else {
+        return PathBuf::from(path);
+    };
+    // "~foo" (un autre utilisateur) : volontairement pas notre "~", laissé
+    // tel quel plutôt que de le tronquer à tort.
+    if !rest.is_empty() && !rest.starts_with('/') {
+        return PathBuf::from(path);
+    }
+    match UserDirs::new() {
+        Some(user_dirs) => user_dirs.home_dir().join(rest.trim_start_matches('/')),
+        None => PathBuf::from(path),
+    }
+}
+
 impl Config {
     /// Résout un nom de disquette en un chemin utilisable.
     ///
@@ -141,7 +164,7 @@ impl Config {
             return filename.to_string();
         }
         if let Some(dir) = &self.file.dsk_path {
-            let candidate = Path::new(dir).join(filename);
+            let candidate = expand_tilde(dir).join(filename);
             if candidate.is_file() {
                 return candidate.to_string_lossy().into_owned();
             }
@@ -165,7 +188,7 @@ impl Config {
             return filename.to_string();
         }
         if let Some(dir) = &self.file.dsk_path {
-            return Path::new(dir).join(filename).to_string_lossy().into_owned();
+            return expand_tilde(dir).join(filename).to_string_lossy().into_owned();
         }
         filename.to_string()
     }
@@ -462,6 +485,52 @@ mod tests {
     }
 
     #[test]
+    fn expand_tilde_replaces_a_leading_tilde_with_the_home_directory() {
+        let home = UserDirs::new().expect("pas de repertoire personnel").home_dir().to_path_buf();
+        assert_eq!(expand_tilde("~/.bytebox/DSK"), home.join(".bytebox/DSK"));
+        assert_eq!(expand_tilde("~"), home);
+    }
+
+    #[test]
+    fn expand_tilde_leaves_other_paths_untouched() {
+        assert_eq!(expand_tilde("bin"), PathBuf::from("bin"));
+        assert_eq!(expand_tilde("/absolute/path"), PathBuf::from("/absolute/path"));
+        assert_eq!(expand_tilde("../relative"), PathBuf::from("../relative"));
+        // "~bob" (un autre utilisateur) : volontairement pas gere, doit
+        // rester tel quel plutot que d'etre tronque a tort.
+        assert_eq!(expand_tilde("~bob/dsk"), PathBuf::from("~bob/dsk"));
+    }
+
+    /// `resolve_disk_path`/`resolve_new_disk_path` doivent, elles aussi,
+    /// developper un `dsk_path` commencant par `~` — c'est le bug concret
+    /// signale : un config.toml avec `dsk_path = "~/.bytebox/DSK"` retombait
+    /// silencieusement sur les chemins par defaut, `~` n'etant jamais un
+    /// dossier reel.
+    #[test]
+    fn resolve_new_disk_path_expands_a_tilde_in_dsk_path() {
+        let home = UserDirs::new().expect("pas de repertoire personnel").home_dir().to_path_buf();
+        let config = Config {
+            drives: DriveConfig { drive_b: false },
+            debugger: Debugger {
+                keyboard: false,
+                audio: false,
+            },
+            file: FileConfig {
+                dsk_path: Some("~/.bytebox/DSK".to_string()),
+            },
+            display: DisplayConfig::default(),
+            memory: MemoryConfig::default(),
+            rom: RomConfig::default(),
+            crt: CrtConfig::default(),
+            keyboard: KeyboardConfig::default(),
+        };
+        assert_eq!(
+            config.resolve_new_disk_path("d.dsk"),
+            home.join(".bytebox/DSK/d.dsk").to_string_lossy()
+        );
+    }
+
+    #[test]
     fn the_audio_option_is_read_when_present() {
         let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = true\naudio = true\n";
         let config: Config = toml::from_str(file).expect("fichier refuse");
@@ -470,5 +539,6 @@ mod tests {
         assert!(!config.drives.drive_b);
     }
 }
+
 
 

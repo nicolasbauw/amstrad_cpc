@@ -19,7 +19,7 @@ audio = false
 # "disk" command, or the --disk command-line option), when that name is not
 # already a valid path as given. A full or relative path still takes
 # priority over this default.
-dsk_path = "bin"
+dsk_path = "~/.bytebox/DSK"
 
 [display]
 # Window zoom level at startup: "x1", "x2", "x3" or "fullscreen". Same
@@ -40,7 +40,7 @@ extra_ram_banks = 0
 # shipped in bin/. `system` may point to a combined 32KB OS+BASIC dump
 # (e.g. Caprice32's rom/cpc6128.rom) instead of a bare 16KB OS ROM; in that
 # case it is split in half automatically and `basic` is ignored.
-# system = "bin/OS6128-AZERTY.rom"
-# basic = "bin/BASIC1-1-AZERTY.ROM"
-# amsdos = "bin/AMSDOS.ROM"
-# diagnostic_upper = "bin/AmstradDiagUpper.rom"
+# system = "~/.bytebox/ROM/OS6128-AZERTY.rom"
+# basic = "~/.bytebox/ROM/BASIC1-1-AZERTY.ROM"
+# amsdos = "~/.bytebox/ROM/AMSDOS.ROM"
+# diagnostic_upper = "~/.bytebox/ROM/AmstradDiagUpper.rom"
