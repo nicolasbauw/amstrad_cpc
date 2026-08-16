@@ -702,6 +702,7 @@ pub fn run(
                         .is_some_and(|c| c.instance_id() == which);
                     if was_active {
                         app_log!("Controller disconnected");
+                        osd.show("Controller disconnected");
                         active_controller = None;
                         // Une direction ou un tir resté "enfoncé" au moment
                         // du débranchement resterait sinon bloqué indéfiniment
