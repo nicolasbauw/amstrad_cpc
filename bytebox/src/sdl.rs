@@ -228,6 +228,16 @@ pub fn run(
     let main_window_id = renderer.window().id();
     let mut event_pump = sdl_context.event_pump()?;
 
+    // Message d'information éphémère (osd.rs) : manette connectée, shader
+    // CRT (F5) activé/désactivé... `active_controller` a été résolue plus
+    // haut, avant que `renderer` (et donc un contexte egui où afficher quoi
+    // que ce soit) n'existe — le message correspondant n'est déclenché
+    // qu'ici, une fois `osd` construite.
+    let mut osd = crate::osd::Osd::new();
+    if let Some(controller) = &active_controller {
+        osd.show(format!("Controller connected: {}", controller.name()));
+    }
+
     // Barre de commande rapide (F10, console_panel.rs) et console complète
     // (F11, console_window.rs) : deux vues du même historique
     // (Plan V2.md, jalon M2), alimentées via le même canal MonitorCmd.
@@ -459,6 +469,13 @@ pub fn run(
                     ..
                 } => {
                     renderer.toggle_crt();
+                    let state = if renderer.crt_enabled() {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
+                    app_log!("CRT shader {state}");
+                    osd.show(format!("CRT shader {state}"));
                 }
                 // Événements d'enfoncement de touches du clavier moderne PC
                 //
@@ -672,6 +689,7 @@ pub fn run(
                         match controller_subsystem.open(which) {
                             Ok(c) => {
                                 app_log!("Controller opened: {}", c.name());
+                                osd.show(format!("Controller connected: {}", c.name()));
                                 active_controller = Some(c);
                             }
                             Err(e) => app_log!("Failed to open controller {which}: {e}"),
@@ -786,7 +804,12 @@ pub fn run(
         // `config_panel_visible` en mutable (`ConfigPanel::ui` peut la
         // remettre à faux via la croix de la fenêtre egui), la relire une
         // fois la fermeture construite serait rejeté par l'emprunteur.
-        let show_overlay = quick_bar_visible || config_panel_visible || keyboard_panel_visible;
+        // L'OSD doit s'afficher même quand aucun des trois panneaux
+        // ci-dessus n'est ouvert (il apparaît en pleine partie, pas
+        // seulement pendant qu'on consulte F6/F7/F10) : sa propre visibilité
+        // rejoint donc `show_overlay`, indépendamment des autres.
+        let show_overlay =
+            quick_bar_visible || config_panel_visible || keyboard_panel_visible || osd.is_active();
         let mut draw_overlay = |ctx: &egui::Context| {
             if quick_bar_visible {
                 quick_bar.ui(ctx, &cmd_sender, &mut console_log, window_size);
@@ -815,6 +838,7 @@ pub fn run(
                     window_size,
                 ));
             }
+            osd.ui(ctx, window_size);
         };
         let overlay: Option<&mut dyn FnMut(&egui::Context)> = if show_overlay {
             Some(&mut draw_overlay)

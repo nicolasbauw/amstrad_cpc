@@ -1,3 +1,0 @@
-Informations OSD:
-- quand une manette est connectée, faire apparaître un message d'information (le même que celui qui apparaît sur la console) pendant deux secondes
-- même chose pour le shader CRT quand il est activé/désactivé

@@ -502,6 +502,13 @@ impl Renderer {
         self.crt_enabled = !self.crt_enabled;
     }
 
+    /// État courant du shader CRT — utile à `sdl.rs` juste après `toggle_crt`
+    /// pour savoir quel message afficher (console et OSD), sans dupliquer la
+    /// bascule elle-même.
+    pub fn crt_enabled(&self) -> bool {
+        self.crt_enabled
+    }
+
     pub fn crt_settings(&self) -> CrtSettings {
         self.crt_settings
     }
