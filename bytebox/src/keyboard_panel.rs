@@ -403,7 +403,11 @@ impl KeyboardPanel {
     }
 
     fn load_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-        match image::open("assets/keyboard.png") {
+        // Toujours dans ~/.bytebox/assets/keyboard.png (identique en debug
+        // et en release, aucun repli vers un chemin relatif au dépôt) — même
+        // convention que les ROMs, voir `config::default_resource_path`.
+        let path = bytebox_core::config::default_resource_path("assets", "keyboard.png");
+        match image::open(&path) {
             Ok(img) => {
                 let img = img.into_rgba8();
                 let size = [img.width() as usize, img.height() as usize];
@@ -415,7 +419,7 @@ impl KeyboardPanel {
                 ))
             }
             Err(e) => {
-                bytebox_core::app_log!("Can't load assets/keyboard.png: {e}");
+                bytebox_core::app_log!("Can't load {}: {e}", path.display());
                 None
             }
         }

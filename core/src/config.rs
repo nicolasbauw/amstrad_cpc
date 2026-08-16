@@ -210,20 +210,51 @@ pub struct Debugger {
     pub audio: bool,
 }
 
-/// Emplacement du fichier de configuration. En release (production) il vit
-/// dans le répertoire personnel ; en debug, on prend celui du dépôt. On garde
-/// un `PathBuf` de bout en bout plutôt que de repasser par une chaîne :
-/// `to_str()` échoue sur un chemin qui n'est pas de l'UTF-8 valide, ce qui
-/// faisait paniquer l'émulateur au démarrage pour un répertoire personnel
-/// exotique.
+/// Emplacement du fichier de configuration : toujours `~/.config/bytebox/
+/// config.toml`, identique en debug et en release — `config/config.toml`, à
+/// la racine du dépôt, n'est qu'un exemple de référence à copier là-bas,
+/// jamais lu par le programme lui-même (voir son commentaire d'en-tête).
+/// Une ancienne version de cette fonction lisait `config/config.toml` en
+/// debug, un choix pratique en apparence mais qui rendait la résolution de
+/// chemins (`dsk_path`, ROM...) différente entre profils de build — piège
+/// pour peu qu'on veuille reproduire un comportement de production en
+/// développement, ou tester la résolution de chemins elle-même.
+///
+/// On garde un `PathBuf` de bout en bout plutôt que de repasser par une
+/// chaîne : `to_str()` échoue sur un chemin qui n'est pas de l'UTF-8 valide,
+/// ce qui faisait paniquer l'émulateur au démarrage pour un répertoire
+/// personnel exotique.
 pub fn config_path() -> Result<PathBuf, MachineError> {
-    if cfg!(debug_assertions) {
-        return Ok(PathBuf::from("config/config.toml"));
-    }
     let user_dirs = UserDirs::new().ok_or(MachineError::ConfigFile)?;
     let mut cfg = user_dirs.home_dir().to_path_buf();
     cfg.push(".config/bytebox/config.toml");
     Ok(cfg)
+}
+
+/// Chemin par défaut d'une ressource (ROM, image du clavier virtuel...) qui
+/// n'a pas été explicitement configurée dans `config.toml` : toujours dans
+/// `~/.bytebox/<sous-répertoire>/<nom>` — l'arborescence que les paquets
+/// d'installation sont censés créer et peupler (voir `Plan V2.md`, jalon M6).
+///
+/// Aucun repli vers un chemin relatif au répertoire de lancement (une
+/// ancienne version en avait un vers `bin/<nom>`, le dossier de
+/// développement local) : décision explicite, pour que builds debug et
+/// release se comportent identiquement, et pour ne pas masquer par
+/// inadvertance une arborescence `~/.bytebox` incomplète — si une ROM y
+/// manque, `load_roms` doit échouer franchement, pas retomber en silence sur
+/// un dossier qui n'a de sens qu'en clone de développement local (`bin/`
+/// n'est d'ailleurs même pas suivi par git : jamais présent dans une
+/// installation réelle).
+pub fn default_resource_path(subdir: &str, filename: &str) -> PathBuf {
+    match UserDirs::new() {
+        Some(user_dirs) => user_dirs.home_dir().join(".bytebox").join(subdir).join(filename),
+        // Cas limite : pas de répertoire personnel détectable (utilisateur
+        // système sans HOME, conteneur minimal...). Le chemin obtenu ne
+        // désignera rien de réel, mais `File::open` échouera alors avec un
+        // message exploitable plutôt que de faire semblant d'avoir résolu
+        // quelque chose.
+        None => PathBuf::from(filename),
+    }
 }
 
 pub fn load_config_file() -> Result<Config, MachineError> {

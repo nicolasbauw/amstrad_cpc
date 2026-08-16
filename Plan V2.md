@@ -229,6 +229,26 @@ PKGBUILD AUR, et correction des chemins en dur dans
 `~/Dev/amstrad_cpc`). Sans dépendance sur les jalons précédents ; peut être
 traité dès que souhaité, y compris avant eux.
 
+**Emplacements attendus par le code (déjà en place, à créer/peupler par les
+paquets)** : `config.toml` vit toujours dans `~/.config/bytebox/config.toml`
+— identique en debug et en release, `config/config.toml` à la racine du
+dépôt n'est qu'un exemple de référence, jamais lu par le programme lui-même.
+Les ROMs, elles, sont attendues dans `~/.bytebox/ROM/<nom>` (`OS6128-AZERTY.rom`,
+`BASIC1-1-AZERTY.ROM`, `AMSDOS.ROM`, `AmstradDiagUpper.rom` — noms exacts
+dans `config::default_resource_path`, utilisée par `Machine::load_roms`) et
+l'illustration du clavier virtuel dans `~/.bytebox/assets/keyboard.png` ;
+`config.toml` peut pointer `[rom]` ailleurs si besoin, mais ce sont les
+chemins par défaut sans configuration explicite — **aucun repli** vers un
+chemin relatif au dépôt (`bin/`, jamais suivi par git, ni présent dans une
+installation réelle) : une ROM absente de `~/.bytebox/ROM` fait échouer
+`load_roms` plutôt que de retomber en silence sur autre chose.
+Chaque paquet doit donc créer `~/.config/bytebox/`, `~/.bytebox/ROM/`,
+`~/.bytebox/DSK/`, `~/.bytebox/CDT/` et `~/.bytebox/assets/` s'ils
+n'existent pas encore, et y placer au minimum `keyboard.png` (fourni dans le
+dépôt, `assets/keyboard.png`) et les ROMs libres de droits déjà présentes
+dans le dépôt (`AmstradDiagUpper.rom`) — les ROMs propriétaires (OS, BASIC,
+AMSDOS) restent à la charge de l'utilisateur, comme aujourd'hui.
+
 Un unique workflow GitHub Actions (`release.yml`, déclenché sur un tag),
 matrice par OS, peut produire tous les formats retenus — GitHub fournit de
 vrais runners Linux/Windows/macOS, donc pas de cross-compile nécessaire.

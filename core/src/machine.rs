@@ -559,7 +559,11 @@ impl Machine {
             .rom
             .system
             .clone()
-            .unwrap_or_else(|| "bin/OS6128-AZERTY.rom".to_string());
+            .unwrap_or_else(|| {
+                config::default_resource_path("ROM", "OS6128-AZERTY.rom")
+                    .to_string_lossy()
+                    .into_owned()
+            });
         let mut f = File::open(config::expand_tilde(&system_path))?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
@@ -575,7 +579,11 @@ impl Machine {
                 .rom
                 .basic
                 .clone()
-                .unwrap_or_else(|| "bin/BASIC1-1-AZERTY.ROM".to_string());
+                .unwrap_or_else(|| {
+                    config::default_resource_path("ROM", "BASIC1-1-AZERTY.ROM")
+                        .to_string_lossy()
+                        .into_owned()
+                });
             let mut f = File::open(config::expand_tilde(&basic_path))?;
             let mut buf = Vec::new();
             f.read_to_end(&mut buf)?;
@@ -588,7 +596,11 @@ impl Machine {
             .rom
             .amsdos
             .clone()
-            .unwrap_or_else(|| "bin/AMSDOS.ROM".to_string());
+            .unwrap_or_else(|| {
+                config::default_resource_path("ROM", "AMSDOS.ROM")
+                    .to_string_lossy()
+                    .into_owned()
+            });
         let mut f = File::open(config::expand_tilde(&amsdos_path))?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
@@ -601,7 +613,11 @@ impl Machine {
                 .rom
                 .diagnostic_upper
                 .clone()
-                .unwrap_or_else(|| "bin/AmstradDiagUpper.rom".to_string());
+                .unwrap_or_else(|| {
+                    config::default_resource_path("ROM", "AmstradDiagUpper.rom")
+                        .to_string_lossy()
+                        .into_owned()
+                });
             let mut f = File::open(config::expand_tilde(&diag_path))?;
             let mut buf = Vec::new();
             f.read_to_end(&mut buf)?;
@@ -1717,10 +1733,9 @@ mod tests {
         }
         // Chemin complet plutôt que le seul nom de fichier : ce test vérifie
         // que la frappe automatique fonctionne, pas la résolution de
-        // `dsk_path`, qui dépend elle-même du fichier de config utilisé
-        // (`config/config.toml` en debug, `~/.config/bytebox/config.toml` en
-        // release — voir `config::load_config_file`) et n'a donc pas de
-        // comportement fiable identique dans les deux profils de build.
+        // `dsk_path` (qui dépend du contenu de `~/.config/bytebox/config.toml`
+        // sur la machine qui exécute le test, potentiellement absent ou
+        // différent d'une machine à l'autre — voir `config::load_config_file`).
         if machine.load_disk("bin/Barbarian.dsk").is_err() {
             println!("Disquette absente : test ignore");
             return;

@@ -1,3 +1,8 @@
+# Reference example, not a live config file: ByteBox always reads
+# ~/.config/bytebox/config.toml, in both debug and release builds — this
+# file in the repo is never read by the running program, no matter how it
+# was built or launched. Copy whatever sections you need over there.
+
 [drives]
 drive_b = true
 
@@ -36,10 +41,14 @@ default_zoom = "x1"
 extra_ram_banks = 0
 
 [rom]
-# ROM file paths. All optional: missing entries fall back to the files
-# shipped in bin/. `system` may point to a combined 32KB OS+BASIC dump
-# (e.g. Caprice32's rom/cpc6128.rom) instead of a bare 16KB OS ROM; in that
-# case it is split in half automatically and `basic` is ignored.
+# ROM file paths. All optional: missing entries fall back to
+# ~/.bytebox/ROM/<filename shown below> — the tree an installer is expected
+# to create and populate (see Plan V2.md, milestone M6). No further
+# fallback beyond that: if a ROM is missing from there, loading fails
+# outright rather than silently reaching for some other directory.
+# `system` may point to a combined 32KB OS+BASIC dump (e.g. Caprice32's
+# rom/cpc6128.rom) instead of a bare 16KB OS ROM; in that case it is split
+# in half automatically and `basic` is ignored.
 # system = "~/.bytebox/ROM/OS6128-AZERTY.rom"
 # basic = "~/.bytebox/ROM/BASIC1-1-AZERTY.ROM"
 # amsdos = "~/.bytebox/ROM/AMSDOS.ROM"
