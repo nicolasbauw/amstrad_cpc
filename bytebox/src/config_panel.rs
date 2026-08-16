@@ -29,6 +29,19 @@ pub enum ZoomChoice {
     Fullscreen,
 }
 
+impl ZoomChoice {
+    /// Forme attendue par `display.default_zoom` dans config.toml — voir
+    /// `DisplayMode::from_config` côté `sdl.rs`, qui lit ces mêmes chaînes.
+    fn as_config_str(self) -> &'static str {
+        match self {
+            ZoomChoice::X1 => "x1",
+            ZoomChoice::X2 => "x2",
+            ZoomChoice::X3 => "x3",
+            ZoomChoice::Fullscreen => "fullscreen",
+        }
+    }
+}
+
 /// Onglet actif du panneau. Le shader CRT s'est retrouvé avec assez de
 /// curseurs pour faire à lui seul déborder la fenêtre en x1 (voir Plan V2.md)
 /// — le séparer du reste, qu'on ajuste rarement une fois réglé une bonne
@@ -104,6 +117,7 @@ impl ConfigPanel {
         keyboard_settings: KeyboardSettings,
         window_size: egui::Vec2,
         generation: u64,
+        current_zoom: ZoomChoice,
     ) -> (Option<ZoomChoice>, CrtSettings, KeyboardSettings) {
         let mut zoom = None;
         let mut crt_settings = crt_settings;
@@ -144,7 +158,12 @@ impl ConfigPanel {
                         Self::hardware_section(ui, machine, cmd_sender);
                         ui.separator();
                         ui.heading("Display");
-                        Self::display_section(ui, &mut zoom, &mut keyboard_settings);
+                        Self::display_section(
+                            ui,
+                            &mut zoom,
+                            &mut keyboard_settings,
+                            current_zoom,
+                        );
                         ui.separator();
                         ui.heading("Audio");
                         Self::audio_section(ui, machine, cmd_sender);
@@ -353,6 +372,7 @@ impl ConfigPanel {
         ui: &mut egui::Ui,
         zoom: &mut Option<ZoomChoice>,
         keyboard_settings: &mut KeyboardSettings,
+        current_zoom: ZoomChoice,
     ) {
         ui.horizontal(|ui| {
             if ui.button("x1").clicked() {
@@ -366,6 +386,27 @@ impl ConfigPanel {
             }
             if ui.button("Fullscreen").clicked() {
                 *zoom = Some(ZoomChoice::Fullscreen);
+            }
+        });
+
+        // Pas de second groupe de boutons pour choisir un zoom "par
+        // défaut" : ce serait dupliquer les quatre boutons ci-dessus pour
+        // une différence purement sémantique. On enregistre plutôt le zoom
+        // courant tel quel — `current_zoom` reflète toujours l'état réel de
+        // la fenêtre (`sdl.rs`), pas seulement ce qui a été choisi ici.
+        ui.horizontal(|ui| {
+            ui.label(format!(
+                "Current zoom: {}",
+                current_zoom.as_config_str()
+            ));
+            if ui.button("Save as startup default").clicked() {
+                let display = bytebox_core::config::DisplayConfig {
+                    default_zoom: Some(current_zoom.as_config_str().to_string()),
+                };
+                match bytebox_core::config::save_display_config(&display) {
+                    Ok(()) => app_log!("Display settings saved to config.toml"),
+                    Err(e) => app_log!("Could not save display settings: {e}"),
+                }
             }
         });
 

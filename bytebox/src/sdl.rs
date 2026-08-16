@@ -68,6 +68,18 @@ impl DisplayMode {
             }
         }
     }
+
+    /// Vers `ZoomChoice` (`config_panel.rs`) : le panneau F6 affiche le zoom
+    /// courant et propose de l'enregistrer comme défaut au démarrage, sans
+    /// dupliquer ses propres boutons x1/x2/x3/Fullscreen pour ça.
+    fn to_zoom_choice(self) -> ZoomChoice {
+        match self {
+            DisplayMode::Normal => ZoomChoice::X1,
+            DisplayMode::X2 => ZoomChoice::X2,
+            DisplayMode::X3 => ZoomChoice::X3,
+            DisplayMode::Fullscreen => ZoomChoice::Fullscreen,
+        }
+    }
 }
 
 /// Applique un niveau de zoom à la fenêtre d'affichage principale.
@@ -224,10 +236,8 @@ pub fn run(
     if machine.crt_config().enabled_at_startup.unwrap_or(false) {
         renderer.set_crt_enabled(true);
     }
-    apply_display_mode(
-        renderer.window_mut(),
-        DisplayMode::from_config(machine.default_zoom()),
-    );
+    let mut current_zoom = DisplayMode::from_config(machine.default_zoom());
+    apply_display_mode(renderer.window_mut(), current_zoom);
     let main_window_id = renderer.window().id();
     let mut event_pump = sdl_context.event_pump()?;
 
@@ -440,15 +450,24 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F1),
                     ..
-                } => apply_display_mode(renderer.window_mut(), DisplayMode::Normal),
+                } => {
+                    current_zoom = DisplayMode::Normal;
+                    apply_display_mode(renderer.window_mut(), current_zoom);
+                }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F2),
                     ..
-                } => apply_display_mode(renderer.window_mut(), DisplayMode::X2),
+                } => {
+                    current_zoom = DisplayMode::X2;
+                    apply_display_mode(renderer.window_mut(), current_zoom);
+                }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F3),
                     ..
-                } => apply_display_mode(renderer.window_mut(), DisplayMode::X3),
+                } => {
+                    current_zoom = DisplayMode::X3;
+                    apply_display_mode(renderer.window_mut(), current_zoom);
+                }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F4),
                     ..
@@ -457,14 +476,12 @@ pub fn run(
                     // (par F4 ou par default_zoom = "fullscreen").
                     let currently_fullscreen = renderer.window().fullscreen_state()
                         != sdl2::video::FullscreenType::Off;
-                    apply_display_mode(
-                        renderer.window_mut(),
-                        if currently_fullscreen {
-                            DisplayMode::Normal
-                        } else {
-                            DisplayMode::Fullscreen
-                        },
-                    );
+                    current_zoom = if currently_fullscreen {
+                        DisplayMode::Normal
+                    } else {
+                        DisplayMode::Fullscreen
+                    };
+                    apply_display_mode(renderer.window_mut(), current_zoom);
                 }
                 // Shader CRT (F5, Plan V2.md jalon M4) : scanlines +
                 // aperture arrondie des pixels, voir renderer_crt.wgsl.
@@ -829,6 +846,7 @@ pub fn run(
                     keyboard_settings,
                     window_size,
                     config_panel_generation,
+                    current_zoom.to_zoom_choice(),
                 );
                 requested_zoom = zoom;
                 requested_crt_settings = Some(crt);
@@ -853,15 +871,13 @@ pub fn run(
         renderer.present(&frame_buffer, overlay);
 
         if let Some(zoom) = requested_zoom {
-            apply_display_mode(
-                renderer.window_mut(),
-                match zoom {
-                    ZoomChoice::X1 => DisplayMode::Normal,
-                    ZoomChoice::X2 => DisplayMode::X2,
-                    ZoomChoice::X3 => DisplayMode::X3,
-                    ZoomChoice::Fullscreen => DisplayMode::Fullscreen,
-                },
-            );
+            current_zoom = match zoom {
+                ZoomChoice::X1 => DisplayMode::Normal,
+                ZoomChoice::X2 => DisplayMode::X2,
+                ZoomChoice::X3 => DisplayMode::X3,
+                ZoomChoice::Fullscreen => DisplayMode::Fullscreen,
+            };
+            apply_display_mode(renderer.window_mut(), current_zoom);
         }
         // Toujours réappliqué sans détection de changement : `crt_settings`
         // ci-dessus vaut déjà les réglages courants si l'utilisateur n'a

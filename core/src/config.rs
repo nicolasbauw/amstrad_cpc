@@ -94,13 +94,16 @@ pub struct FileConfig {
     pub cdt_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+/// `Serialize` en plus de `Deserialize`, comme `CrtConfig`/`KeyboardConfig` :
+/// réécrite par `save_display_config` depuis le panneau F6 ("Save current
+/// zoom as startup default"), pas seulement lue.
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 pub struct DisplayConfig {
     /// Niveau de zoom au démarrage : "x1", "x2", "x3" ou "fullscreen".
     /// Absent ou non reconnu, la fenêtre démarre en taille normale (x1) —
     /// voir `main.rs`, qui journalise un avertissement sur une valeur non
     /// reconnue plutôt que d'échouer au démarrage.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_zoom: Option<String>,
 }
 
@@ -319,6 +322,16 @@ pub fn save_keyboard_config(keyboard: &KeyboardConfig) -> Result<(), MachineErro
     Ok(())
 }
 
+/// Réécrit la seule section `[display]` du fichier de configuration — même
+/// mécanisme que [`save_crt_config`] ci-dessus, voir son commentaire.
+pub fn save_display_config(display: &DisplayConfig) -> Result<(), MachineError> {
+    let path = config_path()?;
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let body = toml::to_string(display).map_err(|_e| MachineError::ConfigFileFmt)?;
+    fs::write(&path, replace_section(&existing, "display", &body))?;
+    Ok(())
+}
+
 /// Remplace le corps de la section TOML `section` par `body`, ou l'ajoute si
 /// elle est absente. La section réécrite est toujours placée en fin de
 /// fichier (l'ordre des sections n'a aucune importance en TOML) ; seul effet
@@ -482,6 +495,22 @@ mod tests {
         let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n";
         let config: Config = toml::from_str(file).expect("fichier refuse");
         assert_eq!(config.keyboard.default_size_percent, None);
+    }
+
+    /// Même tour complet que `a_saved_crt_section_reads_back_identically`,
+    /// pour la section `[display]` réécrite par le bouton "Save as startup
+    /// default" (panneau F6, onglet General).
+    #[test]
+    fn a_saved_display_section_reads_back_identically() {
+        let display = DisplayConfig {
+            default_zoom: Some("x2".to_string()),
+        };
+        let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
+        let body = toml::to_string(&display).expect("serialisation refusee");
+        let updated = replace_section(original, "display", &body);
+        let reread: Config = toml::from_str(&updated).expect("fichier reecrit invalide");
+        assert_eq!(reread.display, display);
+        assert!(reread.drives.drive_b, "le reste du fichier doit survivre");
     }
 
     #[test]
