@@ -60,11 +60,19 @@ struct CrtParams {
     scanline_strength: f32,
     beam_bloom: f32,
     bright_boost: f32,
-    // `vec2` et pas `vec3` : un `vec3<f32>` est aligné sur 16 octets et
-    // décalerait tout le complément. Ici les 10 `f32` qui précèdent font 40
-    // octets, ce `vec2` les porte à 48, un multiple de 16 — la taille exacte
-    // de `CrtParams` côté Rust.
-    _padding: vec2<f32>,
+    /// Écart-type du spot du faisceau à l'HORIZONTALE, en pixels source.
+    /// C'est la bande passante limitée du signal analogique : sur un vrai
+    /// tube, le faisceau balaie chaque ligne en continu, donc rien ne s'y
+    /// termine par une arête franche — mais seulement dans ce sens, chaque
+    /// ligne étant balayée séparément (à la verticale, c'est
+    /// `scanline_beam` qui décide, et lui doit rester étroit pour creuser
+    /// les scanlines). Tendant vers 0, seul le texel le plus proche pèse :
+    /// on retombe exactement sur le pixel net d'origine.
+    horizontal_blur: f32,
+    // Les 11 `f32` qui précèdent font 44 octets ; ce dernier les porte à 48,
+    // un multiple de 16 comme l'exige un uniforme — et la taille exacte de
+    // `CrtParams` côté Rust.
+    _padding: f32,
 };
 
 @group(0) @binding(0)
@@ -99,7 +107,6 @@ fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
     return out;
 }
 
-const PI: f32 = 3.14159265;
 const HALF_PI: f32 = 1.57079633;
 
 // Gamma de linéarisation à l'entrée / de ré-encodage à la sortie : mélanger
@@ -133,13 +140,12 @@ fn to_display(c: vec3<f32>) -> vec3<f32> {
     return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / GAMMA_OUT));
 }
 
-// Lissage cosinus entre deux texels voisins : une transition en S, plus
-// douce qu'un dégradé linéaire mais qui ne déborde pas au-delà des deux
-// texels immédiats (contrairement à la somme gaussienne à 5 colonnes de
-// l'essai précédent) — le spot du faisceau reste net, juste sans arête vive.
-fn ease(frac: f32) -> f32 {
-    return 0.5 - 0.5 * cos(frac * PI);
-}
+// Nombre de colonnes voisines sommées de part et d'autre pour le flou
+// horizontal. 2 (donc 5 colonnes) suffit tant que `horizontal_blur` reste
+// sous ~1 pixel source : au-delà de 2,5 écarts-types, le poids gaussien
+// tombe sous 5 % et tronquer ne se voit pas. C'est ce qui borne la plage du
+// curseur correspondant, côté panneau F6.
+const BLUR_TAPS: i32 = 2;
 
 // Profil du faisceau à la verticale : pic à 1.0 pile sur le centre d'une
 // ligne source, retombe à 0.0 à mi-chemin de la ligne voisine. Volontairement
@@ -178,13 +184,27 @@ fn sample_line(cont_x: f32, line: f32) -> vec3<f32> {
     // donc n'importe laquelle ferait l'affaire — viser le centre garde
     // l'échantillonnage robuste si le doublage venait à changer.
     let row = (line + 0.5) * params.line_height;
-    let col0 = floor(cont_x - 0.5);
-    let frac_x = cont_x - (col0 + 0.5);
-    let uv0 = vec2<f32>(col0 + 0.5, row) / params.source_size;
-    let uv1 = vec2<f32>(col0 + 1.5, row) / params.source_size;
-    let c0 = to_linear(textureSample(t_frame, s_frame, uv0).rgb);
-    let c1 = to_linear(textureSample(t_frame, s_frame, uv1).rgb);
-    return mix(c0, c1, ease(frac_x));
+
+    // Somme gaussienne centrée sur la position continue du fragment, plutôt
+    // qu'une interpolation entre les deux seuls texels encadrants : c'est ce
+    // qui permet au spot de déborder au-delà de ses voisins immédiats quand
+    // on élargit le faisceau, et donc au réglage d'aller quelque part.
+    // Un plancher sur l'écart-type évite la division par zéro (et le NaN qui
+    // s'ensuivrait) quand le curseur est à fond à gauche ; à cette valeur,
+    // le texel le plus proche emporte déjà tout le poids.
+    let sigma = max(params.horizontal_blur, 0.03);
+    let nearest = floor(cont_x) + 0.5;
+    var sum = vec3<f32>(0.0);
+    var weight_sum = 0.0;
+    for (var k = -BLUR_TAPS; k <= BLUR_TAPS; k++) {
+        let col = nearest + f32(k);
+        let d = cont_x - col;
+        let w = exp(-(d * d) / (2.0 * sigma * sigma));
+        let uv = vec2<f32>(col, row) / params.source_size;
+        sum += to_linear(textureSample(t_frame, s_frame, uv).rgb) * w;
+        weight_sum += w;
+    }
+    return sum / weight_sum;
 }
 
 @fragment

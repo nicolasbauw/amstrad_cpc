@@ -51,6 +51,8 @@ pub struct CrtConfig {
     pub beam_bloom: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bright_boost: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_blur: Option<f32>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -314,6 +316,7 @@ mod tests {
             scanline_strength: Some(0.6),
             beam_bloom: Some(0.66),
             bright_boost: Some(1.6),
+            horizontal_blur: Some(0.5),
         };
         let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
         let body = toml::to_string(&crt).expect("serialisation refusee");

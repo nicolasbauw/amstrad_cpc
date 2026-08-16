@@ -58,10 +58,17 @@ intense electron beam is physically wider, so it fills more of the gap. That
 — such a multiply clips the highlights while lifting the troughs, which
 flattens the very scanline contrast it was meant to restore.
 
+Horizontal edges are softened by an adjustable Gaussian beam spot: a real
+CPC feeds the tube an analog signal of limited bandwidth, so nothing ever
+ends on a hard edge *across* a line. Only across — each line is scanned
+separately, which is why the vertical direction stays governed by the
+scanline beam instead. At 0 the spot collapses onto the nearest texel and
+you get the original sharp pixels back.
+
 Every constant behind this effect — mask cell size, mask/scanline strength,
-scanline beam width, beam bloom, brightness boost — is a slider in the
-"Shader CRT" section of the configuration panel (`F6`), with "Reset to
-defaults" and "Save to config.toml" buttons. The shipped defaults are tuned
+scanline beam width, beam bloom, brightness boost, horizontal blur — is a
+slider in the "Shader CRT" section of the configuration panel (`F6`), with
+"Reset to defaults" and "Save to config.toml" buttons. The shipped defaults are tuned
 for a high-density (4K) display; lower-DPI screens will likely want smaller
 values.
 

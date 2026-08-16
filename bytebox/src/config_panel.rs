@@ -295,6 +295,13 @@ impl ConfigPanel {
         ui.add(
             egui::Slider::new(&mut settings.bright_boost, 1.0..=2.5).text("Brightness boost"),
         );
+        // Bornée à 1.0 : au-delà, le noyau à 5 colonnes du shader
+        // (`BLUR_TAPS`) tronquerait visiblement la gaussienne. À 0, on
+        // retrouve le pixel net d'origine.
+        ui.add(
+            egui::Slider::new(&mut settings.horizontal_blur, 0.0..=1.0)
+                .text("Horizontal blur (px)"),
+        );
         ui.horizontal(|ui| {
             if ui.button("Reset to defaults").clicked() {
                 *settings = CrtSettings::default();

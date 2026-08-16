@@ -52,9 +52,10 @@ struct CrtParams {
     scanline_strength: f32,
     beam_bloom: f32,
     bright_boost: f32,
-    /// Un uniforme WGSL est aligné sur 16 octets : 10 `f32` (40) sont
+    horizontal_blur: f32,
+    /// Un uniforme WGSL est aligné sur 16 octets : 11 `f32` (44) sont
     /// complétés à 48. Doit rester en phase avec le `_padding` du shader.
-    _padding: [f32; 2],
+    _padding: f32,
 }
 
 impl CrtParams {
@@ -71,7 +72,8 @@ impl CrtParams {
             scanline_strength: settings.scanline_strength,
             beam_bloom: settings.beam_bloom,
             bright_boost: settings.bright_boost,
-            _padding: [0.0, 0.0],
+            horizontal_blur: settings.horizontal_blur,
+            _padding: 0.0,
         }
     }
 }
@@ -90,6 +92,7 @@ pub struct CrtSettings {
     pub scanline_strength: f32,
     pub beam_bloom: f32,
     pub bright_boost: f32,
+    pub horizontal_blur: f32,
 }
 
 impl CrtSettings {
@@ -106,6 +109,7 @@ impl CrtSettings {
             scanline_strength: crt.scanline_strength.unwrap_or(d.scanline_strength),
             beam_bloom: crt.beam_bloom.unwrap_or(d.beam_bloom),
             bright_boost: crt.bright_boost.unwrap_or(d.bright_boost),
+            horizontal_blur: crt.horizontal_blur.unwrap_or(d.horizontal_blur),
         }
     }
 
@@ -122,6 +126,7 @@ impl CrtSettings {
             scanline_strength: Some(self.scanline_strength),
             beam_bloom: Some(self.beam_bloom),
             bright_boost: Some(self.bright_boost),
+            horizontal_blur: Some(self.horizontal_blur),
         }
     }
 }
@@ -142,6 +147,7 @@ impl Default for CrtSettings {
             scanline_strength: 0.6,
             beam_bloom: 0.66,
             bright_boost: 1.6,
+            horizontal_blur: 0.5,
         }
     }
 }
