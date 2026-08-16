@@ -68,6 +68,13 @@ pub struct CrtConfig {
     pub bright_boost: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub horizontal_blur: Option<f32>,
+    /// Si `true`, le shader est actif dès le lancement de l'émulateur, sans
+    /// attendre un F5. Absent ou `false` : comportement d'origine (shader
+    /// désactivé au démarrage). Contrairement aux huit champs ci-dessus, ne
+    /// participe pas au rendu (`CrtSettings`/`CrtParams`, uniforme GPU) —
+    /// c'est un simple bool que `sdl.rs` lit une fois au lancement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_at_startup: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -418,6 +425,7 @@ mod tests {
             beam_bloom: Some(0.66),
             bright_boost: Some(1.6),
             horizontal_blur: Some(0.75),
+            enabled_at_startup: Some(true),
         };
         let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
         let body = toml::to_string(&crt).expect("serialisation refusee");

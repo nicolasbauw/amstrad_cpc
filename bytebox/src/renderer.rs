@@ -80,9 +80,13 @@ impl CrtParams {
 
 /// Réglages ajustables du shader CRT (F5), exposés au panneau de
 /// configuration (F6, section "Shader CRT") — voir les commentaires de
-/// `renderer_crt.wgsl` pour ce que chaque champ contrôle visuellement. Pas
-/// persisté dans `config.toml` : comme l'activation même du shader (F5),
-/// c'est un réglage de session, pas une préférence durable.
+/// `renderer_crt.wgsl` pour ce que chaque champ contrôle visuellement.
+/// Réglage de session par défaut (repart des valeurs par défaut à chaque
+/// lancement), sauf enregistrement explicite via le bouton "Save" du
+/// panneau (`CrtConfig`, section `[crt]` de `config.toml`). L'activation du
+/// shader elle-même (F5) suit la même logique, mais via
+/// `CrtConfig::enabled_at_startup` plutôt qu'un champ de cette struct —
+/// elle ne fait pas partie de l'uniforme GPU que ces champs alimentent.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CrtSettings {
     pub mask_cell_px: f32,
@@ -127,6 +131,10 @@ impl CrtSettings {
             beam_bloom: Some(self.beam_bloom),
             bright_boost: Some(self.bright_boost),
             horizontal_blur: Some(self.horizontal_blur),
+            // Hors du champ de `CrtSettings` (voir sa doc) : laissé à la
+            // charge de l'appelant (`config_panel.rs`), qui le renseigne
+            // depuis la case "Enable at startup" avant d'enregistrer.
+            enabled_at_startup: None,
         }
     }
 }
@@ -500,6 +508,14 @@ impl Renderer {
     /// bascule F1-F12 de ce fichier.
     pub fn toggle_crt(&mut self) {
         self.crt_enabled = !self.crt_enabled;
+    }
+
+    /// Applique l'état initial du shader lu depuis `config.toml`
+    /// (`CrtConfig::enabled_at_startup`), une fois au lancement — voir
+    /// `sdl::run`. Distinct de `toggle_crt` : ici on impose un état plutôt
+    /// que d'inverser le courant.
+    pub fn set_crt_enabled(&mut self, enabled: bool) {
+        self.crt_enabled = enabled;
     }
 
     /// État courant du shader CRT — utile à `sdl.rs` juste après `toggle_crt`

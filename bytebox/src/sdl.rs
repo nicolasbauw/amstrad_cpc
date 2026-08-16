@@ -221,6 +221,9 @@ pub fn run(
     // Une section [crt] dans config.toml (écrite par le bouton du panneau F6)
     // outrepasse les valeurs par défaut du shader, champ par champ.
     renderer.set_crt_settings(CrtSettings::from_config(machine.crt_config()));
+    if machine.crt_config().enabled_at_startup.unwrap_or(false) {
+        renderer.set_crt_enabled(true);
+    }
     apply_display_mode(
         renderer.window_mut(),
         DisplayMode::from_config(machine.default_zoom()),
@@ -254,7 +257,8 @@ pub fn run(
     // son commentaire) : sans ça, sa taille — proportionnelle au zoom —
     // resterait celle calculée pour l'ancienne taille de fenêtre.
     let mut config_panel_visible = false;
-    let mut config_panel = ConfigPanel::new();
+    let mut config_panel =
+        ConfigPanel::new(machine.crt_config().enabled_at_startup.unwrap_or(false));
     let mut config_panel_generation: u64 = 0;
 
     // Clavier virtuel (F7, keyboard_panel.rs, Plan V2.md jalon M5) : même

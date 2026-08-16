@@ -67,14 +67,21 @@ pub struct ConfigPanel {
     blank_disk_name: String,
     blank_disk_drive_b: bool,
     tab: Tab,
+    /// État de la case "Enable at startup" de l'onglet CRT — lu une fois à
+    /// la construction depuis `config.toml` (`CrtConfig::enabled_at_startup`,
+    /// voir `sdl::run`), puis réenregistré par le bouton "Save" avec le
+    /// reste des réglages du shader. Ne fait pas partie de `CrtSettings` :
+    /// contrairement aux curseurs, elle ne pilote rien côté GPU.
+    crt_enabled_at_startup: bool,
 }
 
 impl ConfigPanel {
-    pub fn new() -> Self {
+    pub fn new(crt_enabled_at_startup: bool) -> Self {
         Self {
             blank_disk_name: String::new(),
             blank_disk_drive_b: false,
             tab: Tab::General,
+            crt_enabled_at_startup,
         }
     }
 
@@ -142,7 +149,9 @@ impl ConfigPanel {
                         ui.heading("Audio");
                         Self::audio_section(ui, machine, cmd_sender);
                     }
-                    Tab::Crt => Self::crt_section(ui, &mut crt_settings),
+                    Tab::Crt => {
+                        Self::crt_section(ui, &mut crt_settings, &mut self.crt_enabled_at_startup)
+                    }
                     Tab::Help => Self::help_section(ui),
                 }
             });
@@ -387,7 +396,7 @@ impl ConfigPanel {
     /// commentaires pour ce que chacune contrôle visuellement. Pas de
     /// `MonitorCmd` ici : ce sont des réglages de présentation, propres au
     /// `Renderer` de la fenêtre principale, au même titre que le zoom.
-    fn crt_section(ui: &mut egui::Ui, settings: &mut CrtSettings) {
+    fn crt_section(ui: &mut egui::Ui, settings: &mut CrtSettings, enabled_at_startup: &mut bool) {
         ui.add(
             egui::Slider::new(&mut settings.mask_cell_px, 0.5..=4.0).text("Mask cell size (px)"),
         );
@@ -417,16 +426,19 @@ impl ConfigPanel {
             egui::Slider::new(&mut settings.horizontal_blur, 0.0..=1.0)
                 .text("Horizontal blur (px)"),
         );
+        ui.checkbox(enabled_at_startup, "Enable at startup");
         ui.horizontal(|ui| {
             if ui.button("Reset to defaults").clicked() {
                 *settings = CrtSettings::default();
             }
-            // Le seul réglage de ce panneau qui survive à la fermeture de
-            // l'émulateur : tout le reste est soit un état de la machine
-            // (rejoué par config.toml au prochain démarrage), soit un choix
-            // de session assumé comme tel (zoom, activation du shader).
+            // Enregistrés ensemble : les curseurs ci-dessus et la case
+            // "Enable at startup" forment tous les deux `[crt]` dans
+            // config.toml, juste par des chemins différents (`CrtSettings`
+            // pour les curseurs, ce bool à part pour la case).
             if ui.button("Save").clicked() {
-                match bytebox_core::config::save_crt_config(&settings.to_config()) {
+                let mut crt_config = settings.to_config();
+                crt_config.enabled_at_startup = Some(*enabled_at_startup);
+                match bytebox_core::config::save_crt_config(&crt_config) {
                     Ok(()) => app_log!("CRT settings saved to config.toml"),
                     Err(e) => app_log!("Could not save CRT settings: {e}"),
                 }
