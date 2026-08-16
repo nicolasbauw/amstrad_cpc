@@ -4,6 +4,7 @@ mod console_log;
 mod console_panel;
 mod console_window;
 mod egui_gpu;
+mod keyboard_panel;
 mod renderer;
 mod sdl;
 mod status_panel;

@@ -9,6 +9,7 @@ use crate::config_panel::{ConfigPanel, ZoomChoice};
 use crate::console_log::ConsoleLog;
 use crate::console_panel::QuickCommandBar;
 use crate::console_window::ConsoleWindow;
+use crate::keyboard_panel::{KeyboardPanel, KeyboardSettings};
 use bytebox_core::machine::{self, Machine};
 use crate::renderer::{CrtSettings, Renderer};
 use bytebox_core::video;
@@ -240,6 +241,19 @@ pub fn run(
     // ci-dessus, même canal MonitorCmd.
     let mut config_panel_visible = false;
     let mut config_panel = ConfigPanel::new();
+
+    // Clavier virtuel (F7, keyboard_panel.rs, Plan V2.md jalon M5) : même
+    // mécanisme d'overlay que les deux panneaux ci-dessus. `pressed_keys`
+    // retient l'ensemble PSG appliqué à la trame précédente, pour ne
+    // presser/relâcher que ce qui change d'une trame à l'autre plutôt que de
+    // rejouer tout l'état à chaque fois. `keyboard_panel_generation` change à
+    // chaque réouverture (F7) : voir le commentaire de `KeyboardPanel::ui`
+    // sur pourquoi elle ne peut pas se suivre elle-même.
+    let mut keyboard_panel_visible = false;
+    let mut keyboard_panel = KeyboardPanel::new();
+    let mut keyboard_panel_generation: u64 = 0;
+    let mut pressed_keys: std::collections::HashSet<(usize, u8)> = std::collections::HashSet::new();
+    let mut keyboard_settings = KeyboardSettings::from_config(machine.keyboard_config());
     // Voir le commentaire sur les évènements Enter/Leave plus bas.
     let mut mouse_over_main_window = false;
     // Tout ce qui a été journalisé avant l'ouverture des fenêtres (bannière
@@ -283,17 +297,18 @@ pub fn run(
             // principale (jouer, taper au BASIC...) ne les atteint jamais.
             status_panel.handle_event(&event);
             console_window.handle_event(&event);
-            // La barre rapide F10 et le panneau de configuration F6, eux,
-            // sont superposés à la fenêtre PRINCIPALE (même wgpu, voir
-            // renderer.rs) : ce filtre par fenêtre ne les protège donc de
-            // rien, toute frappe faite en jouant a le même identifiant de
-            // fenêtre qu'eux. Sans la condition ci-dessous, ces frappes
-            // s'accumulaient en silence dans la file d'entrée d'egui tant
-            // qu'aucun des deux n'était affiché (rien ne la vidait,
-            // `Renderer::present` ne traitant cette file que lorsqu'un
-            // overlay est actif) et se déversaient d'un coup, à
-            // l'ouverture, dans le premier champ de saisie venu.
-            if quick_bar_visible || config_panel_visible {
+            // La barre rapide F10, le panneau de configuration F6 et le
+            // clavier virtuel F7, eux, sont superposés à la fenêtre
+            // PRINCIPALE (même wgpu, voir renderer.rs) : ce filtre par
+            // fenêtre ne les protège donc de rien, toute frappe faite en
+            // jouant a le même identifiant de fenêtre qu'eux. Sans la
+            // condition ci-dessous, ces frappes s'accumulaient en silence
+            // dans la file d'entrée d'egui tant qu'aucun des trois n'était
+            // affiché (rien ne la vidait, `Renderer::present` ne traitant
+            // cette file que lorsqu'un overlay est actif) et se
+            // déversaient d'un coup, à l'ouverture, dans le premier champ
+            // de saisie venu.
+            if quick_bar_visible || config_panel_visible || keyboard_panel_visible {
                 renderer.handle_event(&event);
             }
             match event {
@@ -373,18 +388,43 @@ pub fn run(
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
                 // pour ne jamais y rester coincé sans savoir comment en
                 // sortir.
+                //
+                // Le clavier virtuel (F7), s'il est ouvert, calcule sa
+                // position/taille par défaut une seule fois par ouverture
+                // (voir `KeyboardPanel::ui`) : sans le faire suivre ici, un
+                // changement d'échelle en cours de session le laisserait à
+                // la taille calculée pour l'ancienne fenêtre. Faire changer
+                // `keyboard_panel_generation` force egui à le traiter comme
+                // une réouverture fraîche (nouvel id, donc nouveau calcul de
+                // position/taille) — l'équivalent visuel d'un F7/F7 mais
+                // sans le clignotement d'un vrai cycle fermé/rouvert.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F1),
                     ..
-                } => apply_display_mode(renderer.window_mut(), DisplayMode::Normal),
+                } => {
+                    apply_display_mode(renderer.window_mut(), DisplayMode::Normal);
+                    if keyboard_panel_visible {
+                        keyboard_panel_generation += 1;
+                    }
+                }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F2),
                     ..
-                } => apply_display_mode(renderer.window_mut(), DisplayMode::X2),
+                } => {
+                    apply_display_mode(renderer.window_mut(), DisplayMode::X2);
+                    if keyboard_panel_visible {
+                        keyboard_panel_generation += 1;
+                    }
+                }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F3),
                     ..
-                } => apply_display_mode(renderer.window_mut(), DisplayMode::X3),
+                } => {
+                    apply_display_mode(renderer.window_mut(), DisplayMode::X3);
+                    if keyboard_panel_visible {
+                        keyboard_panel_generation += 1;
+                    }
+                }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F4),
                     ..
@@ -401,6 +441,9 @@ pub fn run(
                             DisplayMode::Fullscreen
                         },
                     );
+                    if keyboard_panel_visible {
+                        keyboard_panel_generation += 1;
+                    }
                 }
                 // Shader CRT (F5, Plan V2.md jalon M4) : scanlines +
                 // aperture arrondie des pixels, voir renderer_crt.wgsl.
@@ -467,6 +510,19 @@ pub fn run(
                     ..
                 } => {
                     config_panel_visible = !config_panel_visible;
+                }
+                // Clavier virtuel (F7, Plan V2.md jalon M5) : même mécanisme
+                // que F6 ci-dessus. La réouverture (pas la fermeture) fait
+                // changer `keyboard_panel_generation` — voir le commentaire
+                // de `KeyboardPanel::ui`.
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::F7),
+                    ..
+                } => {
+                    keyboard_panel_visible = !keyboard_panel_visible;
+                    if keyboard_panel_visible {
+                        keyboard_panel_generation += 1;
+                    }
                 }
                 // Console complète (F11) : fenêtre séparée, sur le même
                 // modèle que le statut machine (F12).
@@ -680,44 +736,67 @@ pub fn run(
         // `ZoomChoice`) : `ConfigPanel::ui` le renvoie plutôt que de
         // l'appliquer lui-même, pour rester composée dans la même fermeture
         // que la barre rapide sans avoir à connaître `Renderer`.
-        // Le pointeur redevient visible dès qu'un overlay cliquable (F6, et
-        // par cohérence F10) est ouvert et que la souris est sur la fenêtre
-        // principale : sinon les boutons du panneau de configuration
-        // seraient quasiment impossibles à viser à l'aveugle. Recalculé
-        // chaque trame plutôt qu'à chaque évènement individuel (Enter/Leave,
-        // F6, F10...) : plus simple, et 60 fois par seconde est largement
-        // assez réactif pour un simple show/hide de curseur.
-        sdl_context
-            .mouse()
-            .show_cursor(!mouse_over_main_window || quick_bar_visible || config_panel_visible);
+        // Le pointeur redevient visible dès qu'un overlay cliquable (F6, F7,
+        // et par cohérence F10) est ouvert et que la souris est sur la
+        // fenêtre principale : sinon les boutons du panneau de
+        // configuration seraient quasiment impossibles à viser à l'aveugle.
+        // Recalculé chaque trame plutôt qu'à chaque évènement individuel
+        // (Enter/Leave, F6, F10...) : plus simple, et 60 fois par seconde
+        // est largement assez réactif pour un simple show/hide de curseur.
+        sdl_context.mouse().show_cursor(
+            !mouse_over_main_window
+                || quick_bar_visible
+                || config_panel_visible
+                || keyboard_panel_visible,
+        );
 
         let mut requested_zoom: Option<ZoomChoice> = None;
         let mut requested_crt_settings: Option<CrtSettings> = None;
+        let mut requested_keyboard_settings: Option<KeyboardSettings> = None;
+        let mut requested_keys: Option<std::collections::HashSet<(usize, u8)>> = None;
         // Lu avant de créer la fermeture ci-dessous, pour la même raison que
         // `show_overlay` juste en dessous : une fois la fermeture construite,
         // elle emprunte `config_panel_visible` en mutable, donc plus moyen de
         // relire quoi que ce soit de `renderer` (qui la borrow aussi via
         // `present`) entre les deux.
         let crt_settings = renderer.crt_settings();
+        // Même raison : taille réelle de la fenêtre CPC, lue directement sur
+        // SDL plutôt que sur l'état egui de cette trame — voir le
+        // commentaire de `KeyboardPanel::ui` sur pourquoi ce dernier peut
+        // encore accuser un train de retard juste après un changement de
+        // zoom (F1-F4).
+        let (window_w, window_h) = renderer.window().drawable_size();
+        let window_size = egui::vec2(window_w as f32, window_h as f32);
         // Décidé avant de créer la fermeture ci-dessous : elle emprunte
         // `config_panel_visible` en mutable (`ConfigPanel::ui` peut la
         // remettre à faux via la croix de la fenêtre egui), la relire une
         // fois la fermeture construite serait rejeté par l'emprunteur.
-        let show_overlay = quick_bar_visible || config_panel_visible;
+        let show_overlay = quick_bar_visible || config_panel_visible || keyboard_panel_visible;
         let mut draw_overlay = |ctx: &egui::Context| {
             if quick_bar_visible {
                 quick_bar.ui(ctx, &cmd_sender, &mut console_log);
             }
             if config_panel_visible {
-                let (zoom, crt) = config_panel.ui(
+                let (zoom, crt, keyboard) = config_panel.ui(
                     ctx,
                     &machine,
                     &cmd_sender,
                     &mut config_panel_visible,
                     crt_settings,
+                    keyboard_settings,
                 );
                 requested_zoom = zoom;
                 requested_crt_settings = Some(crt);
+                requested_keyboard_settings = Some(keyboard);
+            }
+            if keyboard_panel_visible {
+                requested_keys = Some(keyboard_panel.ui(
+                    ctx,
+                    &mut keyboard_panel_visible,
+                    keyboard_panel_generation,
+                    keyboard_settings,
+                    window_size,
+                ));
             }
         };
         let overlay: Option<&mut dyn FnMut(&egui::Context)> = if show_overlay {
@@ -745,6 +824,26 @@ pub fn run(
         if let Some(settings) = requested_crt_settings {
             renderer.set_crt_settings(settings);
         }
+        // Même chose pour les réglages du clavier virtuel : simple
+        // affectation, `keyboard_settings` vaut déjà la valeur courante si
+        // rien n'a changé cette trame.
+        if let Some(settings) = requested_keyboard_settings {
+            keyboard_settings = settings;
+        }
+        // `requested_keys` vaut `None` aussi bien quand le panneau est fermé
+        // que la trame où il vient tout juste de se refermer (croix de la
+        // fenêtre, ou F7) : `unwrap_or_default` retombe alors sur l'ensemble
+        // vide, ce qui relâche automatiquement toute touche encore tenue à
+        // cet instant — sinon une touche cliquée puis le panneau refermé
+        // sans relâcher le bouton resterait bloquée enfoncée côté CPC.
+        let new_pressed_keys = requested_keys.unwrap_or_default();
+        for &(line, bit) in pressed_keys.difference(&new_pressed_keys) {
+            machine.bus.psg.set_matrix_bit(line, bit, false);
+        }
+        for &(line, bit) in new_pressed_keys.difference(&pressed_keys) {
+            machine.bus.psg.set_matrix_bit(line, bit, true);
+        }
+        pressed_keys = new_pressed_keys;
 
         if debug_visible {
             let registers = machine.get_registers_string();

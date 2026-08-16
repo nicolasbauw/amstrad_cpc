@@ -9,6 +9,7 @@
 //! champ pousse sur le même canal `MonitorCmd` que la console — `Machine`
 //! ne voit aucune différence entre les deux façades.
 
+use crate::keyboard_panel::KeyboardSettings;
 use crate::renderer::CrtSettings;
 use bytebox_core::app_log;
 use bytebox_core::machine::Machine;
@@ -78,11 +79,12 @@ impl ConfigPanel {
 
     /// Dessine le panneau ; `open` reflète et contrôle sa visibilité (la
     /// petite croix de la fenêtre egui peut la fermer, en plus de F6).
-    /// `crt_settings` est l'état courant du shader CRT (relu à chaque trame
-    /// depuis `Renderer`, comme `machine` pour l'état de la machine) ;
-    /// renvoie le zoom demandé cette trame s'il y en a un, et les réglages
-    /// CRT à jour — inchangés si l'utilisateur n'a touché aucun curseur,
-    /// donc toujours sûr à réappliquer sans condition (voir `sdl.rs`).
+    /// `crt_settings`/`keyboard_settings` sont l'état courant du shader CRT
+    /// et du clavier virtuel (relus à chaque trame depuis `Renderer`/
+    /// `KeyboardPanel`, comme `machine` pour l'état de la machine) ; renvoie
+    /// le zoom demandé cette trame s'il y en a un, et les réglages CRT/
+    /// clavier à jour — inchangés si l'utilisateur n'a touché aucun curseur,
+    /// donc toujours sûrs à réappliquer sans condition (voir `sdl.rs`).
     pub fn ui(
         &mut self,
         ctx: &egui::Context,
@@ -90,9 +92,11 @@ impl ConfigPanel {
         cmd_sender: &Sender<MonitorMessage>,
         open: &mut bool,
         crt_settings: CrtSettings,
-    ) -> (Option<ZoomChoice>, CrtSettings) {
+        keyboard_settings: KeyboardSettings,
+    ) -> (Option<ZoomChoice>, CrtSettings, KeyboardSettings) {
         let mut zoom = None;
         let mut crt_settings = crt_settings;
+        let mut keyboard_settings = keyboard_settings;
         egui::Window::new("Configuration")
             .open(open)
             .resizable(true)
@@ -113,7 +117,7 @@ impl ConfigPanel {
                         Self::hardware_section(ui, machine, cmd_sender);
                         ui.separator();
                         ui.heading("Display");
-                        Self::display_section(ui, &mut zoom);
+                        Self::display_section(ui, &mut zoom, &mut keyboard_settings);
                         ui.separator();
                         ui.heading("Audio");
                         Self::audio_section(ui, machine, cmd_sender);
@@ -122,7 +126,7 @@ impl ConfigPanel {
                     Tab::Help => Self::help_section(ui),
                 }
             });
-        (zoom, crt_settings)
+        (zoom, crt_settings, keyboard_settings)
     }
 
     fn media_section(
@@ -291,7 +295,11 @@ impl ConfigPanel {
         });
     }
 
-    fn display_section(ui: &mut egui::Ui, zoom: &mut Option<ZoomChoice>) {
+    fn display_section(
+        ui: &mut egui::Ui,
+        zoom: &mut Option<ZoomChoice>,
+        keyboard_settings: &mut KeyboardSettings,
+    ) {
         ui.horizontal(|ui| {
             if ui.button("x1").clicked() {
                 *zoom = Some(ZoomChoice::X1);
@@ -304,6 +312,28 @@ impl ConfigPanel {
             }
             if ui.button("Fullscreen").clicked() {
                 *zoom = Some(ZoomChoice::Fullscreen);
+            }
+        });
+
+        // Taille par défaut du clavier virtuel (F7) : en fraction de la
+        // hauteur de la fenêtre CPC, voir le commentaire de
+        // `KeyboardPanel::ui` sur ce plafond de hauteur — trop grand en x1,
+        // le clavier masque l'écran sur lequel on tape.
+        ui.horizontal(|ui| {
+            let mut percent = keyboard_settings.default_size_percent * 100.0;
+            let response =
+                ui.add(egui::Slider::new(&mut percent, 10.0..=100.0).suffix(" %"));
+            ui.label("Virtual keyboard (F7) default size");
+            if response.changed() {
+                keyboard_settings.default_size_percent = percent / 100.0;
+            }
+            if ui.button("Save").clicked() {
+                match bytebox_core::config::save_keyboard_config(
+                    &keyboard_settings.to_config(),
+                ) {
+                    Ok(()) => app_log!("Keyboard settings saved to config.toml"),
+                    Err(e) => app_log!("Could not save keyboard settings: {e}"),
+                }
             }
         });
     }
@@ -350,7 +380,7 @@ impl ConfigPanel {
             // l'émulateur : tout le reste est soit un état de la machine
             // (rejoué par config.toml au prochain démarrage), soit un choix
             // de session assumé comme tel (zoom, activation du shader).
-            if ui.button("Save to config.toml").clicked() {
+            if ui.button("Save").clicked() {
                 match bytebox_core::config::save_crt_config(&settings.to_config()) {
                     Ok(()) => app_log!("CRT settings saved to config.toml"),
                     Err(e) => app_log!("Could not save CRT settings: {e}"),

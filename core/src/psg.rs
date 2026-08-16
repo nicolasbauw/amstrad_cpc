@@ -89,6 +89,15 @@ impl Psg {
         }
     }
 
+    /// Pose ou relâche une position `(ligne, bit)` de la matrice
+    /// immédiatement, sans passer par un `Keycode`/`Scancode` — c'est ce que
+    /// le clavier virtuel (F7, `bytebox::keyboard_panel`) utilise pour
+    /// presser directement une position connue à l'avance, exactement comme
+    /// le ferait la touche physique correspondante.
+    pub fn set_matrix_bit(&mut self, line: usize, bit: u8, pressed: bool) {
+        self.set_bit_now(line, bit, pressed);
+    }
+
     /// Pose ou relâche un bit de la matrice immédiatement.
     fn set_bit_now(&mut self, line: usize, bit: u8, pressed: bool) {
         if pressed {

@@ -22,6 +22,21 @@ pub struct Config {
     pub rom: RomConfig,
     #[serde(default)]
     pub crt: CrtConfig,
+    #[serde(default)]
+    pub keyboard: KeyboardConfig,
+}
+
+/// Réglages du clavier virtuel (F7) enregistrés depuis le panneau F6, sur le
+/// même modèle que `CrtConfig` ci-dessous (un seul champ pour l'instant,
+/// mais même schéma `Option`/enregistrement partiel/`save_*` dédié, pour
+/// rester cohérent si d'autres réglages du panneau F7 s'y ajoutent).
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
+pub struct KeyboardConfig {
+    /// Taille par défaut à l'ouverture du panneau F7, en fraction de la
+    /// hauteur de la fenêtre CPC (0.0..=1.0) — voir `KeyboardSettings`
+    /// (`bytebox::keyboard_panel`) pour le rôle exact de cette valeur.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_size_percent: Option<f32>,
 }
 
 /// Réglages du shader CRT (F5) enregistrés depuis le panneau F6.
@@ -211,6 +226,16 @@ pub fn save_crt_config(crt: &CrtConfig) -> Result<(), MachineError> {
     Ok(())
 }
 
+/// Réécrit la seule section `[keyboard]` du fichier de configuration —
+/// même mécanisme que [`save_crt_config`] ci-dessus, voir son commentaire.
+pub fn save_keyboard_config(keyboard: &KeyboardConfig) -> Result<(), MachineError> {
+    let path = config_path()?;
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let body = toml::to_string(keyboard).map_err(|_e| MachineError::ConfigFileFmt)?;
+    fs::write(&path, replace_section(&existing, "keyboard", &body))?;
+    Ok(())
+}
+
 /// Remplace le corps de la section TOML `section` par `body`, ou l'ajoute si
 /// elle est absente. La section réécrite est toujours placée en fin de
 /// fichier (l'ordre des sections n'a aucune importance en TOML) ; seul effet
@@ -351,6 +376,30 @@ mod tests {
         assert_eq!(reread.crt.mask_cell_px, Some(3.0));
     }
 
+    /// Même mécanisme que `a_saved_crt_section_reads_back_identically`
+    /// ci-dessus, pour la section `[keyboard]` (F7) — même fonction
+    /// `replace_section`, même schéma `Option`, rien de spécifique à
+    /// re-tester en profondeur.
+    #[test]
+    fn a_saved_keyboard_section_reads_back_identically() {
+        let keyboard = KeyboardConfig {
+            default_size_percent: Some(0.75),
+        };
+        let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
+        let body = toml::to_string(&keyboard).expect("serialisation refusee");
+        let updated = replace_section(original, "keyboard", &body);
+        let reread: Config = toml::from_str(&updated).expect("fichier reecrit invalide");
+        assert_eq!(reread.keyboard, keyboard);
+        assert!(reread.drives.drive_b, "le reste du fichier doit survivre");
+    }
+
+    #[test]
+    fn a_missing_keyboard_section_leaves_the_field_absent() {
+        let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n";
+        let config: Config = toml::from_str(file).expect("fichier refuse");
+        assert_eq!(config.keyboard.default_size_percent, None);
+    }
+
     #[test]
     fn rom_paths_are_read_when_present() {
         let file = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n\n[rom]\nsystem = \"custom/os.rom\"\nbasic = \"custom/basic.rom\"\namsdos = \"custom/amsdos.rom\"\ndiagnostic_upper = \"custom/diag.rom\"\n";
@@ -393,6 +442,7 @@ mod tests {
             memory: MemoryConfig::default(),
             rom: RomConfig::default(),
             crt: CrtConfig::default(),
+            keyboard: KeyboardConfig::default(),
         };
         assert_eq!(config.resolve_new_disk_path("d.dsk"), "bin/d.dsk");
 
@@ -420,4 +470,5 @@ mod tests {
         assert!(!config.drives.drive_b);
     }
 }
+
 

@@ -295,6 +295,7 @@ impl Machine {
                 memory: config::MemoryConfig::default(),
                 rom: config::RomConfig::default(),
                 crt: config::CrtConfig::default(),
+                keyboard: config::KeyboardConfig::default(),
             }
         });
 
@@ -383,6 +384,12 @@ impl Machine {
     /// entre le fichier et lui.
     pub fn crt_config(&self) -> &crate::config::CrtConfig {
         &self.config.crt
+    }
+
+    /// Réglages du clavier virtuel (F7) lus dans `config.toml` — même
+    /// raisonnement que [`Machine::crt_config`] ci-dessus.
+    pub fn keyboard_config(&self) -> &crate::config::KeyboardConfig {
+        &self.config.keyboard
     }
 
     /// Volume de la sortie audio, dans [0, 1].
