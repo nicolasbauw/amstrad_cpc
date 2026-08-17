@@ -63,6 +63,8 @@ F1 / F2 / F3   Window size x1 / x2 / x3
 F4             Toggle fullscreen
 F5             Toggle the CRT shader (RGB phosphor mask, scanlines)
 F6             Toggle this configuration panel
+F7             Toggle the virtual keyboard (clickable, overlaid on the
+               emulator window)
 F8             Step to next Z80 instruction
 F9             Step to next video line
 F10            Toggle the quick command bar (one input line, overlaid

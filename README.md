@@ -23,6 +23,8 @@
     F6             toggle the configuration/media panel (disks, tape,
                    drive B, extra RAM, zoom, volume, CRT shader tuning —
                    all with an immediate effect, no restart needed)
+    F7             toggle the virtual keyboard (clickable, overlaid on the
+                   emulator window)
     F8             step to next Z80 instruction
     F9             step to next video line
     F10            toggle the quick command bar (one input line, overlaid
