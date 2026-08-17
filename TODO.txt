@@ -8,3 +8,5 @@
 
 - à clarifier : si un utilisateur met des ROMs qwerty en paramétrage dans config.toml, quel sera le comportement ?
 comportement souhaité : l'émulateur démarre, tant pis pour l'émulation clavier incorrecte.
+
+- quand on fait un power cycle, l'écran violet qui apparaît n'est pas beau, je lui préfèrerais un écran noir.
