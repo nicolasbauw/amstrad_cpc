@@ -10,3 +10,4 @@
 comportement souhaité : l'émulateur démarre, tant pis pour l'émulation clavier incorrecte.
 
 - quand on fait un power cycle, l'écran violet qui apparaît n'est pas beau, je lui préfèrerais un écran noir.
+si c'est la même couleur que si il n'y a pas de ROM, même traitement : je préfèrerais un écran noir.
