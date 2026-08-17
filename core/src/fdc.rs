@@ -561,6 +561,14 @@ impl Fdc {
             }
         }
 
+        // Le répertoire cible (`~/.bytebox/DSK` par défaut, voir
+        // `Config::resolve_new_disk_path`) peut ne pas encore exister — sur
+        // un clone tout frais, rien ne l'a jamais créé. `create_dir_all` est
+        // un no-op s'il est déjà là : jamais de risque d'écraser quoi que ce
+        // soit qui y serait déjà présent.
+        if let Some(dir) = std::path::Path::new(filename).parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
         let mut f = File::create(filename).map_err(|e| e.to_string())?;
         f.write_all(&out).map_err(|e| e.to_string())?;
         Ok(())
@@ -1487,6 +1495,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Sur un clone tout frais, `~/.bytebox/DSK` (ou tout autre `dsk_path`
+    /// configuré) n'existe pas encore : `write_dsk_file` doit le créer
+    /// plutôt que d'échouer — même raisonnement que
+    /// `config::write_config_section` pour `~/.config/bytebox`.
+    #[test]
+    fn write_dsk_file_creates_missing_parent_directories() {
+        let dir = std::env::temp_dir().join("amstrad_cpc_test_write_dsk_missing_parent");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!dir.exists(), "le repertoire ne doit pas deja exister");
+
+        let path = dir.join("subdir").join("blank.dsk");
+        let path = path.to_str().unwrap();
+
+        Fdc::write_dsk_file(&Fdc::blank_dsk_image(), path)
+            .expect("doit reussir meme sans repertoire parent prealable");
+        assert!(std::path::Path::new(path).is_file());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Une écriture de secteur (SAVE BASIC, par exemple) doit être reflétée

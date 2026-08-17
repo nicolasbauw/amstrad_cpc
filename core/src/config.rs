@@ -295,41 +295,60 @@ pub fn load_config_file() -> Result<Config, MachineError> {
     Ok(config)
 }
 
-/// Réécrit la seule section `[crt]` du fichier de configuration, en laissant
-/// tout le reste — y compris les commentaires — intact.
+/// Réécrit une seule section du fichier de configuration, en laissant tout
+/// le reste — y compris les commentaires — intact. Partagée par
+/// `save_crt_config`/`save_keyboard_config`/`save_display_config`
+/// ci-dessous, qui ne font que sérialiser leur struct et déléguer ici.
 ///
 /// Sérialiser `Config` en entier serait plus court, mais réécrirait le
 /// fichier de l'utilisateur de bout en bout : commentaires perdus, sections
 /// réordonnées, valeurs par défaut soudain écrites en dur. Pour un fichier
 /// que l'utilisateur édite à la main, c'est un prix trop élevé.
-pub fn save_crt_config(crt: &CrtConfig) -> Result<(), MachineError> {
-    let path = config_path()?;
+fn write_config_section(section: &str, body: &str) -> Result<(), MachineError> {
+    write_config_section_at(&config_path()?, section, body)
+}
+
+/// Cœur de [`write_config_section`], paramétré par le chemin — séparé pour
+/// que les tests puissent vérifier la création du répertoire parent avec un
+/// chemin de test isolé, sans passer par `config_path()` (donc sans avoir à
+/// manipuler `$HOME`, une variable globale au processus : la faire varier
+/// pendant qu'un autre test tournant en parallèle construit une `Machine`,
+/// qui en dépend elle aussi via `load_config_file`, provoquerait un test
+/// intermittent — constaté une fois en pratique avant ce découpage).
+fn write_config_section_at(path: &std::path::Path, section: &str, body: &str) -> Result<(), MachineError> {
+    // `~/.config/bytebox` peut ne pas encore exister (clone tout frais,
+    // jamais lancé) : sans ça, ce serait le seul cas où sauvegarder un
+    // réglage échoue au tout premier lancement. `create_dir_all` est un
+    // no-op si le dossier est déjà là, jamais un risque pour son contenu.
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
     // Fichier absent : on repart d'un contenu vide plutôt que d'échouer —
     // enregistrer ses réglages doit marcher même au tout premier lancement.
-    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    fs::write(path, replace_section(&existing, section, body))?;
+    Ok(())
+}
+
+/// Réécrit la seule section `[crt]` du fichier de configuration — voir
+/// [`write_config_section`].
+pub fn save_crt_config(crt: &CrtConfig) -> Result<(), MachineError> {
     let body = toml::to_string(crt).map_err(|_e| MachineError::ConfigFileFmt)?;
-    fs::write(&path, replace_section(&existing, "crt", &body))?;
-    Ok(())
+    write_config_section("crt", &body)
 }
 
-/// Réécrit la seule section `[keyboard]` du fichier de configuration —
-/// même mécanisme que [`save_crt_config`] ci-dessus, voir son commentaire.
+/// Réécrit la seule section `[keyboard]` du fichier de configuration — voir
+/// [`write_config_section`].
 pub fn save_keyboard_config(keyboard: &KeyboardConfig) -> Result<(), MachineError> {
-    let path = config_path()?;
-    let existing = fs::read_to_string(&path).unwrap_or_default();
     let body = toml::to_string(keyboard).map_err(|_e| MachineError::ConfigFileFmt)?;
-    fs::write(&path, replace_section(&existing, "keyboard", &body))?;
-    Ok(())
+    write_config_section("keyboard", &body)
 }
 
-/// Réécrit la seule section `[display]` du fichier de configuration — même
-/// mécanisme que [`save_crt_config`] ci-dessus, voir son commentaire.
+/// Réécrit la seule section `[display]` du fichier de configuration — voir
+/// [`write_config_section`].
 pub fn save_display_config(display: &DisplayConfig) -> Result<(), MachineError> {
-    let path = config_path()?;
-    let existing = fs::read_to_string(&path).unwrap_or_default();
     let body = toml::to_string(display).map_err(|_e| MachineError::ConfigFileFmt)?;
-    fs::write(&path, replace_section(&existing, "display", &body))?;
-    Ok(())
+    write_config_section("display", &body)
 }
 
 /// Remplace le corps de la section TOML `section` par `body`, ou l'ajoute si
@@ -376,6 +395,33 @@ fn replace_section(content: &str, section: &str, body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Le bug qui a motivé `write_config_section`/`write_config_section_at` :
+    /// sur un clone tout frais (jamais lancé, `~/.config/bytebox`
+    /// inexistant), enregistrer un réglage F6 quelconque échouait — seul le
+    /// tout premier lancement de l'émulateur (`Machine::new`, qui ne fait
+    /// que LIRE `config.toml`) s'en sortait grâce à son propre repli sur les
+    /// valeurs par défaut. Passe par `write_config_section_at` avec un
+    /// chemin de temp dir unique plutôt que par `save_crt_config`/`$HOME` :
+    /// voir le commentaire de `write_config_section_at` sur pourquoi.
+    #[test]
+    fn write_config_section_creates_the_config_directory_when_missing() {
+        let dir = std::env::temp_dir().join("bytebox_config_test_missing_parent");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("config.toml");
+        assert!(
+            !path.parent().unwrap().exists(),
+            "le repertoire ne doit pas deja exister, sans quoi ce test ne prouve rien"
+        );
+
+        write_config_section_at(&path, "crt", "mask_cell_px = 2.0\n")
+            .expect("doit reussir meme sans repertoire parent prealable");
+
+        let written = std::fs::read_to_string(&path).expect("le fichier doit exister");
+        assert!(written.contains("mask_cell_px"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Une option ajoutée ne doit pas invalider les config.toml existants :
     /// sans valeur par défaut, tout fichier écrit avant cette version serait
