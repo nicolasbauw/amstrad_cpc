@@ -10,7 +10,7 @@
 //! besoin que `Machine` en sache quoi que ce soit).
 
 use bytebox_core::monitor::{MonitorCmd, MonitorMessage};
-use bytebox_core::rom_installer::InstalledFile;
+use bytebox_core::rom_installer::{InstalledFile, RomStatus};
 use std::sync::mpsc::{Receiver, Sender};
 
 enum InstallEvent {
@@ -31,6 +31,13 @@ pub struct RomInstallState {
     accepted: bool,
     status: Status,
     events: Option<Receiver<InstallEvent>>,
+    /// Ce que `bytebox_core::rom_installer::check_installed` rapportait la
+    /// dernière fois qu'on l'a interrogé — au lancement, puis rafraîchi
+    /// après une installation réussie (voir `poll`). Un simple hachage de
+    /// trois fichiers locaux, mais pas de raison de le refaire à chaque
+    /// trame : rien d'autre que CE panneau n'écrit dans `~/.bytebox/ROM`
+    /// pendant que l'émulateur tourne.
+    already_installed: RomStatus,
 }
 
 impl RomInstallState {
@@ -39,6 +46,7 @@ impl RomInstallState {
             accepted: false,
             status: Status::Idle,
             events: None,
+            already_installed: bytebox_core::rom_installer::check_installed(),
         }
     }
 
@@ -67,6 +75,11 @@ impl RomInstallState {
                     // donc reprend là où `main.rs` avait échoué faute de
                     // ROMs.
                     let _ = cmd_sender.send((MonitorCmd::PowerCycle, String::new(), String::new()));
+                    // Rafraîchi maintenant : la prochaine fois que cet
+                    // onglet est rouvert (`ui`, plus bas), il doit
+                    // reconnaître que tout est en place plutôt que de
+                    // réafficher le formulaire.
+                    self.already_installed = bytebox_core::rom_installer::check_installed();
                     break;
                 }
                 Ok(InstallEvent::Error(e)) => {
@@ -91,6 +104,23 @@ impl RomInstallState {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // Rien à demander/montrer si tout est déjà en place et que
+        // l'utilisateur n'est pas au milieu d'une action sur cet écran
+        // (Running/Done/Failed doit rester visible tel quel — voir plus bas
+        // — même une fois l'installation reconnue par `already_installed`,
+        // le prochain rafraîchissement de `poll` s'en charge déjà).
+        if matches!(self.status, Status::Idle)
+            && let RomStatus::Installed { diagnostic_present } = self.already_installed
+        {
+            ui.colored_text_ok("ROMs installed.");
+            if !diagnostic_present {
+                ui.label(
+                    "(Diagnostic ROM not installed — optional, only used in diagnostic mode.)",
+                );
+            }
+            return;
+        }
+
         ui.label(
             "Amstrad has neither granted nor refused permission to redistribute \
              these ROM images. Their use for emulation is widely tolerated within \

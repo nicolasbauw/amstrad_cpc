@@ -60,6 +60,63 @@ const DIAGNOSTIC_ROM: RomSource = RomSource {
     entries: &[("AmstradDiagUpper.rom", "AmstradDiagUpper.rom")],
 };
 
+/// CRC32 attendu pour chaque fichier canonique, tel que produit par les
+/// deux sources verrouillées ci-dessus — recalculé une fois pour toutes en
+/// téléchargeant réellement les deux archives, pas deviné. Permet à l'écran
+/// F6 de reconnaître que les ROMs déjà en place proviennent bien de cette
+/// installation sans avoir à retélécharger pour vérifier (voir
+/// `check_installed`).
+const EXPECTED_CRC32: &[(&str, u32)] = &[
+    ("OS6128-AZERTY.rom", 0x1574923b),
+    ("AMSDOS.ROM", 0x1fe22ecd),
+    ("AmstradDiagUpper.rom", 0xe13995b7),
+];
+
+/// Résultat de [`check_installed`] : distingue "rien à faire, déjà en
+/// place" de "l'écran doit proposer l'installation" sans que l'appelant
+/// n'ait à connaître les noms de fichiers canoniques lui-même.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RomStatus {
+    /// Les ROMs système (OS+BASIC, AMSDOS) sont présentes et conformes.
+    /// La ROM de diagnostic est optionnelle (voir `Machine::load_roms`,
+    /// qui ne la charge qu'en mode diagnostic) : son absence ne fait donc
+    /// pas basculer ce statut vers `Missing`, juste `diagnostic_present`
+    /// à `false`.
+    Installed { diagnostic_present: bool },
+    /// Au moins une ROM système manque ou ne correspond pas au CRC32
+    /// attendu (fichier différent, corrompu, ou provenant d'ailleurs).
+    Missing,
+}
+
+/// Compare le contenu déjà présent dans `~/.bytebox/ROM` (s'il y en a) au
+/// CRC32 attendu de chaque fichier canonique — un simple hachage de fichier
+/// local, jamais un accès réseau, contrairement au reste de ce module.
+pub fn check_installed() -> RomStatus {
+    check_installed_against(EXPECTED_CRC32)
+}
+
+/// Cœur de [`check_installed`], paramétré par la table de CRC32 attendus —
+/// séparé pour que les tests puissent vérifier la logique de comparaison
+/// avec un petit contenu arbitraire, sans dépendre des vraies valeurs de
+/// `EXPECTED_CRC32` (des ROMs de plusieurs Ko, inutiles à reproduire ici).
+fn check_installed_against(expected: &[(&str, u32)]) -> RomStatus {
+    let matches = |filename: &str| -> bool {
+        let Some(&(_, expected)) = expected.iter().find(|(f, _)| *f == filename) else {
+            return false;
+        };
+        let path = crate::config::default_resource_path("ROM", filename);
+        std::fs::read(&path).is_ok_and(|content| crc32(&content) == expected)
+    };
+
+    if matches("OS6128-AZERTY.rom") && matches("AMSDOS.ROM") {
+        RomStatus::Installed {
+            diagnostic_present: matches("AmstradDiagUpper.rom"),
+        }
+    } else {
+        RomStatus::Missing
+    }
+}
+
 /// Télécharge une URL entière en mémoire. Pas de suivi de progression
 /// (les archives visées font quelques dizaines de Ko, pas des Mo) : le
 /// statut affiché par l'écran se limite à "téléchargement en cours" / "fait".
@@ -269,6 +326,108 @@ mod tests {
             let err = install_from_zip(&zip, &[("CPC6128.ROM", "OS6128-AZERTY.rom")])
                 .expect_err("l'entree demandee n'existe pas dans ce zip");
             assert!(err.contains("CPC6128.ROM"), "erreur peu exploitable : {err}");
+        });
+    }
+
+    #[test]
+    fn check_installed_reports_missing_when_the_rom_directory_is_empty() {
+        with_isolated_home(|_home| {
+            assert_eq!(check_installed(), RomStatus::Missing);
+        });
+    }
+
+    #[test]
+    fn check_installed_reports_installed_once_the_two_system_roms_match() {
+        with_isolated_home(|home| {
+            let rom_dir = home.join(".bytebox/ROM");
+            std::fs::create_dir_all(&rom_dir).unwrap();
+            std::fs::write(rom_dir.join("OS6128-AZERTY.rom"), b"system content").unwrap();
+            std::fs::write(rom_dir.join("AMSDOS.ROM"), b"amsdos content").unwrap();
+
+            let expected: &[(&str, u32)] = &[
+                ("OS6128-AZERTY.rom", crc32(b"system content")),
+                ("AMSDOS.ROM", crc32(b"amsdos content")),
+                ("AmstradDiagUpper.rom", crc32(b"diag content")),
+            ];
+
+            assert_eq!(
+                check_installed_against(expected),
+                RomStatus::Installed {
+                    diagnostic_present: false
+                },
+                "la ROM de diagnostic est absente, mais optionnelle : ne doit pas empecher Installed"
+            );
+        });
+    }
+
+    #[test]
+    fn check_installed_reports_the_diagnostic_rom_when_it_also_matches() {
+        with_isolated_home(|home| {
+            let rom_dir = home.join(".bytebox/ROM");
+            std::fs::create_dir_all(&rom_dir).unwrap();
+            std::fs::write(rom_dir.join("OS6128-AZERTY.rom"), b"system content").unwrap();
+            std::fs::write(rom_dir.join("AMSDOS.ROM"), b"amsdos content").unwrap();
+            std::fs::write(rom_dir.join("AmstradDiagUpper.rom"), b"diag content").unwrap();
+
+            let expected: &[(&str, u32)] = &[
+                ("OS6128-AZERTY.rom", crc32(b"system content")),
+                ("AMSDOS.ROM", crc32(b"amsdos content")),
+                ("AmstradDiagUpper.rom", crc32(b"diag content")),
+            ];
+
+            assert_eq!(
+                check_installed_against(expected),
+                RomStatus::Installed {
+                    diagnostic_present: true
+                }
+            );
+        });
+    }
+
+    #[test]
+    fn check_installed_reports_missing_when_the_crc32_does_not_match() {
+        with_isolated_home(|home| {
+            let rom_dir = home.join(".bytebox/ROM");
+            std::fs::create_dir_all(&rom_dir).unwrap();
+            std::fs::write(rom_dir.join("OS6128-AZERTY.rom"), b"not the expected content").unwrap();
+            std::fs::write(rom_dir.join("AMSDOS.ROM"), b"amsdos content").unwrap();
+
+            let expected: &[(&str, u32)] = &[
+                ("OS6128-AZERTY.rom", crc32(b"system content")),
+                ("AMSDOS.ROM", crc32(b"amsdos content")),
+            ];
+
+            assert_eq!(
+                check_installed_against(expected),
+                RomStatus::Missing,
+                "un contenu different (corrompu, ou d'une autre origine) ne doit pas passer pour installe"
+            );
+        });
+    }
+
+    /// Les trois CRC32 de `EXPECTED_CRC32` doivent effectivement correspondre
+    /// à ce que les sources verrouillées produisent — recalculé une fois
+    /// pour toutes en téléchargeant réellement les deux archives (voir
+    /// `install_everything_downloads_and_installs_from_the_real_sources`
+    /// ci-dessous, qui l'exerce déjà indirectement) plutôt que deviné : ce
+    /// test attrape juste une transcription erronée de ces constantes.
+    #[test]
+    #[ignore]
+    fn expected_crc32_matches_what_the_real_sources_actually_produce() {
+        with_isolated_home(|_home| {
+            let installed = install_everything(|_| {}).expect("doit reussir");
+            for file in &installed {
+                let expected = EXPECTED_CRC32
+                    .iter()
+                    .find(|(name, _)| *name == file.filename)
+                    .map(|(_, crc)| *crc)
+                    .unwrap_or_else(|| panic!("{} absent de EXPECTED_CRC32", file.filename));
+                assert_eq!(
+                    file.crc32, expected,
+                    "EXPECTED_CRC32 est perime pour {}",
+                    file.filename
+                );
+            }
         });
     }
 
