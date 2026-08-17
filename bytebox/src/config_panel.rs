@@ -193,7 +193,7 @@ impl ConfigPanel {
                     Tab::Crt => {
                         Self::crt_section(ui, &mut crt_settings, &mut self.crt_enabled_at_startup)
                     }
-                    Tab::Roms => self.roms.ui(ui),
+                    Tab::Roms => self.roms.ui(ui, machine),
                     Tab::Help => Self::help_section(ui),
                 }
             });

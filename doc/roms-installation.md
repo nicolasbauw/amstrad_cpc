@@ -91,6 +91,45 @@ routé automatiquement sur l'onglet ROMs -> installation -> power cycle
 automatique -> BASIC démarre normalement, sans redémarrage manuel de
 l'émulateur.
 
+## Correctif : détection "déjà installées" basée sur `[rom]`, pas sur un CRC32 figé
+
+Première implémentation : l'onglet ROMs affichait systématiquement le
+formulaire, même quand tout était déjà en place. Corrigé une première fois
+avec un `check_installed()` dans `rom_installer.rs`, comparant les fichiers
+déjà présents dans `~/.bytebox/ROM` à une petite table de CRC32 attendus
+(`EXPECTED_CRC32`), recalculée en téléchargeant réellement les deux sources.
+
+Deux défauts constatés en usage réel, sur la propre machine de
+l'utilisateur :
+
+- **Ignorait `config.toml` `[rom]`** : `check_installed()` ne regardait que
+  les chemins par défaut (`default_resource_path`), jamais une
+  personnalisation. Un utilisateur ayant redirigé `[rom]` vers d'autres
+  fichiers se serait vu proposer une réinstallation inutile — et pire, une
+  fois installée, `check_installed()` continuerait à ignorer SES fichiers à
+  lui, cochés comme "non installés" indéfiniment.
+- **Trop strict sur l'origine** : l'`OS6128-AZERTY.rom` déjà présent sur la
+  machine de développement (antérieur à cette fonctionnalité, origine
+  inconnue mais parfaitement fonctionnel — l'émulateur démarre très bien
+  avec) ne matchait pas le CRC32 de la source `genesis8bit.fr`, donc
+  `check_installed()` répondait `Missing` alors que les ROMs étaient bel et
+  bien installées et utilisées avec succès à chaque lancement.
+
+**Correctif** : remplacé par `Machine::rom_status()` (`core/src/machine.rs`),
+qui répond à une question différente et plus juste — "`load_roms`
+réussirait-il avec la configuration actuelle ?" — plutôt que "ce fichier
+vient-il bien de nos deux sources ?". Mêmes chemins que `load_roms` (`[rom]`
+personnalisée comprise, via un nouveau `resolve_rom_path` partagé par les
+deux), simple test d'existence (et de taille pour `system`, pour savoir si
+`basic` compte aussi), aucun hachage. Une ROM d'ailleurs qui charge est
+donc reconnue installée au même titre qu'une ROM posée par le bouton.
+
+Le CRC32 n'a pas disparu : `install_from_zip` continue de comparer le
+contenu fraîchement téléchargé à celui qu'il écrase (`InstalledFile::previous_crc32`),
+affiché dans le résumé après une installation — utile pour savoir si on
+vient de remplacer un fichier identique ou différent, mais plus jamais
+utilisé pour décider si le formulaire doit s'afficher.
+
 ## Statut
 
 Implémenté. Testé par un vrai téléchargement des deux sources

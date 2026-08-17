@@ -6,11 +6,15 @@
 //! Le téléchargement bloque plusieurs secondes : jamais appelé depuis la
 //! boucle de rendu egui elle-même, toujours dans un thread dédié
 //! (`std::thread::spawn`), dont la progression remonte par un canal
-//! `mpsc` — même principe que `MonitorCmd`, mais propre à cet écran (pas
-//! besoin que `Machine` en sache quoi que ce soit).
+//! `mpsc` — même principe que `MonitorCmd`, mais propre à cet écran.
+//! `Machine` n'est consultée qu'en lecture (`rom_status`, pour savoir si le
+//! formulaire a une raison de s'afficher) ; toute action dessus (recharger
+//! les ROMs après une installation) passe par `MonitorCmd::PowerCycle` sur
+//! le canal existant, jamais par un accès direct.
 
+use bytebox_core::machine::{Machine, RomStatus};
 use bytebox_core::monitor::{MonitorCmd, MonitorMessage};
-use bytebox_core::rom_installer::{InstalledFile, RomStatus};
+use bytebox_core::rom_installer::InstalledFile;
 use std::sync::mpsc::{Receiver, Sender};
 
 enum InstallEvent {
@@ -31,13 +35,6 @@ pub struct RomInstallState {
     accepted: bool,
     status: Status,
     events: Option<Receiver<InstallEvent>>,
-    /// Ce que `bytebox_core::rom_installer::check_installed` rapportait la
-    /// dernière fois qu'on l'a interrogé — au lancement, puis rafraîchi
-    /// après une installation réussie (voir `poll`). Un simple hachage de
-    /// trois fichiers locaux, mais pas de raison de le refaire à chaque
-    /// trame : rien d'autre que CE panneau n'écrit dans `~/.bytebox/ROM`
-    /// pendant que l'émulateur tourne.
-    already_installed: RomStatus,
 }
 
 impl RomInstallState {
@@ -46,7 +43,6 @@ impl RomInstallState {
             accepted: false,
             status: Status::Idle,
             events: None,
-            already_installed: bytebox_core::rom_installer::check_installed(),
         }
     }
 
@@ -75,11 +71,6 @@ impl RomInstallState {
                     // donc reprend là où `main.rs` avait échoué faute de
                     // ROMs.
                     let _ = cmd_sender.send((MonitorCmd::PowerCycle, String::new(), String::new()));
-                    // Rafraîchi maintenant : la prochaine fois que cet
-                    // onglet est rouvert (`ui`, plus bas), il doit
-                    // reconnaître que tout est en place plutôt que de
-                    // réafficher le formulaire.
-                    self.already_installed = bytebox_core::rom_installer::check_installed();
                     break;
                 }
                 Ok(InstallEvent::Error(e)) => {
@@ -103,14 +94,16 @@ impl RomInstallState {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, machine: &Machine) {
         // Rien à demander/montrer si tout est déjà en place et que
         // l'utilisateur n'est pas au milieu d'une action sur cet écran
-        // (Running/Done/Failed doit rester visible tel quel — voir plus bas
-        // — même une fois l'installation reconnue par `already_installed`,
-        // le prochain rafraîchissement de `poll` s'en charge déjà).
+        // (Running/Done/Failed doit rester visible tel quel — voir plus
+        // bas). `rom_status` mire directement la configuration réelle
+        // (`config.toml` [rom], personnalisée ou non) : une ROM d'ailleurs
+        // qui charge très bien compte comme installée, pas seulement celles
+        // que CE bouton a lui-même posées — voir son commentaire.
         if matches!(self.status, Status::Idle)
-            && let RomStatus::Installed { diagnostic_present } = self.already_installed
+            && let RomStatus::Installed { diagnostic_present } = machine.rom_status()
         {
             ui.colored_text_ok("ROMs installed.");
             if !diagnostic_present {

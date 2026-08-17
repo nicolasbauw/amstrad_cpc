@@ -7,7 +7,7 @@ use crate::memory::Memory;
 use crate::monitor::{MonitorCmd, MonitorMessage};
 use crate::trace::{TraceMode, Tracer};
 use std::{
-    collections::HashSet, error, error::Error, fmt, fs::File, io::Read, sync::mpsc,
+    collections::HashSet, error, error::Error, fmt, fs::File, io::Read, path::PathBuf, sync::mpsc,
     sync::mpsc::SendError,
 };
 use zilog_z80::{bus::Bus, cpu::CPU};
@@ -212,6 +212,19 @@ impl From<MachineError> for std::io::Error {
 }
 
 impl error::Error for MachineError {}
+
+/// Résultat de [`Machine::rom_status`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RomStatus {
+    /// Les ROMs système (OS+BASIC, AMSDOS) sont présentes — `load_roms`
+    /// réussirait. La ROM de diagnostic est optionnelle (`load_roms` ne la
+    /// charge qu'en mode diagnostic) : son absence ne fait donc pas
+    /// basculer ce statut vers `Missing`, juste `diagnostic_present` à
+    /// `false`.
+    Installed { diagnostic_present: bool },
+    /// Au moins une ROM système requise manque — `load_roms` échouerait.
+    Missing,
+}
 
 pub struct Machine {
     pub cpu: CPU,
@@ -553,23 +566,28 @@ impl Machine {
         }
     }
 
+    /// Résout le chemin d'une ROM : l'entrée `[rom]` de `config.toml` si
+    /// présente, sinon son nom canonique dans `~/.bytebox/ROM` — partagé par
+    /// `load_roms` et `rom_status`, pour que les deux s'accordent toujours
+    /// sur "quel fichier compte", y compris quand l'utilisateur personnalise
+    /// `[rom]` vers un tout autre emplacement.
+    fn resolve_rom_path(&self, config_override: &Option<String>, default_filename: &str) -> PathBuf {
+        let path = config_override.clone().unwrap_or_else(|| {
+            config::default_resource_path("ROM", default_filename)
+                .to_string_lossy()
+                .into_owned()
+        });
+        config::expand_tilde(&path)
+    }
+
     /// Charge les ROMs appropriées en fonction du mode (Diagnostic ou Officiel).
     /// Les chemins viennent de `config.toml` (section `[rom]`), avec les
     /// fichiers du dépôt en secours si une entrée est absente.
     pub fn load_roms(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // ROM Basse : OS 6128 (ou fichier combiné OS+BASIC de 32 Ko, voir
         // config::RomConfig::system)
-        let system_path = self
-            .config
-            .rom
-            .system
-            .clone()
-            .unwrap_or_else(|| {
-                config::default_resource_path("ROM", "OS6128-AZERTY.rom")
-                    .to_string_lossy()
-                    .into_owned()
-            });
-        let mut f = File::open(config::expand_tilde(&system_path))?;
+        let system_path = self.resolve_rom_path(&self.config.rom.system, "OS6128-AZERTY.rom");
+        let mut f = File::open(&system_path)?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
         if buf.len() >= 32 * 1024 {
@@ -579,56 +597,65 @@ impl Machine {
             self.bus.memory.load_low_rom(&buf);
 
             // ROM Haute 0 : BASIC 1.1
-            let basic_path = self
-                .config
-                .rom
-                .basic
-                .clone()
-                .unwrap_or_else(|| {
-                    config::default_resource_path("ROM", "BASIC1-1-AZERTY.ROM")
-                        .to_string_lossy()
-                        .into_owned()
-                });
-            let mut f = File::open(config::expand_tilde(&basic_path))?;
+            let basic_path = self.resolve_rom_path(&self.config.rom.basic, "BASIC1-1-AZERTY.ROM");
+            let mut f = File::open(&basic_path)?;
             let mut buf = Vec::new();
             f.read_to_end(&mut buf)?;
             self.bus.memory.load_high_rom(0, &buf);
         }
 
         // ROM Haute 7 : AMSDOS (Système de disquettes)
-        let amsdos_path = self
-            .config
-            .rom
-            .amsdos
-            .clone()
-            .unwrap_or_else(|| {
-                config::default_resource_path("ROM", "AMSDOS.ROM")
-                    .to_string_lossy()
-                    .into_owned()
-            });
-        let mut f = File::open(config::expand_tilde(&amsdos_path))?;
+        let amsdos_path = self.resolve_rom_path(&self.config.rom.amsdos, "AMSDOS.ROM");
+        let mut f = File::open(&amsdos_path)?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
         self.bus.memory.load_high_rom(7, &buf);
 
         if self.diagnostic_mode {
             // ROM Haute 15 (Diagnostic Upper)
-            let diag_path = self
-                .config
-                .rom
-                .diagnostic_upper
-                .clone()
-                .unwrap_or_else(|| {
-                    config::default_resource_path("ROM", "AmstradDiagUpper.rom")
-                        .to_string_lossy()
-                        .into_owned()
-                });
-            let mut f = File::open(config::expand_tilde(&diag_path))?;
+            let diag_path =
+                self.resolve_rom_path(&self.config.rom.diagnostic_upper, "AmstradDiagUpper.rom");
+            let mut f = File::open(&diag_path)?;
             let mut buf = Vec::new();
             f.read_to_end(&mut buf)?;
             self.bus.memory.load_high_rom(15, &buf);
         }
         Ok(())
+    }
+
+    /// Vrai si `load_roms` réussirait avec la configuration actuelle — sans
+    /// réellement rien charger (juste l'existence des fichiers concernés,
+    /// et pour `system`, sa taille pour savoir si `basic` compte aussi).
+    /// Utilisé par l'écran d'installation des ROMs (F6, `rom_install_panel.rs`)
+    /// pour savoir s'il y a une raison de s'afficher, sans recharger les
+    /// ROMs dans une machine déjà démarrée juste pour vérifier — et surtout
+    /// sans jamais dépendre de LEUR origine (CRC32, source de
+    /// téléchargement...) : une personnalisation via `config.toml` `[rom]`
+    /// vers des fichiers d'une tout autre provenance doit être reconnue au
+    /// même titre que les ROMs installées par le bouton "Install ROMs".
+    pub fn rom_status(&self) -> RomStatus {
+        let system_path = self.resolve_rom_path(&self.config.rom.system, "OS6128-AZERTY.rom");
+        let Ok(system_len) = std::fs::metadata(&system_path).map(|m| m.len()) else {
+            return RomStatus::Missing;
+        };
+
+        if system_len < 32 * 1024 {
+            let basic_path = self.resolve_rom_path(&self.config.rom.basic, "BASIC1-1-AZERTY.ROM");
+            if !basic_path.is_file() {
+                return RomStatus::Missing;
+            }
+        }
+
+        let amsdos_path = self.resolve_rom_path(&self.config.rom.amsdos, "AMSDOS.ROM");
+        if !amsdos_path.is_file() {
+            return RomStatus::Missing;
+        }
+
+        let diag_path =
+            self.resolve_rom_path(&self.config.rom.diagnostic_upper, "AmstradDiagUpper.rom");
+        RomStatus::Installed {
+            diagnostic_present: diag_path.is_file(),
+        }
     }
 
     /// Exécute une instruction et synchronise les périphériques
@@ -1639,6 +1666,86 @@ impl Machine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `rom_status` doit suivre `[rom]` de `config.toml` telle quelle,
+    /// personnalisée ou non — une ROM d'ailleurs qui charge très bien doit
+    /// être reconnue installée, pas seulement celles posées par le bouton
+    /// "Install ROMs" (F6). Fichiers de test réels sur disque (pas de
+    /// mock) : `resolve_rom_path` fait de vrais appels `Path::is_file`.
+    /// Un champ `[rom]` laissé à `None` retombe sur `default_resource_path`
+    /// (`~/.bytebox/ROM/...`), donc sur de VRAIS fichiers si la machine qui
+    /// exécute ce test en a (le cas sur une machine de développement déjà
+    /// configurée). Les quatre champs sont donc toujours renseignés
+    /// explicitement ci-dessous, y compris vers un chemin volontairement
+    /// inexistant pour ceux qu'un cas veut absents — jamais laissés à
+    /// `None`, qui ferait dépendre le résultat de l'environnement réel.
+    fn nonexistent_path(dir: &std::path::Path, name: &str) -> String {
+        dir.join(name).to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn rom_status_honors_custom_rom_paths_from_config() {
+        let dir = std::env::temp_dir().join("amstrad_cpc_test_rom_status_custom");
+        std::fs::create_dir_all(&dir).unwrap();
+        let system_path = dir.join("my_custom_os.rom");
+        let amsdos_path = dir.join("my_custom_amsdos.rom");
+        // 16 Ko : sous le seuil des 32 Ko qui dispenserait de "basic" —
+        // doit donc être considéré manquant tant que "basic" ne pointe pas
+        // vers un fichier existant lui aussi.
+        std::fs::write(&system_path, vec![0u8; 16 * 1024]).unwrap();
+        std::fs::write(&amsdos_path, vec![0u8; 16 * 1024]).unwrap();
+
+        let mut machine = Machine::new();
+        machine.config.rom.system = Some(system_path.to_string_lossy().into_owned());
+        machine.config.rom.amsdos = Some(amsdos_path.to_string_lossy().into_owned());
+        machine.config.rom.basic = Some(nonexistent_path(&dir, "does_not_exist_basic.rom"));
+        machine.config.rom.diagnostic_upper = Some(nonexistent_path(&dir, "does_not_exist_diag.rom"));
+        assert_eq!(
+            machine.rom_status(),
+            RomStatus::Missing,
+            "system < 32 Ko sans basic valide doit rester Missing"
+        );
+
+        let basic_path = dir.join("my_custom_basic.rom");
+        std::fs::write(&basic_path, vec![0u8; 16 * 1024]).unwrap();
+        machine.config.rom.basic = Some(basic_path.to_string_lossy().into_owned());
+        assert_eq!(
+            machine.rom_status(),
+            RomStatus::Installed {
+                diagnostic_present: false
+            },
+            "system + basic + amsdos personnalises et presents -> Installed"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Un dump combiné (`system` seul, >= 32 Ko) dispense de `basic` — même
+    /// logique que `load_roms`, voir son commentaire.
+    #[test]
+    fn rom_status_accepts_a_combined_32kb_system_rom_without_basic() {
+        let dir = std::env::temp_dir().join("amstrad_cpc_test_rom_status_combined");
+        std::fs::create_dir_all(&dir).unwrap();
+        let system_path = dir.join("combined.rom");
+        let amsdos_path = dir.join("amsdos.rom");
+        std::fs::write(&system_path, vec![0u8; 32 * 1024]).unwrap();
+        std::fs::write(&amsdos_path, vec![0u8; 16 * 1024]).unwrap();
+
+        let mut machine = Machine::new();
+        machine.config.rom.system = Some(system_path.to_string_lossy().into_owned());
+        machine.config.rom.amsdos = Some(amsdos_path.to_string_lossy().into_owned());
+        machine.config.rom.basic = Some(nonexistent_path(&dir, "does_not_exist_basic.rom"));
+        machine.config.rom.diagnostic_upper = Some(nonexistent_path(&dir, "does_not_exist_diag.rom"));
+
+        assert_eq!(
+            machine.rom_status(),
+            RomStatus::Installed {
+                diagnostic_present: false
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Durées réelles sur CPC de quelques instructions, exprimées en
     /// microsecondes dans la documentation de la machine : le Gate Array les

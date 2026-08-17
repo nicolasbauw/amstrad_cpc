@@ -48,18 +48,33 @@ alt-tabbing to this file: the "Help" tab of the configuration panel (`F6`).
 ByteBox doesn't ship the CPC's system ROMs (OS, BASIC, AMSDOS, diagnostic)
 — their legal status has never been formally clarified by Amstrad, so
 they're not bundled or downloaded silently. `Machine::load_roms` expects
-them in `~/.bytebox/ROM/`, following `[rom]` in `config.toml` if set.
+them in `~/.bytebox/ROM/` by default, or wherever `[rom]` in `config.toml`
+points instead if you've set it.
 
-If they're missing (first launch, or a package install without a
-separate ROM-provisioning step), the emulator still opens — it runs on
-blank ROMs, harmlessly, rather than failing before a window ever
-appears — and the configuration panel (`F6`) opens automatically on its
-"ROMs" tab. From there, "Install ROMs" downloads them from two AZERTY
-archives (details in `doc/roms-installation.md`), after you tick a box
-acknowledging that Amstrad has neither granted nor refused permission to
-redistribute them, and that usage is widely tolerated in the
-retro-computing community. Once installed, the machine power-cycles
-automatically — no restart needed.
+The "ROMs" tab of the configuration panel (`F6`) reflects that exact
+lookup, `[rom]` overrides included: it checks whether the files
+`load_roms` would actually use are present, not where they came from — a
+ROM you already had from somewhere else works exactly as well as one
+installed through this screen, and is recognized as installed the same
+way. Only when they're missing does the tab show anything to do: a
+disclaimer to accept (Amstrad has neither granted nor refused permission
+to redistribute these ROMs; usage is widely tolerated in the
+retro-computing community, but their legal status isn't settled) and an
+"Install ROMs" button.
+
+That button downloads from exactly two sources — no others, and no
+`[rom]` override changes what it fetches, only whether the tab decides
+it's needed in the first place: the AZERTY system+AMSDOS ROMs from
+[genesis8bit.fr](https://www.genesis8bit.fr/), and the diagnostic ROM
+from the [amstrad-diagnostics](https://github.com/llopis/amstrad-diagnostics)
+GitHub project (details, including why an initially-considered third
+source was dropped, in `doc/roms-installation.md`).
+
+If they're missing at startup (first launch, or a package install without
+a separate ROM-provisioning step), the emulator still opens — it runs on
+blank ROMs, harmlessly, rather than failing before a window ever appears
+— and `F6` opens automatically on this tab. Once installed, the machine
+power-cycles automatically — no restart needed.
 
 ## CRT shader
 
