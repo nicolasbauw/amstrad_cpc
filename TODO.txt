@@ -1,0 +1,6 @@
+TODO ensuite : dans le panneau de config, l'onglet "help" voit sa fenêtre être trop réduite par rapport à avant (environ de moitié), ce n'est pas confortable pour lire l'aide.
+toujours dans le panneau de config : pour les extra banks : un slider qui permet d'ajuster (de 1 à 56) serait mieux, non ? d'ailleurs, 0 n'est pas étrange ? un 6128 a au moins 1 banque en upper ram, non ?
+
+un détail : dans le tooltip "CRt shader enabled", j'ai l'impression que brièvement apparaît le tooltip de l'état précédent, par exemple : s'il est enable, et qu'on le désactive, on dirait qu'il affiche une fraction de seconde "enabled" avant d'afficher le "disabled". (je n'ai pas constaté ce comportement sur mac, ceci dit - uniquement sous linux). Peut-on y faire quelque chose ?
+
+Autre détail : il est temps de se poser la question d'embarquer une version "downscale" du logo PNG, pour l'icône des fenêtres notamment.
