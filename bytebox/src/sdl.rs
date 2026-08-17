@@ -24,17 +24,61 @@ use sdl2::surface::Surface;
 /// exécute l'émulateur. SDL copie les pixels de la surface dans la fenêtre
 /// dès `set_icon` : la surface elle-même n'a pas besoin de survivre à cet
 /// appel.
+///
+/// Sur un build de développement (`cargo build`/`cargo run`, jamais
+/// `--release` — voir `overlay_dev_stripe`), l'icône porte en plus une
+/// bande rouge diagonale : le paquet installé et la version en cours de
+/// travail deviennent visuellement indissociables autrement (README, section
+/// "Development builds"), notamment une fois le packaging en place.
 fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
     let img = image::open("assets/bytebox.png")
         .map_err(|e| e.to_string())?
         .into_rgba8();
     let (width, height) = img.dimensions();
     let mut pixels = img.into_raw();
+    if cfg!(debug_assertions) {
+        overlay_dev_stripe(&mut pixels, width, height);
+    }
     let pitch = width * 4;
     let surface = Surface::from_data(&mut pixels, width, height, pitch, PixelFormatEnum::RGBA32)
         .map_err(|e| e.to_string())?;
     window.set_icon(&surface);
     Ok(())
+}
+
+/// Dessine une bande rouge diagonale (coin bas-gauche vers coin haut-droit)
+/// sur un buffer RGBA8 déjà décodé, `width`×`height`, 4 octets par pixel.
+///
+/// Une bande de couleur plutôt qu'un texte "DEV" : à la taille d'une icône
+/// de barre des tâches (souvent 32-48px), un texte de trois lettres serait
+/// illisible, alors qu'une diagonale épaisse tranche nettement même à cette
+/// taille (voir README, section "Development builds").
+///
+/// Épaisseur proportionnelle à la taille de l'image (pas un nombre de pixels
+/// fixe, qui deviendrait disproportionné si `assets/bytebox.png` change de
+/// résolution) : chaque pixel est classé par sa distance à la droite
+/// bas-gauche/haut-droit (`x/largeur + y/hauteur = 1`), et repeint s'il
+/// tombe dans la bande.
+fn overlay_dev_stripe(pixels: &mut [u8], width: u32, height: u32) {
+    let w = width as f32;
+    let h = height as f32;
+    let half_thickness = w.min(h) * 0.09;
+    let norm = (w * w + h * h).sqrt();
+
+    for y in 0..height {
+        for x in 0..width {
+            // Distance signée du pixel à la droite x/w + y/h = 1, mise à
+            // l'échelle des pixels (équivalent, sans division par w*h).
+            let dist = ((x as f32) * h + (y as f32) * w - w * h).abs() / norm;
+            if dist <= half_thickness {
+                let idx = ((y * width + x) * 4) as usize;
+                pixels[idx] = 220;
+                pixels[idx + 1] = 20;
+                pixels[idx + 2] = 20;
+                pixels[idx + 3] = 255;
+            }
+        }
+    }
 }
 
 /// Niveau de zoom de la fenêtre d'affichage (touches F1-F4, ou
@@ -976,6 +1020,28 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un coin loin de la diagonale bas-gauche/haut-droit doit rester
+    /// intact (la bande ne doit pas envahir toute l'icône), tandis qu'un
+    /// pixel sur la diagonale elle-même doit devenir rouge opaque.
+    #[test]
+    fn overlay_dev_stripe_paints_the_diagonal_but_leaves_far_corners_alone() {
+        let (w, h) = (64u32, 64u32);
+        let mut pixels = vec![10u8; (w * h * 4) as usize]; // gris uniforme, alpha 10
+
+        overlay_dev_stripe(&mut pixels, w, h);
+
+        let pixel_at = |x: u32, y: u32| -> [u8; 4] {
+            let i = ((y * w + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+
+        // Coin haut-gauche : loin de la diagonale bas-gauche -> haut-droit.
+        assert_eq!(pixel_at(2, 2), [10, 10, 10, 10], "coin haut-gauche repeint a tort");
+
+        // Sur la diagonale (x/w + y/h = 1) : repeint en rouge opaque.
+        assert_eq!(pixel_at(32, 32), [220, 20, 20, 255]);
+    }
 
     #[test]
     fn display_mode_recognizes_the_four_config_values() {

@@ -181,3 +181,13 @@ A concrete example of combined usage:
 6. press **`F9`**: the emulator skips ahead by one video line, and you watch the `HSYNC Counter` and `current_line` update in real-time on the debugger screen.
 
 ![Screenshot](assets/machine_status.png)
+
+## Development builds
+
+Any build that isn't `cargo build --release` (so a plain `cargo build` or
+`cargo run`, as happens when working on the emulator itself) shows a thick
+red diagonal stripe across the window/taskbar icon, on all three windows
+(main, console, machine status). This is the only way to tell a
+development build apart from one installed through a package manager —
+both otherwise look and behave identically — so treat it as a hint that
+you're not running the packaged release.
