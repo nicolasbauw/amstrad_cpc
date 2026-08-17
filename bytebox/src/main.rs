@@ -7,6 +7,7 @@ mod egui_gpu;
 mod keyboard_panel;
 mod osd;
 mod renderer;
+mod rom_install_panel;
 mod sdl;
 mod status_panel;
 mod ui_scale;
@@ -64,7 +65,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Initialisation de la Machine
     let mut machine = Machine::new();
     machine.diagnostic_mode = diag_mode;
-    machine.load_roms()?;
+    // Pas de `?` ici : sur un premier lancement (ou une installation via
+    // gestionnaire de paquets sans les ROMs elles-mêmes, leur statut légal
+    // n'étant pas tranché — voir doc/roms-installation.md), aucune ROM
+    // n'existe encore dans ~/.bytebox/ROM. Autrefois, ça faisait échouer le
+    // programme avant même l'ouverture d'une fenêtre, sans aucun message
+    // exploitable pour qui que ce soit qui ne lit pas les journaux. `sdl::run`
+    // ouvre maintenant la fenêtre de toute façon (la machine tourne sur une
+    // ROM vide, inoffensif — NOP en boucle) et route automatiquement vers
+    // l'écran d'installation des ROMs (F6, onglet ROMs) si elles manquent.
+    let roms_missing = machine.load_roms().is_err();
+    if roms_missing {
+        app_log!("No ROMs found in ~/.bytebox/ROM — opening the ROM installer.");
+    }
 
     if let Some(path) = &disk
         && let Err(e) = machine.load_disk(path)
@@ -83,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|cmd| autotype::AutoTyper::new(&autotype::ensure_validated(cmd)));
 
     // 3. Fenêtrage SDL2 et boucle principale, jusqu'à la fermeture.
-    sdl::run(machine, autotyper)
+    sdl::run(machine, autotyper, roms_missing)
 }
 
 #[cfg(test)]

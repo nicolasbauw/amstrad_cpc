@@ -24,6 +24,7 @@ pub mod memory;
 pub mod monitor;
 pub mod ppi;
 pub mod psg;
+pub mod rom_installer;
 pub mod snapshot;
 pub mod sound;
 pub mod tape;

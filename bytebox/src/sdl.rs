@@ -174,6 +174,7 @@ fn apply_display_mode(window: &mut sdl2::video::Window, mode: DisplayMode) {
 pub fn run(
     mut machine: Machine,
     mut autotyper: Option<AutoTyper>,
+    roms_missing: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 3. Initialisation de SDL2
     let sdl_context = sdl2::init()?;
@@ -318,9 +319,16 @@ pub fn run(
     // ouvert (même mécanisme que `keyboard_panel_generation` plus bas, voir
     // son commentaire) : sans ça, sa taille — proportionnelle au zoom —
     // resterait celle calculée pour l'ancienne taille de fenêtre.
-    let mut config_panel_visible = false;
+    // `roms_missing` (voir `main.rs`) : le panneau s'ouvre directement sur
+    // son onglet ROMs plutôt que de laisser deviner où trouver l'écran
+    // d'installation — c'est le seul cas où F6 s'ouvre de lui-même, sans
+    // appui sur la touche.
+    let mut config_panel_visible = roms_missing;
     let mut config_panel =
         ConfigPanel::new(machine.crt_config().enabled_at_startup.unwrap_or(false));
+    if roms_missing {
+        config_panel.open_on_roms_tab();
+    }
     let mut config_panel_generation: u64 = 0;
 
     // Clavier virtuel (F7, keyboard_panel.rs, Plan V2.md jalon M5) : même

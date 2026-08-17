@@ -51,6 +51,7 @@ impl ZoomChoice {
 enum Tab {
     General,
     Crt,
+    Roms,
     Help,
 }
 
@@ -88,6 +89,11 @@ pub struct ConfigPanel {
     /// reste des réglages du shader. Ne fait pas partie de `CrtSettings` :
     /// contrairement aux curseurs, elle ne pilote rien côté GPU.
     crt_enabled_at_startup: bool,
+    /// Téléchargement/installation des ROMs (onglet "ROMs") : voir
+    /// `rom_install_panel.rs`. Vit ici, pas dans un état séparé côté
+    /// `sdl.rs`, pour la même raison que `crt_enabled_at_startup` — propre à
+    /// ce panneau, sans intérêt pour le reste de la boucle principale.
+    roms: crate::rom_install_panel::RomInstallState,
 }
 
 impl ConfigPanel {
@@ -97,7 +103,16 @@ impl ConfigPanel {
             blank_disk_drive_b: false,
             tab: Tab::General,
             crt_enabled_at_startup,
+            roms: crate::rom_install_panel::RomInstallState::new(),
         }
+    }
+
+    /// Sélectionne l'onglet ROMs — appelé par `sdl.rs` au lancement si
+    /// `Machine::load_roms` a échoué (voir `main.rs`) : plutôt que de
+    /// laisser deviner où trouver l'écran d'installation, F6 s'ouvre
+    /// directement dessus.
+    pub fn open_on_roms_tab(&mut self) {
+        self.tab = Tab::Roms;
     }
 
     /// Dessine le panneau ; `open` reflète et contrôle sa visibilité (la
@@ -124,6 +139,10 @@ impl ConfigPanel {
         let mut zoom = None;
         let mut crt_settings = crt_settings;
         let mut keyboard_settings = keyboard_settings;
+        // Indépendant de l'onglet affiché : un changement d'onglet pendant
+        // un téléchargement en cours ne doit pas en geler la progression ni
+        // son aboutissement (voir `RomInstallState::poll`).
+        self.roms.poll(cmd_sender);
         // Proportionnelle à la fenêtre CPC, pas juste une largeur : élargir
         // le panneau sans grossir police/boutons/curseurs ne sert à rien —
         // c'est justement leur petitesse en plein écran 4K qui gênait, pas
@@ -148,6 +167,7 @@ impl ConfigPanel {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.tab, Tab::General, "General");
                     ui.selectable_value(&mut self.tab, Tab::Crt, "CRT Shader");
+                    ui.selectable_value(&mut self.tab, Tab::Roms, "ROMs");
                     ui.selectable_value(&mut self.tab, Tab::Help, "Help");
                 });
                 ui.separator();
@@ -173,6 +193,7 @@ impl ConfigPanel {
                     Tab::Crt => {
                         Self::crt_section(ui, &mut crt_settings, &mut self.crt_enabled_at_startup)
                     }
+                    Tab::Roms => self.roms.ui(ui),
                     Tab::Help => Self::help_section(ui),
                 }
             });

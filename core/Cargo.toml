@@ -13,3 +13,9 @@ sdl2 = "0.38.0"
 toml = "1.1.4"
 serde = { version = "1.0.229", features = ["derive"] }
 directories = "6.0.0"
+# Installeur de ROMs (rom_installer.rs) : téléchargement synchrone (appelé
+# depuis un thread dédié côté bytebox/, jamais la boucle egui elle-même),
+# extraction du zip source, et vérification d'intégrité.
+ureq = "3"
+zip = "8"
+crc32fast = "1"
