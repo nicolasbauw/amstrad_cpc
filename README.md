@@ -184,10 +184,22 @@ A concrete example of combined usage:
 
 ## Development builds
 
-Any build that isn't `cargo build --release` (so a plain `cargo build` or
-`cargo run`, as happens when working on the emulator itself) shows a thick
-red diagonal stripe across the window/taskbar icon, on all three windows
-(main, console, machine status). This is the only way to tell a
-development build apart from one installed through a package manager —
-both otherwise look and behave identically — so treat it as a hint that
-you're not running the packaged release.
+Only a build made by the official packaging (PKGBUILD or equivalent) is
+considered "official" — same principle as Caprice32. Anything else,
+including a plain `cargo build --release` run by hand, shows a thick red
+diagonal stripe across the window/taskbar icon, on all three windows
+(main, console, machine status), so it's never mistaken for the packaged
+release.
+
+The distinction is made at compile time by the `BYTEBOX_PACKAGED_BUILD`
+environment variable: if it's set (to anything) when `cargo build` runs,
+the stripe is left off. Only the packaging recipe should ever set it —
+for example:
+
+```sh
+BYTEBOX_PACKAGED_BUILD=1 cargo build --release
+```
+
+A plain `--release` build without that variable still gets the stripe:
+`--release` alone doesn't mean "packaged", only the packaging step
+setting this variable does.

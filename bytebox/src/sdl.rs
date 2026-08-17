@@ -25,18 +25,26 @@ use sdl2::surface::Surface;
 /// dès `set_icon` : la surface elle-même n'a pas besoin de survivre à cet
 /// appel.
 ///
-/// Sur un build de développement (`cargo build`/`cargo run`, jamais
-/// `--release` — voir `overlay_dev_stripe`), l'icône porte en plus une
-/// bande rouge diagonale : le paquet installé et la version en cours de
-/// travail deviennent visuellement indissociables autrement (README, section
-/// "Development builds"), notamment une fois le packaging en place.
+/// Tout ce qui n'est pas construit par le paquet officiel — un `cargo
+/// build`/`cargo run` en debug COMME en `--release` — porte en plus une
+/// bande rouge diagonale sur l'icône (voir `overlay_dev_stripe`) : seul un
+/// vrai paquet installé (PKGBUILD ou équivalent) compte comme version
+/// "officielle", même principe que Caprice32. `--release` seul n'en fait
+/// donc pas foi : c'est `BYTEBOX_PACKAGED_BUILD`, une variable
+/// d'environnement lue À LA COMPILATION (`option_env!`, pas `env!` : son
+/// absence ne doit pas empêcher de compiler), que seule la recette de
+/// packaging doit positionner (README, section "Development builds"). Le
+/// paquet installé et la version en cours de travail seraient sinon
+/// indissociables l'un de l'autre.
+const IS_PACKAGED_BUILD: bool = option_env!("BYTEBOX_PACKAGED_BUILD").is_some();
+
 fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
     let img = image::open("assets/bytebox.png")
         .map_err(|e| e.to_string())?
         .into_rgba8();
     let (width, height) = img.dimensions();
     let mut pixels = img.into_raw();
-    if cfg!(debug_assertions) {
+    if !IS_PACKAGED_BUILD {
         overlay_dev_stripe(&mut pixels, width, height);
     }
     let pitch = width * 4;
