@@ -1,0 +1,25 @@
+Packaging multi-plateforme (.github/workflows/build-packages.yml) — à reprendre
+
+- AppImage et MSI Windows : le workflow existe mais n'a jamais tourné pour
+  de vrai (ni CI, ni test manuel). Déclencher un workflow_dispatch pour
+  voir si ça compile/s'empaquette. Le MSI en particulier n'a jamais été
+  testé sur une vraie machine Windows (personne n'en a une sous la main) —
+  angle mort à garder en tête même une fois la CI verte.
+
+- Formula Homebrew (packaging/homebrew/bytebox.rb) : validée de bout en
+  bout sur un vrai Mac (build, bundle .app, icône Dock/Launchpad correcte).
+  Utilise actuellement une entrée `head` (branche dev) le temps que ce
+  travail ne soit pas encore taggé — une fois dev mergée sur master et un
+  nouveau tag créé :
+    - retirer l'entrée `head` de la Formula (ou la garder pour les tests
+      futurs, au choix)
+    - recalculer le sha256 du nouveau tarball de tag et mettre à jour
+      url/sha256
+    - le job CI macOS (build-packages.yml) utilise encore l'ancienne
+      logique (tap + install depuis le tag figé, pas --HEAD) : à revalider
+      une fois qu'un tag à jour existe.
+
+- assets/bytebox_icon.icns : régénéré via iconutil sur le Mac (l'essai
+  initial via png2icns/libicns — JPEG2000 par jasper, obsolète — donnait
+  une icône grise/vide sous macOS). Si un jour l'icône source change,
+  recommencer depuis le Mac (iconutil), pas depuis Linux.
