@@ -221,9 +221,9 @@ A concrete example of combined usage:
 Only a build made by the official packaging (PKGBUILD or equivalent) is
 considered "official" — same principle as Caprice32. Anything else,
 including a plain `cargo build --release` run by hand, is considered a
-dev build, and shows a thick red diagonal stripe across the window/taskbar
-icon, on all three windows (main, console, machine status), so it's never
-mistaken for the packaged release.
+dev build, and shows a red border around the window/taskbar icon, on all
+three windows (main, console, machine status), so it's never mistaken for
+the packaged release.
 
 The distinction is made at compile time by the `BYTEBOX_PACKAGED_BUILD`
 environment variable: if it's set (to anything) when `cargo build` runs,

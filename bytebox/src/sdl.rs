@@ -29,13 +29,13 @@ use sdl2::surface::Surface;
 /// pixels (barre des tâches, alt-tab, titre de fenêtre) : `bytebox_icon.png`
 /// (256×256) est une version pré-réduite de `bytebox.png` (1254×1254, gardé
 /// pour d'autres usages éventuels — capture d'écran du README, etc.), pour
-/// ne pas décoder ni parcourir pixel par pixel (voir `overlay_dev_stripe`
+/// ne pas décoder ni parcourir pixel par pixel (voir `overlay_dev_border`
 /// plus bas) une image ~24× plus grande que nécessaire, trois fois de
 /// suite (une par fenêtre) à chaque lancement.
 ///
 /// Tout ce qui n'est pas construit par le paquet officiel — un `cargo
-/// build`/`cargo run` en debug COMME en `--release` — porte en plus une
-/// bande rouge diagonale sur l'icône (voir `overlay_dev_stripe`) : seul un
+/// build`/`cargo run` en debug COMME en `--release` — porte en plus un
+/// cadre rouge autour de l'icône (voir `overlay_dev_border`) : seul un
 /// vrai paquet installé (PKGBUILD ou équivalent) compte comme version
 /// "officielle", même principe que Caprice32. `--release` seul n'en fait
 /// donc pas foi : c'est `BYTEBOX_PACKAGED_BUILD`, une variable
@@ -59,7 +59,7 @@ fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
     let (width, height) = img.dimensions();
     let mut pixels = img.into_raw();
     if !IS_PACKAGED_BUILD {
-        overlay_dev_stripe(&mut pixels, width, height);
+        overlay_dev_border(&mut pixels, width, height);
     }
     let pitch = width * 4;
     let surface = Surface::from_data(&mut pixels, width, height, pitch, PixelFormatEnum::RGBA32)
@@ -68,31 +68,30 @@ fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
     Ok(())
 }
 
-/// Dessine une bande rouge diagonale (coin bas-gauche vers coin haut-droit)
-/// sur un buffer RGBA8 déjà décodé, `width`×`height`, 4 octets par pixel.
+/// Dessine un cadre rouge tout autour du buffer RGBA8 déjà décodé,
+/// `width`×`height`, 4 octets par pixel.
 ///
-/// Une bande de couleur plutôt qu'un texte "DEV" : à la taille d'une icône
-/// de barre des tâches (souvent 32-48px), un texte de trois lettres serait
-/// illisible, alors qu'une diagonale épaisse tranche nettement même à cette
-/// taille (voir README, section "Development builds").
+/// Un cadre plutôt qu'un texte "DEV" : à la taille d'une icône de barre des
+/// tâches (souvent 32-48px), un texte de trois lettres serait illisible,
+/// alors qu'un contour épais tranche nettement même à cette taille (voir
+/// README, section "Development builds"). Un cadre plutôt que la bande
+/// diagonale utilisée initialement : celle-ci traversait le dessin de
+/// l'icône lui-même, alors qu'un cadre le laisse intact et se contente de
+/// l'entourer.
 ///
-/// Épaisseur proportionnelle à la taille de l'image (pas un nombre de pixels
-/// fixe, qui deviendrait disproportionné si `assets/bytebox_icon.png`
-/// change de résolution) : chaque pixel est classé par sa distance à la droite
-/// bas-gauche/haut-droit (`x/largeur + y/hauteur = 1`), et repeint s'il
-/// tombe dans la bande.
-fn overlay_dev_stripe(pixels: &mut [u8], width: u32, height: u32) {
-    let w = width as f32;
-    let h = height as f32;
-    let half_thickness = w.min(h) * 0.09;
-    let norm = (w * w + h * h).sqrt();
+/// Épaisseur proportionnelle à la taille de l'image (pas un nombre de
+/// pixels fixe, qui deviendrait disproportionné si `assets/bytebox_icon.png`
+/// change de résolution) — plus fine que ne l'était la bande diagonale
+/// (0.07 contre 0.09 de la plus petite dimension), le cadre entier restant
+/// déjà bien plus visible qu'elle à surface de rouge égale.
+fn overlay_dev_border(pixels: &mut [u8], width: u32, height: u32) {
+    let thickness = ((width.min(height) as f32) * 0.07).round().max(1.0) as u32;
 
     for y in 0..height {
         for x in 0..width {
-            // Distance signée du pixel à la droite x/w + y/h = 1, mise à
-            // l'échelle des pixels (équivalent, sans division par w*h).
-            let dist = ((x as f32) * h + (y as f32) * w - w * h).abs() / norm;
-            if dist <= half_thickness {
+            let on_border =
+                x < thickness || y < thickness || x >= width - thickness || y >= height - thickness;
+            if on_border {
                 let idx = ((y * width + x) * 4) as usize;
                 pixels[idx] = 220;
                 pixels[idx + 1] = 20;
@@ -1104,26 +1103,25 @@ pub fn run(
 mod tests {
     use super::*;
 
-    /// Un coin loin de la diagonale bas-gauche/haut-droit doit rester
-    /// intact (la bande ne doit pas envahir toute l'icône), tandis qu'un
-    /// pixel sur la diagonale elle-même doit devenir rouge opaque.
+    /// Le centre de l'icône (loin de tout bord) doit rester intact, tandis
+    /// qu'un pixel sur le bord doit devenir rouge opaque.
     #[test]
-    fn overlay_dev_stripe_paints_the_diagonal_but_leaves_far_corners_alone() {
+    fn overlay_dev_border_paints_the_edges_but_leaves_the_center_alone() {
         let (w, h) = (64u32, 64u32);
         let mut pixels = vec![10u8; (w * h * 4) as usize]; // gris uniforme, alpha 10
 
-        overlay_dev_stripe(&mut pixels, w, h);
+        overlay_dev_border(&mut pixels, w, h);
 
         let pixel_at = |x: u32, y: u32| -> [u8; 4] {
             let i = ((y * w + x) * 4) as usize;
             [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
         };
 
-        // Coin haut-gauche : loin de la diagonale bas-gauche -> haut-droit.
-        assert_eq!(pixel_at(2, 2), [10, 10, 10, 10], "coin haut-gauche repeint a tort");
+        // Centre de l'icône : loin de tout bord.
+        assert_eq!(pixel_at(32, 32), [10, 10, 10, 10], "centre repeint a tort");
 
-        // Sur la diagonale (x/w + y/h = 1) : repeint en rouge opaque.
-        assert_eq!(pixel_at(32, 32), [220, 20, 20, 255]);
+        // Coin haut-gauche, sur le bord : repeint en rouge opaque.
+        assert_eq!(pixel_at(0, 0), [220, 20, 20, 255]);
     }
 
     #[test]

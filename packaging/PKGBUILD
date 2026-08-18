@@ -16,7 +16,7 @@ build() {
   # GitHub repo's name (amstrad_cpc), not the package's (bytebox).
   cd "amstrad_cpc-$pkgver"
   # Marks this as an official build: without it, the window/taskbar icon
-  # carries a diagonal red "dev build" stripe (see README, "Development
+  # carries a red "dev build" border (see README, "Development
   # builds"). --profile dist (not --release): a slower-to-compile but
   # smaller/faster profile reserved for distributed binaries (LTO, single
   # codegen unit — see the root Cargo.toml).
