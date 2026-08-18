@@ -158,10 +158,10 @@ jobs:
       # aucune différence pratique avec un vrai tap distant pour ce test.
       - name: Build and test the Formula
         run: |
-          brew tap-new local/bytebox
-          cp packaging/homebrew/bytebox.rb "$(brew --repository local/bytebox)/Formula/bytebox.rb"
-          brew install --build-from-source local/bytebox/bytebox
-          brew test local/bytebox/bytebox
+          brew tap-new nicolasbauw/bytebox
+          cp packaging/homebrew/bytebox.rb "$(brew --repository nicolasbauw/bytebox)/Formula/bytebox.rb"
+          brew install --build-from-source nicolasbauw/bytebox/bytebox
+          brew test nicolasbauw/bytebox/bytebox
 
       - name: Archive the installed binary and the .app bundle
         run: |
