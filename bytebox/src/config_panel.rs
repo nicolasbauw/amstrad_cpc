@@ -157,11 +157,19 @@ impl ConfigPanel {
         // toute première ouverture.
         let scale = crate::ui_scale::content_scale(window_size);
         let default_width = 420.0 * scale;
+        // Coin haut-gauche fixe : sans `default_pos`, egui place chaque
+        // nouvelle fenêtre (un nouvel id à chaque changement de
+        // `generation`, voir plus haut) via son algorithme de cascade
+        // interne — d'où une position différente d'une ouverture à
+        // l'autre au lieu de toujours la même, symptôme observé en
+        // pratique.
+        let margin = 8.0;
         egui::Window::new("Configuration")
             .id(egui::Id::new(("config_panel_window", generation)))
             .open(open)
             .resizable(true)
             .default_width(default_width)
+            .default_pos(egui::pos2(margin, margin))
             .show(ctx, |ui| {
                 ui.set_style(crate::ui_scale::scaled_style(ui.style(), scale));
                 ui.horizontal(|ui| {

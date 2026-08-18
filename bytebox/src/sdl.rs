@@ -272,16 +272,21 @@ pub fn run(
     let console_window_id = console_win.id();
     let mut console_window = ConsoleWindow::new(console_win)?;
 
-    // Titre dynamique de la fenêtre en fonction du mode configuré
+    // Identifiant de build (build.rs) : le hash court du commit pour un
+    // checkout git (dépôt cloné, `cargo build` local ou
+    // packaging/PKGBUILD-git), sinon (tarball d'une release taguée,
+    // packaging/PKGBUILD, où `git rev-parse` échoue faute de .git) le
+    // numéro de version de Cargo.toml.
+    let build_id = option_env!("BYTEBOX_GIT_HASH").unwrap_or(env!("CARGO_PKG_VERSION"));
     let window_title = if machine.diagnostic_mode {
-        "ByteBox - Amstrad CPC 6128 - BASIC 1.1 AZERTY + Diag ROM"
+        format!("ByteBox - {build_id} - Diag ROM")
     } else {
-        "ByteBox - Amstrad CPC 6128 - BASIC 1.1 AZERTY"
+        format!("ByteBox - {build_id}")
     };
 
     let mut window = video_subsystem
         .window(
-            window_title,
+            &window_title,
             video::SCREEN_WIDTH as u32,
             video::SCREEN_HEIGHT as u32,
         )
