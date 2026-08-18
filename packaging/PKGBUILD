@@ -9,7 +9,7 @@ license=('MIT')
 depends=('sdl2')
 makedepends=('rust')
 source=("$pkgver.tar.gz::https://github.com/nicolasbauw/amstrad_cpc/archive/refs/tags/$pkgver.tar.gz")
-sha256sums=('70a8bbd18e1d8b165cbcf6a499fecb31876f6d2a59ab837a9cf174dabbb72c2b')
+sha256sums=('00cf0ec4b4bf90d4232f2f4c3418a7c0a2bb8ffa4daf7f0707e151290c7606b9')
 
 build() {
   # Archive source, not a git clone: the extracted directory keeps the
