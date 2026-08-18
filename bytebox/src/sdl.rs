@@ -529,35 +529,49 @@ pub fn run(
                 // normale (dernier `Event::KeyDown` de cette liste, le
                 // passthrough clavier CPC), qui doit au contraire répéter
                 // tant que la touche reste enfoncée.
+                //
+                // `window_id == main_window_id` sur celle-ci et sur les onze
+                // autres touches de fonction ci-dessous : sans ce filtre,
+                // n'importe laquelle se déclenchait aussi depuis la console
+                // (F11) ou la fenêtre de statut (F12), qui ont leur propre
+                // focus — repérée en creusant un signalement de
+                // clignotement OSD (finalement pas lié à ceci, mais
+                // découverte au passage). Même principe que le passthrough
+                // clavier CPC un peu plus bas, ou les gestionnaires de
+                // redimensionnement par fenêtre juste au-dessus.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F1),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     current_zoom = DisplayMode::Normal;
                     apply_display_mode(renderer.window_mut(), current_zoom);
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F2),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     current_zoom = DisplayMode::X2;
                     apply_display_mode(renderer.window_mut(), current_zoom);
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F3),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     current_zoom = DisplayMode::X3;
                     apply_display_mode(renderer.window_mut(), current_zoom);
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F4),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     // Bascule : F4 quitte le plein écran s'il est deja actif
                     // (par F4 ou par default_zoom = "fullscreen").
                     let currently_fullscreen = renderer.window().fullscreen_state()
@@ -574,8 +588,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F5),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     renderer.toggle_crt();
                     let state = if renderer.crt_enabled() {
                         "enabled"
@@ -593,8 +608,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F8),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     app_log!(
                         "{}",
                         (zilog_z80::dasm::dasm(&machine.bus, machine.cpu.reg.pc)).0
@@ -605,8 +621,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F9),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     let start_line = machine.current_line;
                     while machine.current_line == start_line {
                         let ticks = machine.step();
@@ -630,8 +647,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F10),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     quick_bar_visible = !quick_bar_visible;
                     if quick_bar_visible {
                         quick_bar.request_focus();
@@ -643,8 +661,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F6),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     config_panel_visible = !config_panel_visible;
                     // Couvre le cas "redimensionné pendant que F6 était
                     // fermé" : le gestionnaire de redimensionnement plus bas
@@ -662,8 +681,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F7),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     keyboard_panel_visible = !keyboard_panel_visible;
                     if keyboard_panel_visible {
                         keyboard_panel_generation += 1;
@@ -674,8 +694,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F11),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     console_window_visible = !console_window_visible;
                     if console_window_visible {
                         console_window.window_mut().show();
@@ -687,8 +708,9 @@ pub fn run(
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F12),
                     repeat: false,
+                    window_id,
                     ..
-                } => {
+                } if window_id == main_window_id => {
                     debug_visible = !debug_visible;
                     if debug_visible {
                         status_panel.window_mut().show();
