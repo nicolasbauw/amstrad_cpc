@@ -224,30 +224,44 @@ configuration du jalon M3.
 
 ### M6 — Packaging (indépendant, peut se faire à tout moment)
 
-PKGBUILD AUR, et correction des chemins en dur dans
-`packaging/bytebox.desktop` (`Exec`/`Path` pointent actuellement vers
-`~/Dev/amstrad_cpc`). Sans dépendance sur les jalons précédents ; peut être
-traité dès que souhaité, y compris avant eux.
+PKGBUILD AUR — voir `doc/create-pkgbuild-aur.md`. `packaging/bytebox.desktop`
+n'a plus de chemin en dur (corrigé : `Exec=bytebox`, trouvé via `$PATH` une
+fois installé, plus de `Path=`). Sans dépendance sur les jalons précédents ;
+peut être traité dès que souhaité, y compris avant eux.
 
-**Emplacements attendus par le code (déjà en place, à créer/peupler par les
-paquets)** : `config.toml` vit toujours dans `~/.config/bytebox/config.toml`
-— identique en debug et en release, `config/config.toml` à la racine du
-dépôt n'est qu'un exemple de référence, jamais lu par le programme lui-même.
-Les ROMs, elles, sont attendues dans `~/.bytebox/ROM/<nom>` (`OS6128-AZERTY.rom`,
-`BASIC1-1-AZERTY.ROM`, `AMSDOS.ROM`, `AmstradDiagUpper.rom` — noms exacts
-dans `config::default_resource_path`, utilisée par `Machine::load_roms`) et
-l'illustration du clavier virtuel dans `~/.bytebox/assets/keyboard.png` ;
-`config.toml` peut pointer `[rom]` ailleurs si besoin, mais ce sont les
-chemins par défaut sans configuration explicite — **aucun repli** vers un
-chemin relatif au dépôt (`bin/`, jamais suivi par git, ni présent dans une
-installation réelle) : une ROM absente de `~/.bytebox/ROM` fait échouer
-`load_roms` plutôt que de retomber en silence sur autre chose.
-Chaque paquet doit donc créer `~/.config/bytebox/`, `~/.bytebox/ROM/`,
-`~/.bytebox/DSK/`, `~/.bytebox/CDT/` et `~/.bytebox/assets/` s'ils
-n'existent pas encore, et y placer au minimum `keyboard.png` (fourni dans le
-dépôt, `assets/keyboard.png`) et les ROMs libres de droits déjà présentes
-dans le dépôt (`AmstradDiagUpper.rom`) — les ROMs propriétaires (OS, BASIC,
-AMSDOS) restent à la charge de l'utilisateur, comme aujourd'hui.
+**État actuel (mis à jour — la version précédente de cette section est
+dépassée sur plusieurs points) :**
+
+- `config.toml` vit toujours dans `~/.config/bytebox/config.toml` —
+  identique en debug et en release, `config/config.toml` à la racine du
+  dépôt n'est qu'un exemple de référence, jamais lu par le programme
+  lui-même. **Le répertoire est désormais créé à la volée** au premier
+  enregistrement d'un réglage (`config::write_config_section_at`) : un
+  paquet n'a plus besoin de le créer d'avance.
+- Les ROMs système sont attendues dans `~/.bytebox/ROM/<nom>`
+  (`OS6128-AZERTY.rom`, `BASIC1-1-AZERTY.ROM`, `AMSDOS.ROM`,
+  `AmstradDiagUpper.rom` — noms exacts dans `config::default_resource_path`,
+  utilisée par `Machine::load_roms`) ; `config.toml` peut pointer `[rom]`
+  ailleurs si besoin. **Un écran d'installation (F6, onglet "ROMs") les
+  télécharge lui-même** depuis deux sources externes (voir
+  `doc/roms-installation.md`) si elles manquent au lancement — l'émulateur
+  n'échoue plus dans ce cas, il route automatiquement vers cet écran. Le
+  répertoire `~/.bytebox/ROM/` est créé à la volée par cet écran, comme
+  `~/.bytebox/DSK/` par la commande "blank" ou la persistance d'écriture
+  disque (`Fdc::write_dsk_file`). Aucun repli vers un chemin relatif au
+  dépôt (`bin/`, jamais suivi par git, ni présent dans une installation
+  réelle) : une ROM absente fait toujours échouer `load_roms` (routé vers
+  l'écran d'installation), pas de silence sur autre chose.
+- L'illustration du clavier virtuel (F7) **n'est plus un fichier externe** :
+  `assets/keyboard.png`, comme la nouvelle icône de fenêtre
+  `assets/bytebox_icon.png`, sont désormais embarquées dans le binaire à la
+  compilation (`include_bytes!`) — ni CWD, ni `~/.bytebox/assets/` (l'ancien
+  emplacement attendu, jamais créé ni peuplé par personne) n'entrent plus en
+  jeu. Rien à installer pour ces deux fichiers.
+- **`BYTEBOX_PACKAGED_BUILD`** : la recette de packaging doit positionner
+  cette variable d'environnement avant `cargo build --release` (voir
+  README, section "Development builds") — sans elle, l'icône du paquet
+  porterait la bande rouge diagonale réservée aux builds de développement.
 
 Un unique workflow GitHub Actions (`release.yml`, déclenché sur un tag),
 matrice par OS, peut produire tous les formats retenus — GitHub fournit de
@@ -262,10 +276,11 @@ vrais runners Linux/Windows/macOS, donc pas de cross-compile nécessaire.
    sans gestionnaire de paquets. Runner `ubuntu-22.04` minimum (une `glib`
    trop ancienne sur 20.04 fait échouer `linuxdeploy`).
 4. **Windows `.msi`** via `cargo-wix` (WiX Toolset, déjà présent sur le
-   runner `windows-latest`) — il faudra embarquer `SDL2.dll` /
-   `SDL2_ttf.dll` à côté de l'exécutable dans l'installeur. Non signé :
-   déclenchera l'avertissement SmartScreen, assumé (pas de coût à engager
-   pour l'éviter).
+   runner `windows-latest`) — il faudra embarquer `SDL2.dll` à côté de
+   l'exécutable dans l'installeur (`SDL2_ttf` n'est plus une dépendance
+   depuis le passage à egui pour le texte, y compris celui de la fenêtre de
+   statut). Non signé : déclenchera l'avertissement SmartScreen, assumé (pas
+   de coût à engager pour l'éviter).
 5. **macOS via Homebrew** (formule/tap `bytebox`, pas un `.dmg`) — Homebrew
    gère la dépendance SDL2 nativement (`depends_on "sdl2"`), donc pas de
    `.dylib` à embarquer, et pas de question de notarisation Apple (le
