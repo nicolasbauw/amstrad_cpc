@@ -10,12 +10,16 @@ fn main() {
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/index");
 
-    if let Ok(output) = Command::new("git")
-        .args(["rev-parse", "--short=7", "HEAD"])
-        .output()
+    if let Ok(output) = Command::new("git").args(["rev-parse", "HEAD"]).output()
         && output.status.success()
     {
         let hash = String::from_utf8_lossy(&output.stdout);
-        println!("cargo:rustc-env=BYTEBOX_GIT_HASH={}", hash.trim());
+        let hash = hash.trim();
+        // Les 7 DERNIERS caractères du hash complet, pas les 7 premiers
+        // (= `git rev-parse --short`, l'abréviation habituelle) : demandé
+        // tel quel, pour distinguer ce hash de version des hash courts déjà
+        // utilisés ailleurs (logs de commit...).
+        let suffix = &hash[hash.len().saturating_sub(7)..];
+        println!("cargo:rustc-env=BYTEBOX_GIT_HASH={suffix}");
     }
 }
