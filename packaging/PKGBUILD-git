@@ -1,20 +1,27 @@
 # Maintainer: Nicolas BAUW <nbauw@hotmail.com>
-pkgname=bytebox
-pkgver=2.0.0
+pkgname=bytebox-git
+pkgver=r1.abcdef0  # placeholder — recomputed by pkgver() below
 pkgrel=1
 pkgdesc="Amstrad CPC 6128 emulator"
 arch=('x86_64')
 url="https://github.com/nicolasbauw/amstrad_cpc"
 license=('MIT')
 depends=('sdl2')
-makedepends=('rust')
-source=("$pkgver.tar.gz::https://github.com/nicolasbauw/amstrad_cpc/archive/refs/tags/$pkgver.tar.gz")
-sha256sums=('70a8bbd18e1d8b165cbcf6a499fecb31876f6d2a59ab837a9cf174dabbb72c2b')
+makedepends=('rust' 'git')
+provides=('bytebox')
+conflicts=('bytebox')
+source=("$pkgname::git+$url.git#branch=master")
+sha256sums=('SKIP')  # VCS source: integrity comes from git itself
+
+pkgver() {
+  cd "$pkgname"
+  # Nothing tagged yet: falls back to "r<commit count>.<short hash>",
+  # the standard scheme for AUR -git packages without upstream tags.
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
 
 build() {
-  # Archive source, not a git clone: the extracted directory keeps the
-  # GitHub repo's name (amstrad_cpc), not the package's (bytebox).
-  cd "amstrad_cpc-$pkgver"
+  cd "$pkgname"
   # Marks this as an official build: without it, the window/taskbar icon
   # carries a diagonal red "dev build" stripe (see README, "Development
   # builds"). --profile dist (not --release): a slower-to-compile but
@@ -27,9 +34,9 @@ build() {
   # for the whole build. That mode needs clang (LLVM bitcode) to compile
   # ring/zstd-sys's C code, not gcc (the default here) — with gcc, it
   # silently produces object files the final Rust link can't resolve
-  # ("undefined symbol: ring_core_..."). See packaging/PKGBUILD-git for
-  # how this was diagnosed. Stripped, not just unset, so unrelated
-  # -O2/-march flags survive.
+  # ("undefined symbol: ring_core_..."). Confirmed by reproducing and
+  # fixing it this way before writing this line. Stripped, not just
+  # unset, so unrelated -O2/-march flags survive.
   export CFLAGS="${CFLAGS//-flto=auto/}"
   export CXXFLAGS="${CXXFLAGS//-flto=auto/}"
   export LDFLAGS="${LDFLAGS//-flto=auto/}"
@@ -37,7 +44,7 @@ build() {
 }
 
 package() {
-  cd "amstrad_cpc-$pkgver"
+  cd "$pkgname"
   install -Dm755 target/dist/bytebox "$pkgdir/usr/bin/bytebox"
   install -Dm644 packaging/bytebox.desktop \
     "$pkgdir/usr/share/applications/bytebox.desktop"
