@@ -69,7 +69,7 @@ arch=('x86_64')
 url="https://github.com/nicolasbauw/amstrad_cpc"
 license=('MIT')
 depends=('sdl2')
-makedepends=('cargo' 'git')
+makedepends=('rust' 'git')
 provides=('bytebox')
 conflicts=('bytebox')
 source=("$pkgname::git+$url.git#branch=master")
@@ -106,6 +106,12 @@ package() {
 
 Notes specific to this project:
 
+- **`makedepends=('rust' ...)`, not `'cargo'`** — on Arch, the standalone
+  `cargo` package is gone; it's now provided virtually by `rust`
+  (`pacman -Qi rust` shows `Provides: cargo rustfmt`, and `Conflicts With:
+  cargo`). `makedepends=('cargo')` still resolves correctly through that
+  virtual `Provides`, but names the actual package explicitly instead of
+  relying on it.
 - **`depends=('sdl2')` only** — no `SDL2_ttf`: an earlier design used it for
   the machine-status window's text, replaced by egui (which ships its own
   font, no system font dependency either). SDL2 itself is dynamically
