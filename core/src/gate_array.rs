@@ -134,13 +134,13 @@ impl GateArray {
         // Un vrai 6128 démarre bien sur ce magenta vif (valeur matérielle
         // 13, voir HARDWARE_TO_PHYSICAL/CPC_COLORS_RGB — pas gris comme le
         // suggérerait son nom hexadécimal &4D dans Colors.asm) le temps que
-        // la ROM initialise elle-même la palette : fidèle au matériel, mais
-        // pas franchement agréable à l'œil pendant les quelques instants où
-        // rien d'autre ne s'affiche (ROM absente, ou juste après un power
-        // cycle) — préférence assumée pour un noir neutre plutôt que cette
-        // authenticité-là.
+        // la ROM initialise elle-même la palette. Un temps assumé "noir
+        // neutre" à la place a été tranché : préférence explicite pour la
+        // fidélité au matériel plutôt que le confort visuel, quitte à ce que
+        // ce démarrage (ou l'absence de ROM) affiche ce magenta plutôt
+        // criard.
         for i in 0..17 {
-            ga.palette[i] = 20; // Noir (&54)
+            ga.palette[i] = 13; // Magenta vif (&4D)
         }
         ga
     }
