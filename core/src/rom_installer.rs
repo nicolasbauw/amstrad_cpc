@@ -17,7 +17,7 @@
 
 use crc32fast::hash as crc32;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Un fichier installé avec succès, pour affichage/consignation côté écran
 /// (résumé "X installé, Y octets, CRC32 Z, correspondait déjà / différait
@@ -83,14 +83,21 @@ fn download(url: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Extrait les entrées demandées d'une archive zip déjà en mémoire et les
-/// écrit dans `~/.bytebox/ROM` sous leur nom canonique, en créant
-/// l'arborescence si besoin (premier lancement : rien n'existe encore).
+/// écrit dans `dest_dir` sous leur nom canonique, en créant l'arborescence
+/// si besoin (premier lancement : rien n'existe encore). `dest_dir` est
+/// passé explicitement plutôt que résolu ici via `config::default_resource_path`
+/// (qui dépend de `$HOME`) : les tests peuvent ainsi passer un répertoire
+/// de test isolé sans jamais toucher à une variable globale au processus.
 fn install_from_zip(
     zip_bytes: &[u8],
     entries: &[(&str, &str)],
+    dest_dir: &Path,
 ) -> Result<Vec<InstalledFile>, String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
         .map_err(|e| format!("Invalid zip archive: {e}"))?;
+
+    std::fs::create_dir_all(dest_dir)
+        .map_err(|e| format!("Can't create {}: {e}", dest_dir.display()))?;
 
     let mut installed = Vec::new();
     for &(entry_name, dest_name) in entries {
@@ -104,11 +111,7 @@ fn install_from_zip(
                 .map_err(|e| format!("Failed to read \"{entry_name}\": {e}"))?;
         }
 
-        let dest_path: PathBuf = crate::config::default_resource_path("ROM", dest_name);
-        if let Some(dir) = dest_path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| format!("Can't create {}: {e}", dir.display()))?;
-        }
+        let dest_path = dest_dir.join(dest_name);
         let previous_crc32 = std::fs::read(&dest_path).ok().map(|old| crc32(&old));
         std::fs::write(&dest_path, &content)
             .map_err(|e| format!("Can't write {}: {e}", dest_path.display()))?;
@@ -130,11 +133,12 @@ fn install_from_zip(
 fn install_source(
     source: &RomSource,
     progress: &mut dyn FnMut(&str),
+    dest_dir: &Path,
 ) -> Result<Vec<InstalledFile>, String> {
     progress(&format!("Downloading {}...", source.url));
     let zip_bytes = download(source.url)?;
     progress("Extracting and installing...");
-    install_from_zip(&zip_bytes, source.entries)
+    install_from_zip(&zip_bytes, source.entries, dest_dir)
 }
 
 /// Séquence complète appelée par le bouton "Install ROMs" : les ROMs
@@ -149,8 +153,9 @@ fn install_source(
 pub fn install_everything(
     mut progress: impl FnMut(&str),
 ) -> Result<Vec<InstalledFile>, String> {
-    let mut installed = install_source(&AZERTY_ROMS, &mut progress)?;
-    match install_source(&DIAGNOSTIC_ROM, &mut progress) {
+    let dest_dir = crate::config::default_resource_dir("ROM");
+    let mut installed = install_source(&AZERTY_ROMS, &mut progress, &dest_dir)?;
+    match install_source(&DIAGNOSTIC_ROM, &mut progress, &dest_dir) {
         Ok(diag) => installed.extend(diag),
         Err(e) => progress(&format!(
             "Diagnostic ROM install failed (optional, skipped): {e}"
@@ -182,100 +187,99 @@ mod tests {
         buf
     }
 
-    /// Répertoire `~/.bytebox/ROM` isolé par test : `HOME` est global au
-    /// processus, donc chaque test qui le modifie doit passer par un mutex
-    /// pour ne jamais courir en parallèle d'un autre test qui en dépend —
-    /// même précaution que les tests de `config.rs` sur `config_path`.
-    fn with_isolated_home<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap();
-
+    /// Répertoire de test unique et jetable — `install_from_zip` prend
+    /// `dest_dir` en paramètre explicite précisément pour ça : contrairement
+    /// à une ancienne version de ce test qui détournait `$HOME` (variable
+    /// globale au processus, dangereuse à faire varier pendant qu'un autre
+    /// test tournant en parallèle en dépend), un chemin de temp dir propre à
+    /// l'appel ne peut jamais entrer en collision avec quoi que ce soit
+    /// d'autre.
+    fn test_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "bytebox_rom_installer_test_{}_{:?}",
+            "bytebox_rom_installer_test_{name}_{}_{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let previous_home = std::env::var("HOME").ok();
-        // Sûr : verrouillé ci-dessus contre toute exécution concurrente
-        // d'un autre test qui lirait `HOME` pendant la fenêtre où il est
-        // temporairement détourné.
-        unsafe {
-            std::env::set_var("HOME", &dir);
-        }
-
-        let result = f(&dir);
-
-        unsafe {
-            match &previous_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-        }
         let _ = std::fs::remove_dir_all(&dir);
-        result
+        dir
     }
 
     #[test]
     fn install_from_zip_extracts_only_the_requested_entries_under_their_canonical_name() {
-        with_isolated_home(|home| {
-            let zip = build_zip(&[
-                ("CPC6128.ROM", b"os+basic content"),
-                ("CPCADOS.ROM", b"amsdos content"),
-                ("FILE_ID.DIZ", b"ignored"),
-            ]);
+        let dir = test_dir("extracts_only_requested");
+        let zip = build_zip(&[
+            ("CPC6128.ROM", b"os+basic content"),
+            ("CPCADOS.ROM", b"amsdos content"),
+            ("FILE_ID.DIZ", b"ignored"),
+        ]);
 
-            let installed = install_from_zip(
-                &zip,
-                &[
-                    ("CPC6128.ROM", "OS6128-AZERTY.rom"),
-                    ("CPCADOS.ROM", "AMSDOS.ROM"),
-                ],
-            )
-            .expect("l'installation doit reussir");
+        let installed = install_from_zip(
+            &zip,
+            &[
+                ("CPC6128.ROM", "OS6128-AZERTY.rom"),
+                ("CPCADOS.ROM", "AMSDOS.ROM"),
+            ],
+            &dir,
+        )
+        .expect("l'installation doit reussir");
 
-            assert_eq!(installed.len(), 2);
-            assert_eq!(installed[0].filename, "OS6128-AZERTY.rom");
-            assert_eq!(installed[0].bytes, "os+basic content".len());
-            assert_eq!(installed[0].previous_crc32, None, "rien n'existait avant");
+        assert_eq!(installed.len(), 2);
+        assert_eq!(installed[0].filename, "OS6128-AZERTY.rom");
+        assert_eq!(installed[0].bytes, "os+basic content".len());
+        assert_eq!(installed[0].previous_crc32, None, "rien n'existait avant");
 
-            let written = std::fs::read(home.join(".bytebox/ROM/OS6128-AZERTY.rom")).unwrap();
-            assert_eq!(written, b"os+basic content");
-            assert!(
-                !home.join(".bytebox/ROM/FILE_ID.DIZ").exists(),
-                "seules les entrees demandees doivent etre extraites"
-            );
-        });
+        let written = std::fs::read(dir.join("OS6128-AZERTY.rom")).unwrap();
+        assert_eq!(written, b"os+basic content");
+        assert!(
+            !dir.join("FILE_ID.DIZ").exists(),
+            "seules les entrees demandees doivent etre extraites"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn install_from_zip_reports_the_previous_crc32_when_a_file_is_overwritten() {
-        with_isolated_home(|home| {
-            let rom_dir = home.join(".bytebox/ROM");
-            std::fs::create_dir_all(&rom_dir).unwrap();
-            std::fs::write(rom_dir.join("AMSDOS.ROM"), b"old content").unwrap();
+        let dir = test_dir("previous_crc32");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("AMSDOS.ROM"), b"old content").unwrap();
 
-            let zip = build_zip(&[("CPCADOS.ROM", b"new content")]);
-            let installed =
-                install_from_zip(&zip, &[("CPCADOS.ROM", "AMSDOS.ROM")]).expect("doit reussir");
+        let zip = build_zip(&[("CPCADOS.ROM", b"new content")]);
+        let installed = install_from_zip(&zip, &[("CPCADOS.ROM", "AMSDOS.ROM")], &dir)
+            .expect("doit reussir");
 
-            assert_eq!(
-                installed[0].previous_crc32,
-                Some(crc32(b"old content")),
-                "le CRC32 de l'ancien fichier doit etre remonte avant l'ecrasement"
-            );
-            assert_eq!(installed[0].crc32, crc32(b"new content"));
-        });
+        assert_eq!(
+            installed[0].previous_crc32,
+            Some(crc32(b"old content")),
+            "le CRC32 de l'ancien fichier doit etre remonte avant l'ecrasement"
+        );
+        assert_eq!(installed[0].crc32, crc32(b"new content"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn install_from_zip_fails_clearly_when_an_entry_is_missing() {
-        with_isolated_home(|_home| {
-            let zip = build_zip(&[("SOMETHING_ELSE.ROM", b"content")]);
-            let err = install_from_zip(&zip, &[("CPC6128.ROM", "OS6128-AZERTY.rom")])
-                .expect_err("l'entree demandee n'existe pas dans ce zip");
-            assert!(err.contains("CPC6128.ROM"), "erreur peu exploitable : {err}");
-        });
+        let dir = test_dir("missing_entry");
+        let zip = build_zip(&[("SOMETHING_ELSE.ROM", b"content")]);
+        let err = install_from_zip(&zip, &[("CPC6128.ROM", "OS6128-AZERTY.rom")], &dir)
+            .expect_err("l'entree demandee n'existe pas dans ce zip");
+        assert!(err.contains("CPC6128.ROM"), "erreur peu exploitable : {err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_from_zip_creates_the_destination_directory_when_missing() {
+        let dir = test_dir("creates_dest_dir");
+        assert!(!dir.exists(), "le repertoire ne doit pas deja exister");
+
+        let zip = build_zip(&[("CPC6128.ROM", b"content")]);
+        install_from_zip(&zip, &[("CPC6128.ROM", "OS6128-AZERTY.rom")], &dir)
+            .expect("doit reussir meme sans repertoire prealable");
+        assert!(dir.join("OS6128-AZERTY.rom").is_file());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Test réseau réel, volontairement `#[ignore]` (même convention que
@@ -284,21 +288,20 @@ mod tests {
     #[test]
     #[ignore]
     fn install_everything_downloads_and_installs_from_the_real_sources() {
-        with_isolated_home(|home| {
-            let mut steps = Vec::new();
-            let installed =
-                install_everything(|msg| steps.push(msg.to_string())).expect("doit reussir");
+        let mut steps = Vec::new();
+        let installed =
+            install_everything(|msg| steps.push(msg.to_string())).expect("doit reussir");
 
-            assert_eq!(installed.len(), 3, "OS+BASIC, AMSDOS, ROM de diagnostic");
-            for file in &installed {
-                assert!(file.bytes > 0);
-                assert!(
-                    home.join(".bytebox/ROM").join(&file.filename).exists(),
-                    "{} doit exister apres l'installation",
-                    file.filename
-                );
-            }
-            assert!(!steps.is_empty(), "la progression doit etre rapportee");
-        });
+        assert_eq!(installed.len(), 3, "OS+BASIC, AMSDOS, ROM de diagnostic");
+        let dest_dir = crate::config::default_resource_dir("ROM");
+        for file in &installed {
+            assert!(file.bytes > 0);
+            assert!(
+                dest_dir.join(&file.filename).exists(),
+                "{} doit exister apres l'installation",
+                file.filename
+            );
+        }
+        assert!(!steps.is_empty(), "la progression doit etre rapportee");
     }
 }

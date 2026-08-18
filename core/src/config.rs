@@ -278,14 +278,24 @@ pub fn config_path() -> Result<PathBuf, MachineError> {
 /// n'est d'ailleurs même pas suivi par git : jamais présent dans une
 /// installation réelle).
 pub fn default_resource_path(subdir: &str, filename: &str) -> PathBuf {
+    default_resource_dir(subdir).join(filename)
+}
+
+/// Le répertoire seul (`~/.bytebox/<sous-répertoire>`), sans nom de fichier —
+/// pour un appelant qui doit écrire plusieurs fichiers dans le même dossier
+/// (voir `rom_installer.rs`) sans recalculer `UserDirs::new()` à chaque
+/// fois, et pour rester testable avec un répertoire explicite plutôt que de
+/// dépendre de `$HOME` (variable globale au processus, dangereuse à faire
+/// varier dans des tests qui tournent en parallèle).
+pub fn default_resource_dir(subdir: &str) -> PathBuf {
     match UserDirs::new() {
-        Some(user_dirs) => user_dirs.home_dir().join(".bytebox").join(subdir).join(filename),
+        Some(user_dirs) => user_dirs.home_dir().join(".bytebox").join(subdir),
         // Cas limite : pas de répertoire personnel détectable (utilisateur
         // système sans HOME, conteneur minimal...). Le chemin obtenu ne
-        // désignera rien de réel, mais `File::open` échouera alors avec un
-        // message exploitable plutôt que de faire semblant d'avoir résolu
-        // quelque chose.
-        None => PathBuf::from(filename),
+        // désignera rien de réel, mais `File::open`/`fs::write` échoueront
+        // alors avec un message exploitable plutôt que de faire semblant
+        // d'avoir résolu quelque chose.
+        None => PathBuf::from(subdir),
     }
 }
 
