@@ -59,8 +59,13 @@ tag exists) mainly means replacing the `source`/`pkgver()` below with a
 release tarball URL and a real `sha256sums` — noted inline where that
 would change.
 
+The real file lives at `packaging/PKGBUILD` in the repo, ready to copy —
+not just an example here. It's been built end to end with `makepkg`
+(`--nodeps`, since the sandbox it was tested in isn't Arch itself): package
+produced, binary extracted and launched successfully.
+
 ```sh
-# Maintainer: Your Name <you@example.com>
+# Maintainer: Nicolas BAUW <nbauw@hotmail.com>
 pkgname=bytebox-git
 pkgver=r1.abcdef0  # placeholder — recomputed by pkgver() below
 pkgrel=1
@@ -86,10 +91,22 @@ build() {
   cd "$pkgname"
   # Marks this as an official build: without it, the window/taskbar icon
   # carries a diagonal red "dev build" stripe (see README, "Development
-  # builds"). `--profile dist` (not `--release`): a slower-to-compile but
+  # builds"). --profile dist (not --release): a slower-to-compile but
   # smaller/faster profile reserved for distributed binaries (LTO, single
   # codegen unit — see the root Cargo.toml).
   export BYTEBOX_PACKAGED_BUILD=1
+  # makepkg.conf's LTOFLAGS ("-flto=auto") ends up in CFLAGS/CXXFLAGS: with
+  # this profile's own Rust-side LTO (`dist` = `lto = "thin"`), cargo
+  # detects both and auto-enables cross-language LTO (-C linker-plugin-lto)
+  # for the whole build. That mode needs clang (LLVM bitcode) to compile
+  # ring/zstd-sys's C code, not gcc (the default here) — with gcc, it
+  # silently produces object files the final Rust link can't resolve
+  # ("undefined symbol: ring_core_..."). Confirmed by reproducing and
+  # fixing it this way before writing this line. Stripped, not just
+  # unset, so unrelated -O2/-march flags survive.
+  export CFLAGS="${CFLAGS//-flto=auto/}"
+  export CXXFLAGS="${CXXFLAGS//-flto=auto/}"
+  export LDFLAGS="${LDFLAGS//-flto=auto/}"
   cargo build --profile dist --locked
 }
 
@@ -106,6 +123,15 @@ package() {
 
 Notes specific to this project:
 
+- **The LTO/linker bug above was the one real surprise** — everything else
+  in this PKGBUILD worked on the first or second try; this one took several
+  rounds of elimination (LDFLAGS's `--as-needed`? the `lld` linker itself?
+  before landing on the actual cause, makepkg's auto-added `-flto=auto`
+  triggering cross-language LTO). Worth knowing if a *future* dependency
+  reintroduces a similar "undefined symbol" failure that only reproduces
+  under `makepkg`, never under a plain `cargo build`: check `cargo build
+  -vv` for `-C linker-plugin-lto` in the compile command before suspecting
+  anything else.
 - **`makedepends=('rust' ...)`, not `'cargo'`** — on Arch, the standalone
   `cargo` package is gone; it's now provided virtually by `rust`
   (`pacman -Qi rust` shows `Provides: cargo rustfmt`, and `Conflicts With:
