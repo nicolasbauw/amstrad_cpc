@@ -152,16 +152,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Homebrew refuse désormais d'installer une formule hors tap
+      # ("Homebrew requires formulae to be in a tap") : un tap local (un
+      # simple dépôt git sur le disque du runner, rien à publier) suffit —
+      # aucune différence pratique avec un vrai tap distant pour ce test.
       - name: Build and test the Formula
         run: |
-          brew install --build-from-source ./packaging/homebrew/bytebox.rb
-          brew test bytebox
+          brew tap-new local/bytebox
+          cp packaging/homebrew/bytebox.rb "$(brew --repository local/bytebox)/Formula/bytebox.rb"
+          brew install --build-from-source local/bytebox/bytebox
+          brew test local/bytebox/bytebox
 
-      - name: Archive the installed binary
+      - name: Archive the installed binary and the .app bundle
         run: |
           mkdir -p dist
           cp "$(brew --prefix bytebox)/bin/bytebox" dist/
-          tar -C dist -czf "bytebox-${{ github.ref_name }}-macos-arm64.tar.gz" bytebox
+          cp -R "$(brew --prefix bytebox)/ByteBox.app" dist/
+          tar -C dist -czf "bytebox-${{ github.ref_name }}-macos-arm64.tar.gz" bytebox ByteBox.app
 
       - uses: actions/upload-artifact@v4
         with:
