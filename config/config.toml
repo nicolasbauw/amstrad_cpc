@@ -57,3 +57,10 @@ extra_ram_banks = 0
 # basic = "~/.bytebox/ROM/BASIC1-1-AZERTY.ROM"
 # amsdos = "~/.bytebox/ROM/AMSDOS.ROM"
 # diagnostic_upper = "~/.bytebox/ROM/AmstradDiagUpper.rom"
+#
+# None of the above is validated for content or keyboard layout: pointing
+# `system`/`basic` at a QWERTY (or any other non-AZERTY) dump loads and
+# boots exactly as normal. Only the physical/virtual keyboard mapping
+# suffers — it's calibrated for AZERTY (see doc/roms-installation.md) and
+# doesn't know which ROM is loaded, so typed characters would be wrong.
+# Nothing else breaks.

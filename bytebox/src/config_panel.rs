@@ -194,7 +194,7 @@ impl ConfigPanel {
                         Self::crt_section(ui, &mut crt_settings, &mut self.crt_enabled_at_startup)
                     }
                     Tab::Roms => self.roms.ui(ui, machine),
-                    Tab::Help => Self::help_section(ui),
+                    Tab::Help => Self::help_section(ui, scale),
                 }
             });
         (zoom, crt_settings, keyboard_settings)
@@ -373,7 +373,20 @@ impl ConfigPanel {
         ui.horizontal(|ui| {
             ui.label("Extra RAM banks:");
             let mut banks = machine.extra_ram_banks();
-            let response = ui.add(egui::DragValue::new(&mut banks).range(0..=56));
+            // 0 est la valeur normale d'un 6128 de base : les 128 Ko
+            // standard (donc déjà une "banque haute") sont acquis d'office,
+            // ce réglage ne compte que ce qu'une extension tierce
+            // (Dk'tronics et consorts) ajouterait par-dessus — voir le
+            // tooltip, pour la confusion venue une fois de "pourquoi 0 est
+            // une valeur possible".
+            let response = ui
+                .add(egui::Slider::new(&mut banks, 0..=56))
+                .on_hover_text(
+                    "On top of the 6128's standard 128 KB, which is already \
+                     included and not affected by this setting. Only for a \
+                     third-party expansion (Dk'tronics and the like) — 0, \
+                     the default, is a plain, unexpanded 6128.",
+                );
             if response.changed() {
                 let _ = cmd_sender.send((
                     MonitorCmd::ExtraRamBanks,
@@ -519,9 +532,14 @@ impl ConfigPanel {
     /// `bytebox_core::machine::HELP` fournit déjà les deux dernières
     /// sections telles quelles : c'est le même texte que la commande console
     /// `help` (F10/F11), une seule source pour les deux façades.
-    fn help_section(ui: &mut egui::Ui) {
+    fn help_section(ui: &mut egui::Ui, scale: f32) {
+        // Non mis à l'échelle jusqu'ici, contrairement à `default_width`
+        // (voir `ConfigPanel::ui`) : à fort zoom, le texte grossit (police
+        // via `ui_scale::scaled_style`) mais la fenêtre de défilement
+        // gardait la même hauteur en pixels, donc affichait nettement moins
+        // de lignes à la fois — l'aide semblait "réduite de moitié".
         egui::ScrollArea::vertical()
-            .max_height(420.0)
+            .max_height(420.0 * scale)
             .show(ui, |ui| {
                 ui.heading("Function keys");
                 ui.label(egui::RichText::new(FUNCTION_KEYS).monospace());

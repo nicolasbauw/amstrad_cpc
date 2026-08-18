@@ -17,13 +17,21 @@ use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::surface::Surface;
 
-/// Pose `assets/croco.png` comme icône de la fenêtre donnée. Décodage en
-/// pur Rust via la crate `image` (plutôt que la feature `"image"` de
-/// `sdl2`, qui dépend de la bibliothèque système `libSDL2_image`) : pas de
-/// dépendance supplémentaire à installer sur la machine qui compile ou qui
-/// exécute l'émulateur. SDL copie les pixels de la surface dans la fenêtre
-/// dès `set_icon` : la surface elle-même n'a pas besoin de survivre à cet
-/// appel.
+/// Pose `assets/bytebox_icon.png` comme icône de la fenêtre donnée.
+/// Décodage en pur Rust via la crate `image` (plutôt que la feature
+/// `"image"` de `sdl2`, qui dépend de la bibliothèque système
+/// `libSDL2_image`) : pas de dépendance supplémentaire à installer sur la
+/// machine qui compile ou qui exécute l'émulateur. SDL copie les pixels de
+/// la surface dans la fenêtre dès `set_icon` : la surface elle-même n'a pas
+/// besoin de survivre à cet appel.
+///
+/// Une icône n'est jamais affichée plus grande que quelques dizaines de
+/// pixels (barre des tâches, alt-tab, titre de fenêtre) : `bytebox_icon.png`
+/// (256×256) est une version pré-réduite de `bytebox.png` (1254×1254, gardé
+/// pour d'autres usages éventuels — capture d'écran du README, etc.), pour
+/// ne pas décoder ni parcourir pixel par pixel (voir `overlay_dev_stripe`
+/// plus bas) une image ~24× plus grande que nécessaire, trois fois de
+/// suite (une par fenêtre) à chaque lancement.
 ///
 /// Tout ce qui n'est pas construit par le paquet officiel — un `cargo
 /// build`/`cargo run` en debug COMME en `--release` — porte en plus une
@@ -39,7 +47,7 @@ use sdl2::surface::Surface;
 const IS_PACKAGED_BUILD: bool = option_env!("BYTEBOX_PACKAGED_BUILD").is_some();
 
 fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
-    let img = image::open("assets/bytebox.png")
+    let img = image::open("assets/bytebox_icon.png")
         .map_err(|e| e.to_string())?
         .into_rgba8();
     let (width, height) = img.dimensions();
@@ -507,8 +515,23 @@ pub fn run(
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
                 // pour ne jamais y rester coincé sans savoir comment en
                 // sortir.
+                //
+                // `repeat: false` sur celle-ci et sur toutes les touches de
+                // fonction ci-dessous (F1-F12) : ce sont des bascules, pas du
+                // texte à taper — sans ce filtre, un appui tenu un peu trop
+                // longtemps envoie plusieurs `KeyDown` de répétition du
+                // système (le délai avant la première répétition varie
+                // d'un système à l'autre, plus court sur certaines
+                // configurations Linux que sur macOS) et la touche
+                // bascule deux fois de suite, quasi instantanément — visible
+                // sur F5 comme un message OSD qui semble clignoter entre
+                // l'ancien et le nouvel état. Sans rapport avec la frappe
+                // normale (dernier `Event::KeyDown` de cette liste, le
+                // passthrough clavier CPC), qui doit au contraire répéter
+                // tant que la touche reste enfoncée.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F1),
+                    repeat: false,
                     ..
                 } => {
                     current_zoom = DisplayMode::Normal;
@@ -516,6 +539,7 @@ pub fn run(
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F2),
+                    repeat: false,
                     ..
                 } => {
                     current_zoom = DisplayMode::X2;
@@ -523,6 +547,7 @@ pub fn run(
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F3),
+                    repeat: false,
                     ..
                 } => {
                     current_zoom = DisplayMode::X3;
@@ -530,6 +555,7 @@ pub fn run(
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F4),
+                    repeat: false,
                     ..
                 } => {
                     // Bascule : F4 quitte le plein écran s'il est deja actif
@@ -547,6 +573,7 @@ pub fn run(
                 // aperture arrondie des pixels, voir renderer_crt.wgsl.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F5),
+                    repeat: false,
                     ..
                 } => {
                     renderer.toggle_crt();
@@ -565,6 +592,7 @@ pub fn run(
                 // commande rapide (voir plus bas).
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F8),
+                    repeat: false,
                     ..
                 } => {
                     app_log!(
@@ -576,6 +604,7 @@ pub fn run(
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F9),
+                    repeat: false,
                     ..
                 } => {
                     let start_line = machine.current_line;
@@ -600,6 +629,7 @@ pub fn run(
                 // ouverture pour taper sans clic préalable.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F10),
+                    repeat: false,
                     ..
                 } => {
                     quick_bar_visible = !quick_bar_visible;
@@ -612,6 +642,7 @@ pub fn run(
                 // sur la fenêtre principale, pas de fenêtre séparée).
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F6),
+                    repeat: false,
                     ..
                 } => {
                     config_panel_visible = !config_panel_visible;
@@ -630,6 +661,7 @@ pub fn run(
                 // de `KeyboardPanel::ui`.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F7),
+                    repeat: false,
                     ..
                 } => {
                     keyboard_panel_visible = !keyboard_panel_visible;
@@ -641,6 +673,7 @@ pub fn run(
                 // modèle que le statut machine (F12).
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F11),
+                    repeat: false,
                     ..
                 } => {
                     console_window_visible = !console_window_visible;
@@ -653,6 +686,7 @@ pub fn run(
                 }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F12),
+                    repeat: false,
                     ..
                 } => {
                     debug_visible = !debug_visible;
