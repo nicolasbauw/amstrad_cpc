@@ -3,10 +3,22 @@ name = "bytebox"
 version = "2.0.0"
 edition = "2024"
 license = "MIT"
+authors = ["Nicolas BAUW <nbauw@hotmail.com>"]
+description = "Amstrad CPC 6128 emulator"
 
 [[bin]]
 name = "bytebox"
 path = "src/main.rs"
+
+# Réservée aux paquets qui n'ont pas de gestionnaire de dépendances système
+# pour fournir SDL2 (AppImage, MSI Windows) : compile SDL2 depuis les
+# sources et la lie statiquement dans le binaire, qui devient alors
+# autonome vis-à-vis d'elle. À NE PAS activer pour l'AUR/Homebrew : ces
+# deux-là déclarent SDL2 comme dépendance système (`depends_on`/`depends`),
+# dans l'esprit de leurs conventions respectives — la lier statiquement là
+# aussi ne ferait qu'alourdir la compilation sans bénéfice.
+[features]
+static-sdl2 = ["sdl2/bundled", "sdl2/static-link"]
 
 [dependencies]
 bytebox-core = { path = "../core" }

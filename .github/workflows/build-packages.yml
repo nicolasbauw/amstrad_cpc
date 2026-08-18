@@ -1,0 +1,175 @@
+name: Build packages
+
+# Déclenché sur un tag de release (convention du projet : "2.0.0", pas de
+# préfixe "v" — voir packaging/PKGBUILD) et manuellement via
+# workflow_dispatch, pour pouvoir tester le workflow lui-même sans avoir à
+# pousser un tag à chaque itération.
+on:
+  push:
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # AppImage (Linux) : SDL2 liée statiquement (feature Cargo "static-sdl2",
+  # voir bytebox/Cargo.toml) puisqu'une AppImage doit tourner sur des
+  # distributions qu'on ne contrôle pas, sans dépendre d'un paquet système
+  # SDL2 particulier. Les ROMs et ~/.bytebox, ~/.config/bytebox ne sont pas
+  # à préparer ici : ByteBox les crée/peuple lui-même au premier lancement
+  # (voir core/src/config.rs), quel que soit le format de paquet — même
+  # principe que le PKGBUILD AUR.
+  appimage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # cmake : nécessaire pour compiler SDL2 depuis les sources (feature
+      # "bundled"). Le reste : bibliothèques de dev pour chacun des backends
+      # que SDL2 sait cibler (X11, Wayland, ALSA, PulseAudio...) — sans elles,
+      # le SDL2 compilé perdrait le support de certains environnements de
+      # bureau au lieu d'échouer franchement à la compilation.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libasound2-dev libpulse-dev libx11-dev \
+            libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev \
+            libxss-dev libxkbcommon-dev libwayland-dev libdbus-1-dev libudev-dev
+
+      - name: Build (SDL2 statique, build "officiel")
+        env:
+          BYTEBOX_PACKAGED_BUILD: "1"
+        run: cargo build --profile dist --locked -p bytebox --features static-sdl2
+
+      # linuxdeploy assemble l'AppDir (résolution des bibliothèques
+      # partagées restantes, génération de l'AppRun) puis produit l'AppImage.
+      # APPIMAGE_EXTRACT_AND_RUN : les runners GitHub n'ont pas FUSE, requis
+      # par défaut pour exécuter une AppImage (linuxdeploy et appimagetool
+      # sont eux-mêmes distribués comme des AppImages) — cette variable leur
+      # fait extraire puis lancer leur contenu directement à la place.
+      - name: Assemble the AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          ARCH: x86_64
+        run: |
+          wget -q -O linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          ./linuxdeploy --appdir AppDir \
+            --executable target/dist/bytebox \
+            --desktop-file packaging/bytebox.desktop \
+            --icon-file assets/bytebox_icon.png \
+            --output appimage
+          mv ByteBox*.AppImage "bytebox-${{ github.ref_name }}-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bytebox-appimage
+          path: bytebox-*.AppImage
+
+      - name: Attach to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bytebox-*.AppImage
+
+  # MSI Windows : compilé nativement sur un runner Windows (toolchain MSVC
+  # déjà en place), pas de cross-compilation depuis Linux. SDL2 également
+  # liée statiquement, pour ne pas avoir à faire trouver un SDL2.dll par
+  # l'utilisateur final. cargo-wix (WiX Toolset v3) génère le .msi à partir
+  # de bytebox/wix/main.wxs.
+  #
+  # AUCUN TEST RÉEL EFFECTUÉ SUR WINDOWS À CE STADE (voir la conversation
+  # qui a produit ce workflow) : ce job prouve que ça compile et s'empaquette,
+  # pas que ça se lance correctement chez un utilisateur — à vérifier
+  # manuellement dès que possible.
+  windows-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --locked
+
+      - name: Install WiX Toolset v3
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Add WiX Toolset to PATH
+        shell: pwsh
+        run: |
+          $wixBin = Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3*\bin" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $wixBin) { throw "WiX Toolset bin folder not found" }
+          echo "$($wixBin.FullName)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build (SDL2 statique, build "officiel")
+        env:
+          BYTEBOX_PACKAGED_BUILD: "1"
+        run: cargo build --profile dist --locked -p bytebox --features static-sdl2
+
+      # --no-build : on a déjà compilé nous-mêmes juste au-dessus, avec la
+      # feature static-sdl2 et BYTEBOX_PACKAGED_BUILD — cargo-wix ne doit pas
+      # relancer son propre `cargo build` par défaut (profil Release, sans
+      # ces réglages), qui produirait un binaire différent de celui empaqueté.
+      - name: Package the MSI
+        run: cargo wix -p bytebox --no-build --profile dist --nocapture -o target/wix/
+
+      - name: Rename the installer
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target/wix/*.msi | Select-Object -First 1
+          Rename-Item $msi.FullName "bytebox-${{ github.ref_name }}-x86_64.msi"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bytebox-windows-msi
+          path: target/wix/bytebox-*.msi
+
+      - name: Attach to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/wix/bytebox-*.msi
+
+  # Homebrew : construit et teste la Formula (packaging/homebrew/bytebox.rb)
+  # exactement comme un utilisateur macOS le ferait (`brew install
+  # --build-from-source` depuis le fichier local, avant toute publication
+  # dans un tap) — contrairement au job Windows ci-dessus, celui-ci est donc
+  # une vraie vérification, pas seulement "ça compile en CI".
+  # SDL2 reste liée dynamiquement ici (`depends_on "sdl2"` dans la Formula,
+  # pas la feature static-sdl2) : Homebrew EST le gestionnaire de
+  # dépendances système sur macOS, inutile de la recompiler.
+  macos-homebrew:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test the Formula
+        run: |
+          brew install --build-from-source ./packaging/homebrew/bytebox.rb
+          brew test bytebox
+
+      - name: Archive the installed binary
+        run: |
+          mkdir -p dist
+          cp "$(brew --prefix bytebox)/bin/bytebox" dist/
+          tar -C dist -czf "bytebox-${{ github.ref_name }}-macos-arm64.tar.gz" bytebox
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bytebox-macos
+          path: bytebox-*.tar.gz
+
+      - name: Attach to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bytebox-*.tar.gz
