@@ -47,7 +47,13 @@ use sdl2::surface::Surface;
 const IS_PACKAGED_BUILD: bool = option_env!("BYTEBOX_PACKAGED_BUILD").is_some();
 
 fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
-    let img = image::open("assets/bytebox_icon.png")
+    // Embarquée dans le binaire à la compilation (`include_bytes!`), pas lue
+    // sur le disque à l'exécution : un chemin relatif au répertoire courant
+    // ("assets/bytebox_icon.png") ne pointe nulle part de fiable une fois
+    // installée par un paquet (`Exec=bytebox` sans `Path=` particulier dans
+    // le `.desktop`, ou lancée depuis n'importe où via `$PATH`) — et
+    // contrairement aux ROMs, rien n'empêche de la distribuer telle quelle.
+    let img = image::load_from_memory(include_bytes!("../../assets/bytebox_icon.png"))
         .map_err(|e| e.to_string())?
         .into_rgba8();
     let (width, height) = img.dimensions();
@@ -71,8 +77,8 @@ fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
 /// taille (voir README, section "Development builds").
 ///
 /// Épaisseur proportionnelle à la taille de l'image (pas un nombre de pixels
-/// fixe, qui deviendrait disproportionné si `assets/bytebox.png` change de
-/// résolution) : chaque pixel est classé par sa distance à la droite
+/// fixe, qui deviendrait disproportionné si `assets/bytebox_icon.png`
+/// change de résolution) : chaque pixel est classé par sa distance à la droite
 /// bas-gauche/haut-droit (`x/largeur + y/hauteur = 1`), et repeint s'il
 /// tombe dans la bande.
 fn overlay_dev_stripe(pixels: &mut [u8], width: u32, height: u32) {

@@ -316,7 +316,7 @@ impl KeyboardPanel {
             .default_pos(default_pos)
             .show(ctx, |ui| {
                 let Some(texture) = &self.texture else {
-                    ui.label("assets/keyboard.png introuvable ou illisible — voir la console.");
+                    ui.label("Couldn't decode the embedded keyboard image — see the console.");
                     return;
                 };
                 // Largeur réellement disponible dans la fenêtre (bornée par
@@ -403,11 +403,17 @@ impl KeyboardPanel {
     }
 
     fn load_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-        // Toujours dans ~/.bytebox/assets/keyboard.png (identique en debug
-        // et en release, aucun repli vers un chemin relatif au dépôt) — même
-        // convention que les ROMs, voir `config::default_resource_path`.
-        let path = bytebox_core::config::default_resource_path("assets", "keyboard.png");
-        match image::open(&path) {
+        // Embarquée dans le binaire à la compilation (`include_bytes!`), pas
+        // lue sur le disque à l'exécution : contrairement aux ROMs (droits
+        // non tranchés, jamais distribuées avec l'émulateur — voir
+        // doc/roms-installation.md), cette illustration est notre propre
+        // travail, rien n'empêche de la distribuer telle quelle. Évite un
+        // ancien piège à deux volets : un chemin relatif au répertoire
+        // courant ne pointe nulle part de fiable une fois installée par un
+        // paquet, et ~/.bytebox/assets/ (l'ancienne convention) n'était créé
+        // ni peuplé par personne — même défaut que les ROMs avant leur
+        // installeur (F6), mais sans raison de le reproduire ici.
+        match image::load_from_memory(include_bytes!("../../assets/keyboard.png")) {
             Ok(img) => {
                 let img = img.into_rgba8();
                 let size = [img.width() as usize, img.height() as usize];
@@ -419,7 +425,7 @@ impl KeyboardPanel {
                 ))
             }
             Err(e) => {
-                bytebox_core::app_log!("Can't load {}: {e}", path.display());
+                bytebox_core::app_log!("Can't load the embedded keyboard image: {e}");
                 None
             }
         }
