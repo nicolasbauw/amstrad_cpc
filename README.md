@@ -11,7 +11,7 @@
   jumping straight into a game during a debugging session:
 
   ```sh
-  cargo run -- --disk=Barbarian.dsk --autocmd='RUN"BARBA.I'
+  bytebox --disk=Barbarian.dsk --autocmd='RUN"BARBA.I'
   ```
 
 ## Function keys
