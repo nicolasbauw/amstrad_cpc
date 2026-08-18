@@ -4,6 +4,12 @@ class Bytebox < Formula
   url "https://github.com/nicolasbauw/amstrad_cpc/archive/refs/tags/2.0.0.tar.gz"
   sha256 "00cf0ec4b4bf90d4232f2f4c3418a7c0a2bb8ffa4daf7f0707e151290c7606b9"
   license "MIT"
+  # Pour tester contre les derniers commits avant qu'un tag n'existe pour
+  # eux (icns/wix/static-sdl2 ajoutés après le tag 2.0.0, par exemple) :
+  # `brew install --HEAD ...` clone directement cette branche au lieu de
+  # télécharger l'archive du tag ci-dessus. À retirer une fois cette
+  # branche mergée et un nouveau tag créé pour elle.
+  head "https://github.com/nicolasbauw/amstrad_cpc.git", branch: "dev"
 
   depends_on "pkg-config" => :build
   depends_on "rust" => :build
