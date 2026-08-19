@@ -226,17 +226,20 @@ considered "official" — same principle as Caprice32. Anything else,
 including a plain `cargo build --release` run by hand, is considered a
 dev build, and shows a red border around the window/taskbar icon, on all
 three windows (main, console, machine status), so it's never mistaken for
-the packaged release.
+the packaged release. On macOS, this only applies to the icon set by
+ByteBox itself — SDL has no notion of a per-window icon there, and would
+otherwise clobber the Dock/App Switcher icon of a properly bundled `.app`
+(see `packaging/homebrew/bytebox.rb`) with an unmasked, non-rounded one.
 
 The distinction is made at compile time by the `BYTEBOX_PACKAGED_BUILD`
 environment variable: if it's set (to anything) when `cargo build` runs,
-the stripe is left off. Only the packaging recipe should ever set it —
+the border is left off. Only the packaging recipe should ever set it —
 for example:
 
 ```sh
 BYTEBOX_PACKAGED_BUILD=1 cargo build --release
 ```
 
-A plain `--release` build without that variable still gets the stripe:
+A plain `--release` build without that variable still gets the border:
 `--release` alone doesn't mean "packaged", only the packaging step
 setting this variable does.
