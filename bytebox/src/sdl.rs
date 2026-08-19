@@ -724,13 +724,21 @@ pub fn run(
                     }
                 }
                 // Console complète (F11) : fenêtre séparée, sur le même
-                // modèle que le statut machine (F12).
+                // modèle que le statut machine (F12). Accepté aussi depuis
+                // `console_window_id` elle-même, pas seulement depuis la
+                // fenêtre principale : l'ouvrir lui donne le focus
+                // (`request_focus` ci-dessous), donc un réappui sur F11 pour
+                // la refermer arrive avec ce `window_id`-là — le filtre
+                // `main_window_id` seul (ajouté pour empêcher les AUTRES
+                // touches de fonction de se déclencher depuis cette fenêtre,
+                // voir le commentaire sur F1) l'aurait sinon silencieusement
+                // avalé.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F11),
                     repeat: false,
                     window_id,
                     ..
-                } if window_id == main_window_id => {
+                } if window_id == main_window_id || window_id == console_window_id => {
                     console_window_visible = !console_window_visible;
                     if console_window_visible {
                         console_window.window_mut().show();
@@ -751,7 +759,7 @@ pub fn run(
                     keymod,
                     window_id,
                     ..
-                } if window_id == main_window_id
+                } if (window_id == main_window_id || window_id == console_window_id)
                     && keymod.intersects(
                         sdl2::keyboard::Mod::LGUIMOD | sdl2::keyboard::Mod::RGUIMOD,
                     )
@@ -767,12 +775,17 @@ pub fn run(
                         console_window.window_mut().hide();
                     }
                 }
+                // Même raisonnement que F11 ci-dessus : la plupart des
+                // gestionnaires de fenêtres donnent le focus à une fenêtre
+                // qu'on vient de montrer, même sans `request_focus` explicite
+                // ici — un réappui sur F12 pour refermer arrive donc avec
+                // `debug_window_id`, pas `main_window_id`.
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F12),
                     repeat: false,
                     window_id,
                     ..
-                } if window_id == main_window_id => {
+                } if window_id == main_window_id || window_id == debug_window_id => {
                     debug_visible = !debug_visible;
                     if debug_visible {
                         status_panel.window_mut().show();
