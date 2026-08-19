@@ -293,6 +293,15 @@ pub fn run(
         // Sans effet hors macOS ; là-bas, condition requise pour que wgpu
         // puisse créer une surface à partir du handle de cette fenêtre.
         .metal_view()
+        // Sans .resizable(), le bouton vert "plein écran" de la barre de
+        // titre macOS reste grisé (NSWindow doit pouvoir se redimensionner
+        // pour que le bureau propose une transition plein écran) — F1-F4
+        // redimensionnent déjà la fenêtre par le code, et `renderer.resize`
+        // (voir plus bas, sur SizeChanged/Resized) recalcule le letterboxing
+        // pour n'importe quelle taille de surface, pas seulement les
+        // quatre zooms prédéfinis : un redimensionnement à la souris marche
+        // donc aussi bien qu'un F1-F4, sans code supplémentaire.
+        .resizable()
         .build()?;
     // Non bloquant : une icône manquante ou illisible ne doit pas empêcher
     // l'émulateur de démarrer, la fenêtre garde alors l'icône par défaut du
