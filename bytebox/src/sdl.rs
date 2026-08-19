@@ -29,13 +29,13 @@ use sdl2::surface::Surface;
 /// pixels (barre des tâches, alt-tab, titre de fenêtre) : `bytebox_icon.png`
 /// (256×256) est une version pré-réduite de `bytebox.png` (1254×1254, gardé
 /// pour d'autres usages éventuels — capture d'écran du README, etc.), pour
-/// ne pas décoder ni parcourir pixel par pixel (voir `overlay_dev_border`
-/// plus bas) une image ~24× plus grande que nécessaire, trois fois de
-/// suite (une par fenêtre) à chaque lancement.
+/// ne pas décoder ni parcourir pixel par pixel (voir
+/// `recolor_border_for_dev_build` plus bas) une image ~24× plus grande que
+/// nécessaire, trois fois de suite (une par fenêtre) à chaque lancement.
 ///
 /// Tout ce qui n'est pas construit par le paquet officiel — un `cargo
-/// build`/`cargo run` en debug COMME en `--release` — porte en plus un
-/// cadre rouge autour de l'icône (voir `overlay_dev_border`) : seul un
+/// build`/`cargo run` en debug COMME en `--release` — a en plus son cadre
+/// recoloré en rouge (voir `recolor_border_for_dev_build`) : seul un
 /// vrai paquet installé (PKGBUILD ou équivalent) compte comme version
 /// "officielle", même principe que Caprice32. `--release` seul n'en fait
 /// donc pas foi : c'est `BYTEBOX_PACKAGED_BUILD`, une variable
@@ -47,6 +47,19 @@ use sdl2::surface::Surface;
 const IS_PACKAGED_BUILD: bool = option_env!("BYTEBOX_PACKAGED_BUILD").is_some();
 
 fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
+    // Sous macOS, SDL n'a pas de notion d'icône par fenêtre (NSWindow n'en
+    // affiche pas dans sa barre de titre) : sa moulinette Cocoa fait donc
+    // autre chose de cet appel — elle remplace l'icône du Dock/App Switcher
+    // par cette surface brute, non masquée par le "squircle" arrondi
+    // qu'applique macOS aux .icns des vraies applications (Finder,
+    // Launchpad...). Résultat observé : l'icône passe d'arrondie (avant
+    // lancement) à carrée et non lissée (une fois lancée). Ne rien faire ici
+    // laisse macOS utiliser l'icône du bundle .app (Info.plist,
+    // CFBundleIconFile) du début à la fin — la même partout, lancée ou non.
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+
     // Embarquée dans le binaire à la compilation (`include_bytes!`), pas lue
     // sur le disque à l'exécution : un chemin relatif au répertoire courant
     // ("assets/bytebox_icon.png") ne pointe nulle part de fiable une fois
@@ -59,7 +72,7 @@ fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
     let (width, height) = img.dimensions();
     let mut pixels = img.into_raw();
     if !IS_PACKAGED_BUILD {
-        overlay_dev_border(&mut pixels, width, height);
+        recolor_border_for_dev_build(&mut pixels);
     }
     let pitch = width * 4;
     let surface = Surface::from_data(&mut pixels, width, height, pitch, PixelFormatEnum::RGBA32)
@@ -68,36 +81,31 @@ fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
     Ok(())
 }
 
-/// Dessine un cadre rouge tout autour du buffer RGBA8 déjà décodé,
-/// `width`×`height`, 4 octets par pixel.
+/// Repeint en rouge le cadre gris arrondi déjà dessiné dans
+/// `assets/bytebox_icon.png`, sur un buffer RGBA8, 4 octets par pixel.
 ///
-/// Un cadre plutôt qu'un texte "DEV" : à la taille d'une icône de barre des
-/// tâches (souvent 32-48px), un texte de trois lettres serait illisible,
-/// alors qu'un contour épais tranche nettement même à cette taille (voir
-/// README, section "Development builds"). Un cadre plutôt que la bande
-/// diagonale utilisée initialement : celle-ci traversait le dessin de
-/// l'icône lui-même, alors qu'un cadre le laisse intact et se contente de
-/// l'entourer.
+/// Une première version dessinait un nouveau cadre rouge au bord du
+/// canevas, par-dessus le fond noir — visuellement correct, mais un second
+/// cadre distinct de celui du logo, pas franchement élégant. Celui-ci
+/// recolore directement le cadre existant : un seul cadre, à la même
+/// place, juste d'une autre couleur selon le type de build.
 ///
-/// Épaisseur proportionnelle à la taille de l'image (pas un nombre de
-/// pixels fixe, qui deviendrait disproportionné si `assets/bytebox_icon.png`
-/// change de résolution) — plus fine que ne l'était la bande diagonale
-/// (0.07 contre 0.09 de la plus petite dimension), le cadre entier restant
-/// déjà bien plus visible qu'elle à surface de rouge égale.
-fn overlay_dev_border(pixels: &mut [u8], width: u32, height: u32) {
-    let thickness = ((width.min(height) as f32) * 0.07).round().max(1.0) as u32;
-
-    for y in 0..height {
-        for x in 0..width {
-            let on_border =
-                x < thickness || y < thickness || x >= width - thickness || y >= height - thickness;
-            if on_border {
-                let idx = ((y * width + x) * 4) as usize;
-                pixels[idx] = 220;
-                pixels[idx + 1] = 20;
-                pixels[idx + 2] = 20;
-                pixels[idx + 3] = 255;
-            }
+/// Détection par couleur plutôt que par géométrie (pas de rectangle à
+/// coordonnées codées en dur, qui casserait si l'artwork changeait) : le
+/// cadre est gris neutre (R≈G≈B), à mi-clarté — jamais confondu avec le
+/// fond noir, le jaune/bleu du logo "BB" ou les bandes de couleur, aucun de
+/// ces éléments n'étant proche du gris neutre.
+fn recolor_border_for_dev_build(pixels: &mut [u8]) {
+    for px in pixels.chunks_exact_mut(4) {
+        let [r, g, b, _a] = [px[0], px[1], px[2], px[3]];
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let desaturated = max - min <= 12;
+        let mid_lightness = (40..=235).contains(&max);
+        if desaturated && mid_lightness {
+            px[0] = 220;
+            px[1] = 20;
+            px[2] = 20;
         }
     }
 }
@@ -1140,25 +1148,25 @@ pub fn run(
 mod tests {
     use super::*;
 
-    /// Le centre de l'icône (loin de tout bord) doit rester intact, tandis
-    /// qu'un pixel sur le bord doit devenir rouge opaque.
+    /// Un pixel gris neutre (le cadre) doit devenir rouge, alpha préservé ;
+    /// le fond noir et une couleur saturée (jaune/bleu du logo) doivent
+    /// rester intacts.
     #[test]
-    fn overlay_dev_border_paints_the_edges_but_leaves_the_center_alone() {
-        let (w, h) = (64u32, 64u32);
-        let mut pixels = vec![10u8; (w * h * 4) as usize]; // gris uniforme, alpha 10
+    fn recolor_border_for_dev_build_only_touches_neutral_grey_pixels() {
+        #[rustfmt::skip]
+        let mut pixels: Vec<u8> = vec![
+            180, 178, 182, 200, // cadre : gris neutre, mi-clarté
+              0,   0,   0, 255, // fond noir
+            254, 213,   3, 255, // jaune saturé (logo)
+             20,  85, 224, 255, // bleu saturé (logo)
+        ];
 
-        overlay_dev_border(&mut pixels, w, h);
+        recolor_border_for_dev_build(&mut pixels);
 
-        let pixel_at = |x: u32, y: u32| -> [u8; 4] {
-            let i = ((y * w + x) * 4) as usize;
-            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
-        };
-
-        // Centre de l'icône : loin de tout bord.
-        assert_eq!(pixel_at(32, 32), [10, 10, 10, 10], "centre repeint a tort");
-
-        // Coin haut-gauche, sur le bord : repeint en rouge opaque.
-        assert_eq!(pixel_at(0, 0), [220, 20, 20, 255]);
+        assert_eq!(&pixels[0..4], [220, 20, 20, 200], "cadre gris non recolore");
+        assert_eq!(&pixels[4..8], [0, 0, 0, 255], "fond noir repeint a tort");
+        assert_eq!(&pixels[8..12], [254, 213, 3, 255], "jaune repeint a tort");
+        assert_eq!(&pixels[12..16], [20, 85, 224, 255], "bleu repeint a tort");
     }
 
     #[test]
