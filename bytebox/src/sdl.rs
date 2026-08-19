@@ -1054,12 +1054,14 @@ pub fn run(
                     .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0) * scale)
                     .interactable(false)
                     .show(ctx, |ui| {
-                        let radius = 6.0 * scale;
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(radius * 2.0, radius * 2.0), egui::Sense::hover());
-                        ui.painter().circle_filled(
-                            rect.center(),
-                            radius,
+                        // Rectangle plutôt qu'un rond : rappelle la forme de
+                        // la LED d'un vrai lecteur de disquettes, pas un
+                        // simple témoin générique.
+                        let size = egui::vec2(16.0, 10.0) * scale;
+                        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                        ui.painter().rect_filled(
+                            rect,
+                            2.0 * scale,
                             egui::Color32::from_rgb(220, 40, 40),
                         );
                     });
