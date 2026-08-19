@@ -715,6 +715,34 @@ pub fn run(
                         console_window.window_mut().hide();
                     }
                 }
+                // Raccourci alternatif pour la console, en plus de F11 :
+                // sous macOS, F11 est intercepté au niveau système par
+                // "Afficher le bureau" (Mission Control) avant même
+                // d'atteindre l'application — rien à faire côté SDL contre
+                // ça. F11 reste la touche standard partout ailleurs ; Cmd+
+                // Maj+C donne un second chemin qui marche toujours sur Mac.
+                Event::KeyDown {
+                    keycode: Some(sdl2::keyboard::Keycode::C),
+                    repeat: false,
+                    keymod,
+                    window_id,
+                    ..
+                } if window_id == main_window_id
+                    && keymod.intersects(
+                        sdl2::keyboard::Mod::LGUIMOD | sdl2::keyboard::Mod::RGUIMOD,
+                    )
+                    && keymod.intersects(
+                        sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
+                    ) =>
+                {
+                    console_window_visible = !console_window_visible;
+                    if console_window_visible {
+                        console_window.window_mut().show();
+                        console_window.request_focus();
+                    } else {
+                        console_window.window_mut().hide();
+                    }
+                }
                 Event::KeyDown {
                     keycode: Some(sdl2::keyboard::Keycode::F12),
                     repeat: false,

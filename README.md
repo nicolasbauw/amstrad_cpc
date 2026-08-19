@@ -31,7 +31,10 @@
     F10            toggle the quick command bar (one input line, overlaid
                    on the emulator window)
     F11            toggle the full console window (scrollable history,
-                   same commands as the quick command bar)
+                   same commands as the quick command bar) — on macOS,
+                   Cmd+Shift+C does the same thing, since F11 is claimed
+                   system-wide by "Show Desktop" before it ever reaches
+                   the app
     F12            toggle the machine status window
 
 The emulator no longer depends on the terminal it was launched from: every
