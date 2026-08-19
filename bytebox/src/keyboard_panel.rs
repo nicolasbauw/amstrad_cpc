@@ -155,7 +155,12 @@ const KEYS: &[VirtualKey] = &[
     k(1055.0, 348.0, 1140.0, 435.0, 3, 3), // P
     k(1151.0, 348.0, 1237.0, 435.0, 3, 2), // ¨ ^
     k(1246.0, 348.0, 1332.0, 435.0, 2, 1), // < *
-    k(1342.0, 348.0, 1474.0, 435.0, 2, 2), // RETURN (haut)
+    // RETURN (haut/bas) : les deux rectangles se rejoignent exactement à
+    // y=439.5 (le milieu de l'écart de 9px entre rangées 2 et 3 ailleurs
+    // sur le clavier) — dans l'image source, RETURN est dessinée comme une
+    // seule touche en L, sans coupure visible à cet endroit ; un vrai écart
+    // ici créerait une zone morte au clic en plein milieu de cette touche.
+    k(1342.0, 348.0, 1474.0, 439.5, 2, 2), // RETURN (haut)
     k(1484.0, 348.0, 1571.0, 435.0, 2, 4), // f4
     k(1580.0, 348.0, 1667.0, 435.0, 1, 4), // f5
     k(1677.0, 348.0, 1761.0, 435.0, 0, 4), // f6
@@ -174,7 +179,7 @@ const KEYS: &[VirtualKey] = &[
     k(1079.0, 444.0, 1165.0, 530.0, 3, 5), // M
     k(1174.0, 444.0, 1262.0, 530.0, 3, 4), // % ù
     k(1272.0, 444.0, 1360.0, 530.0, 2, 3), // > #
-    k(1370.0, 444.0, 1469.0, 530.0, 2, 2), // RETURN (bas)
+    k(1370.0, 439.5, 1469.0, 530.0, 2, 2), // RETURN (bas)
     k(1485.0, 444.0, 1569.0, 530.0, 1, 5), // f1
     k(1580.0, 444.0, 1667.0, 530.0, 1, 6), // f2
     k(1676.0, 444.0, 1762.0, 530.0, 0, 5), // f3
@@ -336,6 +341,20 @@ impl KeyboardPanel {
                     egui::Color32::WHITE,
                 );
 
+                // Deux passes plutôt qu'une : SHIFT et RETURN ont chacun
+                // deux rectangles pour une seule position PSG (voir plus
+                // bas), et un survol/appui sur l'un des deux doit allumer
+                // les DEUX — sinon RETURN, dessinée dans l'image source
+                // comme une seule touche en L, a l'air de deux touches
+                // distinctes dont une seule réagit. Impossible à savoir
+                // avant d'avoir appelé `ui.interact` sur tous les
+                // rectangles, d'où les deux passes : la première interagit
+                // et agrège par position, la seconde dessine avec l'état
+                // agrégé.
+                let mut rects = Vec::with_capacity(KEYS.len());
+                let mut lit_by_position: std::collections::HashMap<Position, (bool, bool)> =
+                    std::collections::HashMap::new();
+
                 for (index, key) in KEYS.iter().enumerate() {
                     let screen_rect = egui::Rect::from_min_max(
                         image_rect.min + key.rect.min.to_vec2() * scale,
@@ -375,7 +394,15 @@ impl KeyboardPanel {
                         held
                     };
 
-                    if pressed || response.hovered() {
+                    let entry = lit_by_position.entry(key.position).or_default();
+                    entry.0 |= pressed;
+                    entry.1 |= response.hovered();
+                    rects.push((screen_rect, key.position));
+                }
+
+                for (screen_rect, position) in rects {
+                    let (pressed, hovered) = lit_by_position[&position];
+                    if pressed || hovered {
                         ui.painter().rect_stroke(
                             screen_rect,
                             4.0,
