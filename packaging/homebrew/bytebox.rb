@@ -64,9 +64,9 @@ class Bytebox < Formula
     return unless OS.mac?
 
     <<~EOS
-      ByteBox s'installe aussi comme bundle macOS (#{prefix}/ByteBox.app),
-      pour un lancement/épinglage normal depuis le Dock ou Launchpad — au
-      lieu du binaire nu de #{bin}. Pour l'ajouter à Applications :
+      ByteBox also installs as a macOS bundle (#{prefix}/ByteBox.app), for
+      normal launching/pinning from the Dock or Launchpad — instead of the
+      bare binary in #{bin}. To add it to Applications:
 
         ln -s "#{prefix}/ByteBox.app" /Applications/ByteBox.app
     EOS
