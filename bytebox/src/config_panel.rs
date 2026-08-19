@@ -135,6 +135,7 @@ impl ConfigPanel {
         window_size: egui::Vec2,
         generation: u64,
         current_zoom: ZoomChoice,
+        disk_indicator_enabled: &mut bool,
     ) -> (Option<ZoomChoice>, CrtSettings, KeyboardSettings) {
         let mut zoom = None;
         let mut crt_settings = crt_settings;
@@ -193,6 +194,7 @@ impl ConfigPanel {
                             &mut zoom,
                             &mut keyboard_settings,
                             current_zoom,
+                            disk_indicator_enabled,
                         );
                         ui.separator();
                         ui.heading("Audio");
@@ -417,6 +419,7 @@ impl ConfigPanel {
         zoom: &mut Option<ZoomChoice>,
         keyboard_settings: &mut KeyboardSettings,
         current_zoom: ZoomChoice,
+        disk_indicator_enabled: &mut bool,
     ) {
         ui.horizontal(|ui| {
             if ui.button("x1").clicked() {
@@ -433,11 +436,21 @@ impl ConfigPanel {
             }
         });
 
+        ui.checkbox(
+            disk_indicator_enabled,
+            "Show a red dot on the emulator screen during disk access",
+        );
+
         // Pas de second groupe de boutons pour choisir un zoom "par
         // défaut" : ce serait dupliquer les quatre boutons ci-dessus pour
         // une différence purement sémantique. On enregistre plutôt le zoom
         // courant tel quel — `current_zoom` reflète toujours l'état réel de
         // la fenêtre (`sdl.rs`), pas seulement ce qui a été choisi ici.
+        // Un seul bouton pour le zoom ET l'indicateur ci-dessus, pas deux
+        // boutons "Save" séparés : `save_display_config` réécrit toute la
+        // section [display] d'un coup (voir son commentaire) — un bouton
+        // dédié à l'un des deux réglages écraserait silencieusement l'autre
+        // avec sa valeur par défaut à chaque sauvegarde.
         ui.horizontal(|ui| {
             ui.label(format!(
                 "Current zoom: {}",
@@ -446,6 +459,7 @@ impl ConfigPanel {
             if ui.button("Save as startup default").clicked() {
                 let display = bytebox_core::config::DisplayConfig {
                     default_zoom: Some(current_zoom.as_config_str().to_string()),
+                    show_disk_access_indicator: Some(*disk_indicator_enabled),
                 };
                 match bytebox_core::config::save_display_config(&display) {
                     Ok(()) => app_log!("Display settings saved to config.toml"),

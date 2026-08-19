@@ -105,6 +105,12 @@ pub struct DisplayConfig {
     /// reconnue plutôt que d'échouer au démarrage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_zoom: Option<String>,
+    /// Point rouge superposé à l'écran de l'émulateur pendant un accès
+    /// disque (même condition que celui de la fenêtre de statut F12) —
+    /// activé par défaut (absent ou `Some(true)`), désactivable depuis le
+    /// panneau F6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_disk_access_indicator: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -560,6 +566,7 @@ mod tests {
     fn a_saved_display_section_reads_back_identically() {
         let display = DisplayConfig {
             default_zoom: Some("x2".to_string()),
+            show_disk_access_indicator: Some(false),
         };
         let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
         let body = toml::to_string(&display).expect("serialisation refusee");

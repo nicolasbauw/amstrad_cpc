@@ -31,6 +31,10 @@ cdt_path = "~/.bytebox/CDT"
 # unrecognized falls back to "x1".
 default_zoom = "x1"
 
+# Red dot overlaid on the emulator screen during a disk access — same
+# indicator as the machine status window (F12). Missing or true: shown.
+show_disk_access_indicator = true
+
 [memory]
 # Extra 64KB RAM banks beyond the 6128's standard 128KB, in the style of
 # period third-party expansions (Dk'tronics and the like). Detected by the

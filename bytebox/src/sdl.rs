@@ -326,6 +326,13 @@ pub fn run(
     }
     let mut current_zoom = DisplayMode::from_config(machine.default_zoom());
     apply_display_mode(renderer.window_mut(), current_zoom);
+    // Point rouge superposé à l'écran pendant un accès disque (panneau F6,
+    // config_panel.rs) : lu une fois au démarrage depuis config.toml, puis
+    // modifiable en direct sans redémarrage — contrairement au zoom/CRT, pas
+    // besoin de le faire transiter par le petit ballet Option/tuple de
+    // `ConfigPanel::ui` (voir son commentaire) : rien d'autre n'emprunte
+    // cette variable ailleurs dans la trame.
+    let mut disk_indicator_enabled = machine.show_disk_access_indicator();
     let main_window_id = renderer.window().id();
     let mut event_pump = sdl_context.event_pump()?;
 
@@ -1000,9 +1007,16 @@ pub fn run(
         // L'OSD doit s'afficher même quand aucun des trois panneaux
         // ci-dessus n'est ouvert (il apparaît en pleine partie, pas
         // seulement pendant qu'on consulte F6/F7/F10) : sa propre visibilité
-        // rejoint donc `show_overlay`, indépendamment des autres.
-        let show_overlay =
-            quick_bar_visible || config_panel_visible || keyboard_panel_visible || osd.is_active();
+        // rejoint donc `show_overlay`, indépendamment des autres. Même
+        // raisonnement pour le point rouge d'accès disque : il doit
+        // apparaître en pleine partie, pas seulement quand un panneau est
+        // déjà ouvert pour une autre raison.
+        let disk_access = disk_indicator_enabled && machine.disk_access_in_progress();
+        let show_overlay = quick_bar_visible
+            || config_panel_visible
+            || keyboard_panel_visible
+            || osd.is_active()
+            || disk_access;
         let mut draw_overlay = |ctx: &egui::Context| {
             if quick_bar_visible {
                 quick_bar.ui(ctx, &cmd_sender, &mut console_log, window_size);
@@ -1018,6 +1032,7 @@ pub fn run(
                     window_size,
                     config_panel_generation,
                     current_zoom.to_zoom_choice(),
+                    &mut disk_indicator_enabled,
                 );
                 requested_zoom = zoom;
                 requested_crt_settings = Some(crt);
@@ -1033,6 +1048,22 @@ pub fn run(
                 ));
             }
             osd.ui(ctx, window_size);
+            if disk_access {
+                let scale = crate::ui_scale::content_scale(window_size);
+                egui::Area::new(egui::Id::new("disk_access_indicator"))
+                    .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0) * scale)
+                    .interactable(false)
+                    .show(ctx, |ui| {
+                        let radius = 6.0 * scale;
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(radius * 2.0, radius * 2.0), egui::Sense::hover());
+                        ui.painter().circle_filled(
+                            rect.center(),
+                            radius,
+                            egui::Color32::from_rgb(220, 40, 40),
+                        );
+                    });
+            }
         };
         let overlay: Option<&mut dyn FnMut(&egui::Context)> = if show_overlay {
             Some(&mut draw_overlay)

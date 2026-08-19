@@ -383,6 +383,13 @@ impl Machine {
         self.config.display.default_zoom.as_deref()
     }
 
+    /// Point rouge superposé à l'écran de l'émulateur pendant un accès
+    /// disque (config.toml, `[display] show_disk_access_indicator`) —
+    /// activé par défaut, absent ou `Some(true)`.
+    pub fn show_disk_access_indicator(&self) -> bool {
+        self.config.display.show_disk_access_indicator.unwrap_or(true)
+    }
+
     /// Répertoire par défaut où chercher/créer une image disque
     /// (config.toml, `[file] dsk_path`) — utile à toute façade proposant un
     /// sélecteur de fichier (le panneau F6, notamment), pour l'ouvrir au
@@ -403,6 +410,18 @@ impl Machine {
     /// entre le fichier et lui.
     pub fn crt_config(&self) -> &crate::config::CrtConfig {
         &self.config.crt
+    }
+
+    /// Vrai pendant une lecture/écriture disque effective — même condition
+    /// que le point rouge affiché sur la ligne "Disk access" de la fenêtre
+    /// de statut (F12, voir `get_hardware_string` plus bas), exposée ici
+    /// pour que `sdl.rs` puisse superposer le même indicateur directement
+    /// sur l'écran de l'émulateur, sans dupliquer la condition.
+    pub fn disk_access_in_progress(&self) -> bool {
+        matches!(
+            self.bus.fdc.borrow().phase,
+            crate::fdc::FdcPhase::ExecutionRead | crate::fdc::FdcPhase::ExecutionWrite
+        )
     }
 
     /// Réglages du clavier virtuel (F7) lus dans `config.toml` — même
@@ -1136,10 +1155,7 @@ impl Machine {
         // --- FDC / LECTEURS DE DISQUETTES ---
         {
             let fdc = self.bus.fdc.borrow();
-            let disk_access = matches!(
-                fdc.phase,
-                crate::fdc::FdcPhase::ExecutionRead | crate::fdc::FdcPhase::ExecutionWrite
-            );
+            let disk_access = self.disk_access_in_progress();
             let _ = writeln!(s, "\n[FDC]");
             let _ = writeln!(s, "  Motor On           : {:<5}", fdc.motor_on);
             let _ = writeln!(
