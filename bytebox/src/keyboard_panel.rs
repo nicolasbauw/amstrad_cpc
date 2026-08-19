@@ -54,6 +54,12 @@ type Position = (usize, u8);
 const SHIFT: Position = (2, 5);
 const CONTROL: Position = (2, 7);
 const CAPS_LOCK: Position = (8, 6);
+/// Seule touche à deux rectangles qui soit une seule et même touche
+/// visuelle en L (SHIFT, l'autre cas à deux rectangles, ce sont deux
+/// touches séparées aux deux bouts du clavier) — voir `l_shape_outline`
+/// plus bas, pour un contour de surbrillance qui suit cette forme au lieu
+/// de deux rectangles disjoints qui la font paraître coupée en deux.
+const RETURN: Position = (2, 2);
 
 /// Loquets relâchés automatiquement dès qu'une autre touche est cliquée —
 /// voir le commentaire d'en-tête. CAPS LOCK n'en est PAS un : impulsion
@@ -114,6 +120,25 @@ const fn k(x0: f32, y0: f32, x1: f32, y1: f32, line: usize, bit: u8) -> VirtualK
         },
         position: (line, bit),
     }
+}
+
+/// Les 8 sommets du contour en L de deux rectangles empilés verticalement
+/// et en contact (`top.max.y == bottom.min.y`) — RETURN, la seule touche
+/// dans ce cas (voir la constante `RETURN`). Ne suppose pas lequel des
+/// deux est le plus large : suit simplement l'union réelle des deux
+/// largeurs, dans l'ordre où `top`/`bottom` sont donnés.
+fn l_shape_outline(top: egui::Rect, bottom: egui::Rect) -> Vec<egui::Pos2> {
+    use egui::pos2;
+    vec![
+        pos2(top.min.x, top.min.y),
+        pos2(top.max.x, top.min.y),
+        pos2(top.max.x, top.max.y),
+        pos2(bottom.max.x, top.max.y),
+        pos2(bottom.max.x, bottom.max.y),
+        pos2(bottom.min.x, bottom.max.y),
+        pos2(bottom.min.x, top.max.y),
+        pos2(top.min.x, top.max.y),
+    ]
 }
 
 /// Une touche à cheval sur deux rangées (RETURN, en L) ou dédoublée de
@@ -400,22 +425,47 @@ impl KeyboardPanel {
                     rects.push((screen_rect, key.position));
                 }
 
+                let stroke_for = |pressed: bool| {
+                    egui::Stroke::new(
+                        2.0_f32,
+                        if pressed {
+                            egui::Color32::YELLOW
+                        } else {
+                            egui::Color32::from_white_alpha(120)
+                        },
+                    )
+                };
+
+                // RETURN : un seul contour en L plutôt que deux rectangles
+                // disjoints, qui la font paraître coupée en deux même une
+                // fois éclairés ensemble (voir `l_shape_outline`). SHIFT a
+                // aussi deux rectangles pour une seule position, mais ce
+                // sont deux vraies touches séparées aux deux bouts du
+                // clavier — pour elle, deux contours distincts restent
+                // corrects.
+                let mut return_rects = Vec::with_capacity(2);
                 for (screen_rect, position) in rects {
+                    if position == RETURN {
+                        return_rects.push(screen_rect);
+                        continue;
+                    }
                     let (pressed, hovered) = lit_by_position[&position];
                     if pressed || hovered {
                         ui.painter().rect_stroke(
                             screen_rect,
                             4.0,
-                            egui::Stroke::new(
-                                2.0_f32,
-                                if pressed {
-                                    egui::Color32::YELLOW
-                                } else {
-                                    egui::Color32::from_white_alpha(120)
-                                },
-                            ),
+                            stroke_for(pressed),
                             egui::StrokeKind::Inside,
                         );
+                    }
+                }
+                if let [top, bottom] = return_rects[..] {
+                    let (pressed, hovered) = lit_by_position[&RETURN];
+                    if pressed || hovered {
+                        ui.painter().add(egui::Shape::closed_line(
+                            l_shape_outline(top, bottom),
+                            stroke_for(pressed),
+                        ));
                     }
                 }
             });
@@ -463,6 +513,32 @@ impl KeyboardPanel {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    /// Le contour en L doit suivre exactement RETURN, insets asymétriques
+    /// inclus (28px à gauche, 5px à droite dans l'artwork réel) — pas une
+    /// approximation qui supposerait un L symétrique.
+    #[test]
+    fn l_shape_outline_follows_returns_actual_asymmetric_insets() {
+        let top = egui::Rect::from_min_max(egui::pos2(1342.0, 348.0), egui::pos2(1474.0, 439.5));
+        let bottom =
+            egui::Rect::from_min_max(egui::pos2(1370.0, 439.5), egui::pos2(1469.0, 530.0));
+
+        let outline = l_shape_outline(top, bottom);
+
+        assert_eq!(
+            outline,
+            vec![
+                egui::pos2(1342.0, 348.0),
+                egui::pos2(1474.0, 348.0),
+                egui::pos2(1474.0, 439.5),
+                egui::pos2(1469.0, 439.5),
+                egui::pos2(1469.0, 530.0),
+                egui::pos2(1370.0, 530.0),
+                egui::pos2(1370.0, 439.5),
+                egui::pos2(1342.0, 439.5),
+            ]
+        );
+    }
 
     /// Filet de sécurité contre une coquille de transcription dans le
     /// tableau `KEYS` (76 rectangles saisis à la main depuis les profils de
