@@ -1,12 +1,12 @@
 # Plan V3 — ByteBox, on peaufine les détails
 
-Sept points connus, documentés, et VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
-V1 : aucun ne nuit au fonctionnement aujourd'hui (tous les logiciels du
-premier batch tournent), ce sont des approximations acceptées dont on connaît
-la limite. À reprendre une fois la V2 (interface, voir `Plan V2.md`)
-terminée. Rien n'est codé ici — c'est une liste de référence, pas un jalonnage
-figé : chaque point est indépendant des autres et peut être traité dans
-n'importe quel ordre, ou laissé de côté indéfiniment si rien ne le réclame.
+Sept points connus et documentés, VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
+V1 (un désormais résolu, voir le point 5) : aucun ne nuisait au fonctionnement
+(tous les logiciels du premier batch tournaient déjà), ce sont des
+approximations acceptées dont on connaît la limite. Rien n'est codé ici pour
+les six qui restent — c'est une liste de référence, pas un jalonnage figé :
+chaque point est indépendant des autres et peut être traité dans n'importe
+quel ordre, ou laissé de côté indéfiniment si rien ne le réclame.
 
 ## 1) FDC — écriture par secteur au lieu de l'image entière
 
@@ -56,16 +56,22 @@ Per-ligne est déjà bien plus fidèle que per-trame (c'est ce qui a réglé
 Cauldron), per-caractère le serait davantage. Aucun symptôme connu ne le
 réclame aujourd'hui.
 
-## 5) Vidéo — la vidéo doit lire les 64 premiers Ko, pas la vue bankée du Z80
+## 5) RÉSOLU — Vidéo — la vidéo doit lire les 64 premiers Ko, pas la vue bankée du Z80
 
-`video.rs` passe par `Memory::read_ram_byte`, qui suit la commutation de
+`video.rs` passait par `Memory::read_ram_byte`, qui suit la commutation de
 banques du Z80. Sur un vrai 6128, le circuit vidéo va toujours chercher
 l'image dans les 64 premiers Ko, quelle que soit la configuration &7Fxx : un
 logiciel qui bascule en &C2 pour se faire un tampon de 64 Ko continue
 d'afficher l'écran resté en banque 3.
 
-Correctif essayé puis retiré faute de logiciel pour le démontrer (Discology
-n'y est pas sensible) — à reprendre avec un cas de test réel.
+Un premier essai avait été retiré faute de logiciel pour le démontrer
+(Discology n'y est pas sensible) — traité sans attendre un cas de test réel,
+jugé suffisamment important pour la fidélité de l'émulation : nouvelle
+méthode `Memory::read_video_ram_byte` (toujours banques 0-3, indépendante de
+`ram_config`/`extended_page1_bank`), utilisée par `video.rs` à la place de
+`read_ram_byte`, qui garde son comportement banké pour son autre usage (le
+débogueur, commande `ReadMem`). Vérifié : Discology et BMX Simulator (les
+deux tests d'intégration les plus sensibles à la VRAM) toujours au vert.
 
 ## 6) Clavier — "@" inatteignable, et c'est normal
 
