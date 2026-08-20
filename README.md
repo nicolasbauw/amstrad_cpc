@@ -1,5 +1,59 @@
 # ByteBox - an Amstrad CPC 6128 Emulator
 
+## Installation
+
+None of these packages bundle the CPC's system ROMs (legal status
+unclear — see "Missing ROMs" below); the emulator still opens fine
+without them and walks you through installing them on first launch.
+
+**Arch Linux (AUR):**
+
+```sh
+yay -S bytebox
+# or, to track the latest commit instead of a tagged release:
+yay -S bytebox-git
+```
+
+(No `yay`? Any AUR helper works the same way, or build manually — see
+`doc/create-pkgbuild-aur.md`.)
+
+**macOS (Homebrew):**
+
+```sh
+brew tap nicolasbauw/bytebox
+brew install bytebox
+```
+
+This builds from source (`rust`, pulled in automatically, is the only
+non-trivial dependency) and also installs `ByteBox.app`; see the
+"Caveats" note `brew` prints at the end for the one extra command to add
+it to `/Applications`.
+
+**Linux (AppImage), any distribution:**
+
+Download the latest `bytebox-*-x86_64.AppImage` from the
+[Releases page](https://github.com/nicolasbauw/amstrad_cpc/releases), then:
+
+```sh
+chmod +x bytebox-*-x86_64.AppImage
+./bytebox-*-x86_64.AppImage
+```
+
+**Windows:**
+
+Download the latest `bytebox-*-x86_64.msi` from the
+[Releases page](https://github.com/nicolasbauw/amstrad_cpc/releases) and
+run it.
+
+**Build from source (any platform):**
+
+```sh
+git clone https://github.com/nicolasbauw/amstrad_cpc.git
+cd amstrad_cpc
+cargo build --release
+./target/release/bytebox
+```
+
 ## Command-line options
 
 - `--diag` : additional diagnostics ROM (0F slot)
