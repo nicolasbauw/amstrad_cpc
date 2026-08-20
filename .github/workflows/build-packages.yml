@@ -147,10 +147,13 @@ jobs:
       # relatifs à la racine et échouait ("cannot find wix\License.rtf").
       # -o ../target/wix/ compense le changement de répertoire courant : le
       # dossier cible reste target/wix/ à la racine, comme le lisent les
-      # étapes suivantes, pas un target/ local à bytebox/.
+      # étapes suivantes, pas un target/ local à bytebox/. -p bytebox reste
+      # nécessaire même depuis ce dossier : cargo-wix détecte le workspace
+      # en remontant jusqu'à sa racine quel que soit le répertoire courant,
+      # et réclame un nom de paquet explicite dès qu'il en trouve un.
       - name: Package the MSI
         working-directory: bytebox
-        run: cargo wix --no-build --profile dist --nocapture -o ../target/wix/
+        run: cargo wix -p bytebox --no-build --profile dist --nocapture -o ../target/wix/
 
       - name: Rename the installer
         shell: pwsh
