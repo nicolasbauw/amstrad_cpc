@@ -6,15 +6,17 @@ None of these packages bundle the CPC's system ROMs (legal status
 unclear — see "Missing ROMs" below); the emulator still opens fine
 without them and walks you through installing them on first launch.
 
-**Arch Linux (AUR):**
+**Arch Linux (AUR) — coming soon:** the AUR is currently not accepting new
+maintainer accounts, following recent attacks — these packages aren't
+published there yet.
 
 ```sh
-yay -S bytebox
+paru -S bytebox
 # or, to track the latest commit instead of a tagged release:
-yay -S bytebox-git
+paru -S bytebox-git
 ```
 
-(No `yay`? Any AUR helper works the same way, or build manually — see
+(No `paru`? Any AUR helper works the same way, or build manually — see
 `doc/create-pkgbuild-aur.md`.)
 
 **macOS (Homebrew):**
