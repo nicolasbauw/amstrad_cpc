@@ -89,6 +89,8 @@ just a darkened pixel). The beam reconstruction is computed in source-pixel
 space, so it keeps the same proportions at every zoom level; the phosphor
 mask is sized in real output pixels (a property of the simulated tube, not
 of the source image), so it stays visible at `x1` too, not just from `x2` up.
+Scanlines, on the other hand, may be hard to perceive at `x1`: each one only
+spans a couple of output pixels there. `x2` and up make them much clearer.
 
 Scanlines follow the *real* CPC scanline period, not the frame buffer's:
 `video::render` draws each CPC scanline twice (600 buffer rows = 300 real
@@ -113,9 +115,9 @@ scanline beam width, beam bloom, brightness boost, horizontal blur — is a
 slider in the "CRT Shader" tab of the configuration panel (`F6`), with
 "Reset to defaults" and "Save to config.toml" buttons. It's a separate tab
 from the rest of the panel (media, hardware, display, audio) because eight
-sliders together no longer fit an `x1` window. The shipped defaults are tuned
-for a high-density (4K) display; lower-DPI screens will likely want smaller
-values.
+sliders together no longer fit an `x1` window. The shipped defaults look
+good on ordinary displays too, not just high-density ones — adjust to
+taste from there.
 
 Saving writes a `[crt]` section holding every slider's current value, and
 only that section — the rest of your `config.toml`, comments included, is
