@@ -84,3 +84,33 @@ rouvre comme un bug.
 
 `TAPE_AMPLITUDE` (`sound.rs`) est figée à 0.10. À exposer dans `config.toml`,
 ou dans la fenêtre de configuration F6 prévue par `Plan V2.md` (jalon M3).
+
+## Piste ouverte — lecture des snapshots .SNA (interfaçage RASM)
+
+Pas une approximation à corriger comme les sept points ci-dessus : une
+capacité qui n'existe pas encore, à étudier.
+
+`core/src/snapshot.rs` sait déjà ÉCRIRE un `.SNA` (utile pour comparer
+notre état exact avec un autre émulateur), mais explicitement pas le LIRE —
+décision prise à l'époque pour éviter "un format à moitié relu", vu son
+absence d'utilité immédiate. Elle en gagnerait une : RASM (l'assembleur Z80/
+CPC de Roudoudou, largement utilisé dans la scène) sait produire directement
+un `.SNA` prêt à l'emploi à partir du code assemblé, RAM et PC d'entrée déjà
+en place — un cycle "assemble avec RASM, charge direct dans ByteBox" sans
+repasser par une image disque/cassette, précieux pour du développement Z80
+rapide.
+
+À étudier avant de coder quoi que ce soit :
+- quelles versions du format (v1/v2/v3 — tailles d'en-tête et de RAM
+  différentes, champs Gate Array/CRTC/PSG plus ou moins complets) RASM
+  produit-il réellement, et lesquelles vaut-il la peine de couvrir en
+  lecture (pas forcément les trois) ;
+- où l'exposer côté ByteBox : un `--snapshot=<fichier.sna>` en ligne de
+  commande (même esprit que `--disk`/`--tape`, `main.rs`), une commande
+  console dédiée, ou un onglet du panneau F6 — à trancher selon l'usage
+  réel visé (dev Z80 au lancement vs charger un snapshot en cours de
+  session) ;
+- restaurer un état COMPLET (registres, RAM, configuration Gate Array/CRTC/
+  PPI/PSG/FDC) suppose de repasser la machine par un chemin d'initialisation
+  différent du power-on habituel — à concevoir avec soin plutôt qu'en
+  pièces détachées au fil des champs du format.
