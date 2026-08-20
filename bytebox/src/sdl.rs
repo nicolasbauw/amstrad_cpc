@@ -279,12 +279,21 @@ pub fn run(
     let console_window_id = console_win.id();
     let mut console_window = ConsoleWindow::new(console_win)?;
 
-    // Identifiant de build (build.rs) : le hash court du commit pour un
-    // checkout git (dépôt cloné, `cargo build` local ou
-    // packaging/PKGBUILD-git), sinon (tarball d'une release taguée,
-    // packaging/PKGBUILD, où `git rev-parse` échoue faute de .git) le
-    // numéro de version de Cargo.toml.
-    let build_id = option_env!("BYTEBOX_GIT_HASH").unwrap_or(env!("CARGO_PKG_VERSION"));
+    // Identifiant de build (build.rs) : le numéro de version pour un build
+    // "officiel" (IS_PACKAGED_BUILD — même signal que le cadre rouge de
+    // l'icône, voir plus haut), sinon le hash court du commit s'il est
+    // disponible (dépôt cloné, `cargo build` local ou
+    // packaging/PKGBUILD-git), sinon encore la version en repli. Un simple
+    // `.git` présent ne suffit PAS à lui seul à afficher le hash : nos
+    // propres CI de packaging (AppImage, MSI) clonent via `actions/checkout`
+    // (donc avec `.git`) tout en étant des builds officiels, qui doivent
+    // afficher la version comme le ferait packaging/PKGBUILD depuis un
+    // tarball sans `.git`.
+    let build_id = if IS_PACKAGED_BUILD {
+        env!("CARGO_PKG_VERSION")
+    } else {
+        option_env!("BYTEBOX_GIT_HASH").unwrap_or(env!("CARGO_PKG_VERSION"))
+    };
     let window_title = if machine.diagnostic_mode {
         format!("ByteBox - {build_id} - Diag ROM")
     } else {

@@ -9,6 +9,15 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/index");
+    // sdl.rs lit aussi BYTEBOX_PACKAGED_BUILD via option_env! (icône avec ou
+    // sans cadre "dev build") — sans cette ligne, Cargo ne sait pas que la
+    // fraîcheur de sdl.rs dépend de cette variable externe (elle n'apparaît
+    // dans aucun fichier suivi ci-dessus) et peut réutiliser un objet compilé
+    // lors d'un run précédent SANS elle, restauré par un cache externe
+    // (Swatinem/rust-cache en CI) — observé en pratique : une AppImage
+    // construite avec BYTEBOX_PACKAGED_BUILD=1 gardait quand même le cadre
+    // rouge de dev.
+    println!("cargo:rerun-if-env-changed=BYTEBOX_PACKAGED_BUILD");
 
     if let Ok(output) = Command::new("git").args(["rev-parse", "HEAD"]).output()
         && output.status.success()
