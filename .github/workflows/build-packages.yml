@@ -138,8 +138,19 @@ jobs:
       # feature static-sdl2 et BYTEBOX_PACKAGED_BUILD — cargo-wix ne doit pas
       # relancer son propre `cargo build` par défaut (profil Release, sans
       # ces réglages), qui produirait un binaire différent de celui empaqueté.
+      #
+      # working-directory: bytebox — bytebox/wix/main.wxs référence
+      # "wix\License.rtf" et "..\assets\bytebox_icon.ico", des chemins
+      # relatifs qui supposent bytebox/ comme répertoire courant de WiX (là
+      # où `cargo wix init` les a écrits). Lancé depuis la racine du dépôt
+      # (`-p bytebox` seul, sans changer de dossier), WiX les cherchait
+      # relatifs à la racine et échouait ("cannot find wix\License.rtf").
+      # -o ../target/wix/ compense le changement de répertoire courant : le
+      # dossier cible reste target/wix/ à la racine, comme le lisent les
+      # étapes suivantes, pas un target/ local à bytebox/.
       - name: Package the MSI
-        run: cargo wix -p bytebox --no-build --profile dist --nocapture -o target/wix/
+        working-directory: bytebox
+        run: cargo wix --no-build --profile dist --nocapture -o ../target/wix/
 
       - name: Rename the installer
         shell: pwsh
