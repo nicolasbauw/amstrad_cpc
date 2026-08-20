@@ -42,9 +42,18 @@ jobs:
             libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev \
             libxss-dev libxkbcommon-dev libwayland-dev libdbus-1-dev libudev-dev
 
+      # CMAKE_POLICY_VERSION_MINIMUM : SDL2 (compilée depuis les sources par
+      # la feature "bundled") déclare un `cmake_minimum_required` trop ancien
+      # pour CMake 4, qui a retiré tout support des projets sans version
+      # plancher >= 3.5 — sans ça, la configuration du build SDL2 échoue tout
+      # court sur les runners récents. Variable d'environnement dédiée que
+      # CMake lui-même reconnaît (ajoutée par Kitware justement pour ce genre
+      # de cas), pas un `-D` à passer à la main : le crate `cmake` (via
+      # sdl2-sys) invoque `cmake` en sous-processus, qui hérite de l'env.
       - name: Build (SDL2 statique, build "officiel")
         env:
           BYTEBOX_PACKAGED_BUILD: "1"
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --profile dist --locked -p bytebox --features static-sdl2
 
       # linuxdeploy assemble l'AppDir (résolution des bibliothèques
@@ -53,6 +62,11 @@ jobs:
       # par défaut pour exécuter une AppImage (linuxdeploy et appimagetool
       # sont eux-mêmes distribués comme des AppImages) — cette variable leur
       # fait extraire puis lancer leur contenu directement à la place.
+      #
+      # --icon-file copie le fichier donné SOUS SON PROPRE NOM dans l'AppDir
+      # (pas de renommage) : packaging/bytebox.desktop porte "Icon=bytebox",
+      # donc le fichier doit s'appeler bytebox.png, pas bytebox_icon.png —
+      # d'où la copie préalable sous ce nom.
       - name: Assemble the AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
@@ -60,10 +74,11 @@ jobs:
         run: |
           wget -q -O linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy
+          cp assets/bytebox_icon.png bytebox.png
           ./linuxdeploy --appdir AppDir \
             --executable target/dist/bytebox \
             --desktop-file packaging/bytebox.desktop \
-            --icon-file assets/bytebox_icon.png \
+            --icon-file bytebox.png \
             --output appimage
           mv ByteBox*.AppImage "bytebox-${{ github.ref_name }}-x86_64.AppImage"
 
@@ -110,9 +125,13 @@ jobs:
           if (-not $wixBin) { throw "WiX Toolset bin folder not found" }
           echo "$($wixBin.FullName)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      # Voir le commentaire équivalent du job appimage ci-dessus : même
+      # incompatibilité CMake 4 / cmake_minimum_required trop ancien de SDL2,
+      # côté Windows aussi.
       - name: Build (SDL2 statique, build "officiel")
         env:
           BYTEBOX_PACKAGED_BUILD: "1"
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --profile dist --locked -p bytebox --features static-sdl2
 
       # --no-build : on a déjà compilé nous-mêmes juste au-dessus, avec la
