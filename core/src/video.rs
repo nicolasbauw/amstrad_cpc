@@ -133,7 +133,7 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
                             machine
                                 .bus
                                 .memory
-                                .read_ram_byte(addr_base.wrapping_add(byte_off))
+                                .read_video_ram_byte(addr_base.wrapping_add(byte_off))
                         });
                     let x_byte = x_base + byte_off as i32 * 8;
 
@@ -186,8 +186,8 @@ pub fn capture_scanline_vram(
     for x_char in 0..r1 as u16 {
         let ma = line_ma.wrapping_add(x_char) & 0x3FFF;
         let addr_base = ((ma & 0x3000) << 2) | ((raster & 0x07) << 11) | ((ma & 0x03FF) << 1);
-        out.push(memory.read_ram_byte(addr_base));
-        out.push(memory.read_ram_byte(addr_base.wrapping_add(1)));
+        out.push(memory.read_video_ram_byte(addr_base));
+        out.push(memory.read_video_ram_byte(addr_base.wrapping_add(1)));
     }
 }
 

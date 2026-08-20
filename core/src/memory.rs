@@ -194,10 +194,37 @@ impl Memory {
         };
     }
 
-    /// Lecture directe de la RAM (utilisée par le moteur vidéo pour ignorer le banking ROM)
+    /// Lecture directe de la RAM, en ignorant seulement le banking ROM (la
+    /// RAM sous une ROM active, invisible pour le Z80 tant qu'elle reste en
+    /// place) — le paging RAM (`ram_config`/`extended_page1_bank`), lui,
+    /// s'applique toujours. Utilisée par le débogueur (`ReadMem`) : il doit
+    /// montrer ce que le Z80 verrait en RAM à cette adresse si la ROM était
+    /// désactivée, donc dans la configuration de banques actuellement en
+    /// vigueur pour lui — pas autre chose. Pour le moteur vidéo, qui ne doit
+    /// PAS suivre ce paging, voir [`Memory::read_video_ram_byte`].
     pub fn read_ram_byte(&self, address: u16) -> u8 {
         let physical_addr = self.get_ram_physical_address(address);
         self.ram[physical_addr]
+    }
+
+    /// Lecture RAM pour le moteur vidéo (`video.rs`) : toujours dans les 64
+    /// premiers Ko physiques (banques 0-3), quelle que soit la configuration
+    /// de paging RAM du Z80 (`ram_config`/`extended_page1_bank`, voir
+    /// `write_mmu_register`).
+    ///
+    /// Sur un vrai 6128, le circuit vidéo (Gate Array + CRTC) a son propre
+    /// chemin direct vers la RAM physique, indépendant du registre MMU qui
+    /// ne reconfigure QUE ce que voit le Z80. Un logiciel qui bascule en
+    /// &C2 (page 1 = banque 4, par exemple) pour se faire un tampon de
+    /// travail continue donc d'afficher l'écran resté en banque 3 — pas le
+    /// contenu de la banque fraîchement paginée. `get_ram_physical_address`,
+    /// lui, suit `ram_config` : inadapté ici, d'où cette méthode séparée
+    /// plutôt qu'un paramètre optionnel sur elle.
+    pub fn read_video_ram_byte(&self, address: u16) -> u8 {
+        // Banques 0-3 = adresses 0x0000-0xFFFF, contiguës et dans cet ordre :
+        // une simple identité, pas besoin de repasser par le découpage
+        // page/offset de `get_ram_physical_address`.
+        self.ram[address as usize]
     }
 
     /// Lecture d'un octet en fonction du banking actif (RAM + ROM).
@@ -337,5 +364,32 @@ mod tests {
     fn extra_ram_banks_is_capped_to_the_addressable_maximum() {
         let mem = Memory::new(MAX_EXTRA_RAM_GROUPS + 100);
         assert_eq!(mem.extra_ram_banks, MAX_EXTRA_RAM_GROUPS);
+    }
+
+    /// Plan V3.md, point 5 : le moteur vidéo doit toujours lire les 64
+    /// premiers Ko physiques, jamais la vue paginée du Z80 — contrairement à
+    /// `read_ram_byte`, que `write_mmu_register` (via `ram_config` ou une
+    /// banque étendue installée) peut détourner ailleurs.
+    #[test]
+    fn video_ram_reads_ignore_all_ram_paging() {
+        let mut mem = Memory::new(1); // 1 groupe installe, pour tester aussi ce cas
+        mem.write_byte(0x4000, 0x11); // banque physique 1 (page 1, config standard 0)
+
+        // Bascule la page 1 sur la config standard 4 = [0,4,2,3] : le Z80 ne
+        // verrait plus la banque 1 à cette adresse, mais la vidéo doit
+        // continuer de la lire quand même.
+        mem.write_mmu_register(0x7F00, 0xC4);
+        assert_ne!(
+            mem.get_ram_physical_address(0x4000),
+            16384,
+            "pre-requis du test : la page 1 doit reellement avoir change de banque physique"
+        );
+        assert_eq!(mem.read_video_ram_byte(0x4000), 0x11);
+
+        // Meme chose avec une banque etendue installee sur la page 1 : la
+        // vidéo doit encore lire la banque physique 1, pas l'extension.
+        mem.write_mmu_register(0x7E00, 0xC4); // section 0x7E, banque 0, bloc 0 : installe
+        assert!(mem.get_ram_physical_address(0x4000) >= 8 * 16384);
+        assert_eq!(mem.read_video_ram_byte(0x4000), 0x11);
     }
 }
