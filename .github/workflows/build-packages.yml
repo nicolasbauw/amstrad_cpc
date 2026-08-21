@@ -1,28 +1,26 @@
 name: Build packages
 
-# Déclenché sur un tag de release (convention du projet : "2.0.0", pas de
-# préfixe "v" — voir packaging/PKGBUILD) et manuellement via
-# workflow_dispatch, pour pouvoir tester le workflow lui-même sans avoir à
-# pousser un tag à chaque itération. Un déclenchement manuel ne publie
-# RIEN par défaut (voir le "if" de chaque étape "Attach to the GitHub
-# release" plus bas) : un run manuel n'a pas de tag associé, donc pas de
-# release à mettre à jour, sauf si `publish` est explicitement coché — ce
-# qui demande alors de préciser QUEL tag/release cibler, `github.ref_name`
-# valant le nom de la branche dans ce cas, pas un tag.
+# Uniquement manuel (workflow_dispatch) — VOLONTAIREMENT pas de
+# déclenchement automatique sur push de tag : packaging/PKGBUILD et
+# packaging/homebrew/bytebox.rb épinglent un sha256 du tarball du tag, que
+# seul un humain peut calculer une fois le tag effectivement poussé (voir
+# la conversation qui a introduit ce commentaire) — un run automatique au
+# moment même du push de tag construirait donc systématiquement avant que
+# ce sha256 ne soit à jour, pour rien. `tag` précise quel tag/release
+# cibler (obligatoire même pour un build sans publication : c'est aussi
+# lui qui détermine le commit réellement construit) ; `publish` décide en
+# plus si les artefacts doivent être attachés à la release de ce tag.
 on:
-  push:
-    tags:
-      - "*.*.*"
   workflow_dispatch:
     inputs:
-      publish:
-        description: "Attach the build artifacts to an existing GitHub release"
-        type: boolean
-        default: false
       tag:
-        description: "Tag/release to publish to (only used if 'publish' is checked)"
+        description: "Tag to build from"
         type: string
         default: ""
+      publish:
+        description: "Attach the build artifacts to this tag's GitHub release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -38,15 +36,13 @@ jobs:
   appimage:
     runs-on: ubuntu-latest
     steps:
+      # ref explicite : sans elle, un déclenchement manuel checkout la
+      # branche choisie dans l'interface "Run workflow" (par défaut la
+      # branche par défaut, à SON commit le plus récent), pas le tag donné
+      # en entrée — deux choses potentiellement différentes.
       - uses: actions/checkout@v4
-
-      # Sur un push de tag, github.ref_name EST le tag ("2.0.0"). Sur un
-      # déclenchement manuel, c'est le nom de la branche — inutilisable pour
-      # nommer l'artefact ou cibler une release, d'où l'input `tag` dans ce
-      # cas (voir le commentaire de `on:` en tête de fichier).
-      - name: Determine version
-        id: version
-        run: echo "value=${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -102,7 +98,7 @@ jobs:
             --desktop-file packaging/bytebox.desktop \
             --icon-file bytebox.png \
             --output appimage
-          mv ByteBox*.AppImage "bytebox-${{ steps.version.outputs.value }}-x86_64.AppImage"
+          mv ByteBox*.AppImage "bytebox-${{ inputs.tag }}-x86_64.AppImage"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -110,10 +106,10 @@ jobs:
           path: bytebox-*.AppImage
 
       - name: Attach to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        if: inputs.publish
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.value }}
+          tag_name: ${{ inputs.tag }}
           files: bytebox-*.AppImage
 
   # MSI Windows : compilé nativement sur un runner Windows (toolchain MSVC
@@ -129,15 +125,10 @@ jobs:
   windows-msi:
     runs-on: windows-latest
     steps:
+      # Voir le commentaire équivalent du job appimage ci-dessus.
       - uses: actions/checkout@v4
-
-      # Voir le commentaire équivalent du job appimage ci-dessus. shell:
-      # bash explicite : le shell par défaut sur windows-latest est pwsh,
-      # qui ne comprend pas cette syntaxe de redirection.
-      - name: Determine version
-        id: version
-        shell: bash
-        run: echo "value=${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -190,7 +181,7 @@ jobs:
         shell: pwsh
         run: |
           $msi = Get-ChildItem target/wix/*.msi | Select-Object -First 1
-          Rename-Item $msi.FullName "bytebox-${{ steps.version.outputs.value }}-x86_64.msi"
+          Rename-Item $msi.FullName "bytebox-${{ inputs.tag }}-x86_64.msi"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -198,10 +189,10 @@ jobs:
           path: target/wix/bytebox-*.msi
 
       - name: Attach to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        if: inputs.publish
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.value }}
+          tag_name: ${{ inputs.tag }}
           files: target/wix/bytebox-*.msi
 
   # Homebrew : construit et teste la Formula (packaging/homebrew/bytebox.rb)
@@ -215,12 +206,10 @@ jobs:
   macos-homebrew:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-
       # Voir le commentaire équivalent du job appimage ci-dessus.
-      - name: Determine version
-        id: version
-        run: echo "value=${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       # Homebrew refuse désormais d'installer une formule hors tap
       # ("Homebrew requires formulae to be in a tap") : un tap local (un
@@ -238,7 +227,7 @@ jobs:
           mkdir -p dist
           cp "$(brew --prefix bytebox)/bin/bytebox" dist/
           cp -R "$(brew --prefix bytebox)/ByteBox.app" dist/
-          tar -C dist -czf "bytebox-${{ steps.version.outputs.value }}-macos-arm64.tar.gz" bytebox ByteBox.app
+          tar -C dist -czf "bytebox-${{ inputs.tag }}-macos-arm64.tar.gz" bytebox ByteBox.app
 
       - uses: actions/upload-artifact@v4
         with:
@@ -246,8 +235,8 @@ jobs:
           path: bytebox-*.tar.gz
 
       - name: Attach to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        if: inputs.publish
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.value }}
+          tag_name: ${{ inputs.tag }}
           files: bytebox-*.tar.gz
