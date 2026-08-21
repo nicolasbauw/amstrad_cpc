@@ -102,16 +102,23 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
 
             // Octets tels que capturés au moment où le CRTC a réellement
             // balayé cette scanline pendant l'émulation (voir
-            // `Machine::capture_scanline_vram`), plutôt que relus maintenant
-            // dans la VRAM courante. Un vrai tube cathodique peint chaque
-            // ligne avec le contenu de la VRAM tel qu'il était exactement à
-            // cet instant : une routine de tracé de sprite par XOR (le CPC
-            // ne masque pas les interruptions pendant ce genre de boucle)
-            // peut être interrompue à mi-chemin par l'interruption vidéo,
-            // et sans cette capture progressive, un instantané global pris
-            // en fin de trame la surprendrait à moitié terminée — un
-            // sprite à moitié effacé pendant une seule trame, perçu comme
-            // un clignotement très rapide (voir TODO.txt).
+            // `Machine::capture_beam_progress` et `capture_scanline_chars`),
+            // plutôt que relus maintenant dans la VRAM courante. Un vrai
+            // tube cathodique peint chaque ligne avec le contenu de la VRAM
+            // tel qu'il était exactement à cet instant : une routine de
+            // tracé de sprite par XOR (le CPC ne masque pas les
+            // interruptions pendant ce genre de boucle) peut être
+            // interrompue à mi-chemin par l'interruption vidéo, et sans
+            // cette capture progressive, un instantané global pris en fin de
+            // trame la surprendrait à moitié terminée — un sprite à moitié
+            // effacé pendant une seule trame, perçu comme un clignotement
+            // très rapide (voir doc/sprite-flicker.md).
+            //
+            // La capture est faite position de caractère par position de
+            // caractère : le repli ci-dessous (lecture directe de la VRAM)
+            // couvre donc aussi la fin d'une ligne que le faisceau n'avait
+            // pas encore atteinte, pas seulement les lignes jamais
+            // capturées.
             let captured = machine
                 .scanline_vram
                 .get(scanline as usize)
@@ -156,25 +163,43 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
 }
 
 /// Capture les octets de VRAM affichés sur la scanline courante du CRTC
-/// (`crtc.char_row`/`crtc.raster`, déjà avancés par `step_scanline`), pour
-/// que `render` puisse ensuite peindre cette ligne avec le contenu exact
-/// qu'un tube cathodique y aurait vu passer — pas l'état (potentiellement
-/// plus tardif) de la VRAM au moment où toute la trame est dessinée d'un
-/// coup. Appelée une fois par scanline depuis `Machine::step`.
+/// (`crtc.char_row`/`crtc.raster`), pour que `render` puisse ensuite peindre
+/// cette ligne avec le contenu exact qu'un tube cathodique y aurait vu
+/// passer — pas l'état (potentiellement plus tardif) de la VRAM au moment où
+/// toute la trame est dessinée d'un coup.
 ///
-/// Laisse `out` vide (plutôt que d'y mettre des données obsolètes) quand la
+/// Capture PROGRESSIVE : `upto_char` dit jusqu'où le faisceau est arrivé
+/// dans la ligne, et seules les positions de caractère nouvellement
+/// franchies sont ajoutées à `out` (deux octets chacune, comme le CRTC les
+/// lit). Appelée plusieurs fois par scanline depuis `Machine::step`, au fil
+/// de l'avancée du faisceau, plutôt qu'une seule fois en début de ligne :
+/// une écriture survenant en milieu de ligne se voit alors sur sa moitié
+/// droite mais pas sur la gauche, déjà balayée — ce que la capture en un
+/// bloc ne pouvait pas reproduire (`Plan V3.md`, point 4).
+///
+/// `out` reste vide (plutôt que de recevoir des données obsolètes) quand la
 /// ligne courante n'appartient pas à la zone affichée : `render` retombe
 /// alors sur une lecture directe de la VRAM pour cette ligne, ce qui n'a pas
-/// d'incidence puisque seule la bordure y est dessinée.
-pub fn capture_scanline_vram(
+/// d'incidence puisque seule la bordure y est dessinée. Même repli, position
+/// par position, pour la fin d'une ligne que le faisceau n'a pas encore
+/// atteinte.
+pub fn capture_scanline_chars(
     crtc: &crate::crtc::Crtc,
     memory: &crate::memory::Memory,
     out: &mut Vec<u8>,
+    upto_char: u32,
 ) {
-    out.clear();
     let r1 = crtc.registers[1] as u32;
     let r6 = crtc.registers[6] as u32;
     if r1 == 0 || (crtc.char_row as u32) >= r6 {
+        return;
+    }
+    // Le CRTC ne lit la VRAM que pendant la fenêtre d'affichage, les R1
+    // premiers caractères de la ligne : au-delà, le faisceau est dans la
+    // bordure et il n'y a plus rien à capturer.
+    let target = upto_char.min(r1);
+    let already = (out.len() / 2) as u32;
+    if already >= target {
         return;
     }
 
@@ -182,9 +207,9 @@ pub fn capture_scanline_vram(
     let line_ma = start_addr.wrapping_add((crtc.char_row as u32 * r1) as u16) & 0x3FFF;
     let raster = crtc.raster as u16;
 
-    out.reserve(2 * r1 as usize);
-    for x_char in 0..r1 as u16 {
-        let ma = line_ma.wrapping_add(x_char) & 0x3FFF;
+    out.reserve(2 * (target - already) as usize);
+    for x_char in already..target {
+        let ma = line_ma.wrapping_add(x_char as u16) & 0x3FFF;
         let addr_base = ((ma & 0x3000) << 2) | ((raster & 0x07) << 11) | ((ma & 0x03FF) << 1);
         out.push(memory.read_video_ram_byte(addr_base));
         out.push(memory.read_video_ram_byte(addr_base.wrapping_add(1)));
@@ -321,5 +346,55 @@ mod tests {
             crtc.frame_scanlines() as i32,
         );
         assert_eq!(y_after - y_before, -8 * PIXELS_PER_SCANLINE);
+    }
+
+    /// Le cœur de la capture per-caractère (`Plan V3.md`, point 4) : une
+    /// écriture VRAM survenant alors que le faisceau est au milieu de la
+    /// ligne ne doit se voir QUE sur les positions pas encore balayées. La
+    /// capture d'une ligne d'un seul bloc, elle, donnait forcément la même
+    /// valeur partout — soit l'ancienne, soit la nouvelle.
+    #[test]
+    fn a_write_mid_line_only_shows_on_the_part_not_yet_scanned() {
+        let crtc = Crtc::new();
+        let mut memory = crate::memory::Memory::new(0);
+        let r1 = crtc.registers[1] as usize; // 40 caractères affichés
+        assert!(r1 > 20, "le test suppose une ligne d'au moins 20 caracteres");
+
+        // Toute la VRAM à 0xAA, puis le faisceau parcourt les 10 premiers
+        // caractères de la ligne.
+        memory.ram[..64 * 1024].fill(0xAA);
+        let mut captured = Vec::new();
+        capture_scanline_chars(&crtc, &memory, &mut captured, 10);
+        assert_eq!(captured.len(), 20, "10 caracteres = 20 octets");
+
+        // Le programme réécrit la VRAM pendant que le faisceau est là, puis
+        // le balayage se poursuit jusqu'au bout de la ligne.
+        memory.ram[..64 * 1024].fill(0x55);
+        capture_scanline_chars(&crtc, &memory, &mut captured, r1 as u32);
+        assert_eq!(captured.len(), r1 * 2, "toute la ligne doit etre capturee");
+
+        assert!(
+            captured[..20].iter().all(|&b| b == 0xAA),
+            "la moitie gauche, deja balayee, doit garder l'ancien contenu"
+        );
+        assert!(
+            captured[20..].iter().all(|&b| b == 0x55),
+            "la partie balayee apres l'ecriture doit montrer le nouveau contenu"
+        );
+    }
+
+    /// Le faisceau ne capture jamais au-delà de la fenêtre d'affichage (les
+    /// R1 premiers caractères) : le reste de la ligne est de la bordure, où
+    /// le CRTC ne lit pas la VRAM.
+    #[test]
+    fn capture_stops_at_the_end_of_the_display_window() {
+        let crtc = Crtc::new();
+        let memory = crate::memory::Memory::new(0);
+        let r1 = crtc.registers[1] as usize;
+
+        let mut captured = Vec::new();
+        // Bien au-delà de R1 : la ligne complète fait R0+1 = 64 caractères.
+        capture_scanline_chars(&crtc, &memory, &mut captured, 64);
+        assert_eq!(captured.len(), r1 * 2);
     }
 }

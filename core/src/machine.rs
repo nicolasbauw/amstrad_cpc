@@ -687,6 +687,29 @@ impl Machine {
         }
     }
 
+    /// Capture les positions de caractère que le faisceau a franchies dans la
+    /// scanline courante, `ticks_into_line` étant sa position depuis le début
+    /// de cette ligne (0..=256).
+    ///
+    /// Le découpage en caractères suit la géométrie réellement programmée
+    /// (`R0 + 1` positions par ligne) et non une valeur figée : une scanline
+    /// dure toujours 256 ticks dans notre modèle, mais un logiciel qui
+    /// reprogramme R0 — ce que font les effets de rupture — change le nombre
+    /// de caractères qui s'y logent, donc la durée de chacun.
+    fn capture_beam_progress(&mut self, ticks_into_line: u32) {
+        let line_chars = self.bus.crtc.line_chars().max(1);
+        let ticks_per_char = (256 / line_chars).max(1);
+        let upto_char = ticks_into_line / ticks_per_char;
+        if let Some(slot) = self.scanline_vram.get_mut(self.bus.crtc.scanline as usize) {
+            crate::video::capture_scanline_chars(
+                &self.bus.crtc,
+                &self.bus.memory,
+                slot,
+                upto_char,
+            );
+        }
+    }
+
     /// Exécute une instruction et synchronise les périphériques
     pub fn step(&mut self) -> u32 {
         let current_pc = self.cpu.reg.pc;
@@ -798,6 +821,15 @@ impl Machine {
 
         // Gestion HSYNC / Interruptions (période 256 ticks = 64µs)
         self.hsync_accumulator += elapsed_ticks;
+
+        // Le faisceau vient d'avancer à l'intérieur de la scanline courante :
+        // on capture les positions de caractère qu'il a franchies, AVANT de
+        // traiter un éventuel passage à la ligne suivante. C'est ce qui rend
+        // la capture per-caractère (voir `capture_beam_progress`) : une
+        // écriture VRAM faite entre deux appels ne touchera que les
+        // positions pas encore balayées.
+        self.capture_beam_progress(self.hsync_accumulator.min(256));
+
         while self.hsync_accumulator >= 256 {
             self.hsync_accumulator -= 256;
 
@@ -829,12 +861,13 @@ impl Machine {
                 *slot = self.bus.gate_array.state();
             }
 
-            // Capture des octets de VRAM affichés sur cette scanline, à
-            // l'instant même où le CRTC la balaie (voir la doc de
-            // `scanline_vram` et `video::capture_scanline_vram`).
+            // Nouvelle scanline : sa capture repart de zéro, puis on rattrape
+            // tout de suite la portion déjà écoulée (l'instruction qui vient
+            // de s'exécuter a pu déborder sur cette ligne).
             if let Some(slot) = self.scanline_vram.get_mut(self.bus.crtc.scanline as usize) {
-                crate::video::capture_scanline_vram(&self.bus.crtc, &self.bus.memory, slot);
+                slot.clear();
             }
+            self.capture_beam_progress(self.hsync_accumulator.min(256));
 
             // On force le bit 1 à 1 pour lire Joystick A par défaut
             self.bus.ppi.set_system_port_b(self.bus.crtc.vsync, true);

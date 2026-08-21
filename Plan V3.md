@@ -6,12 +6,12 @@
 > La lecture des `.SNA` ci-dessous a par exemple donné la 2.1.0.
 
 Sept points connus et documentés, VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
-V1 (un désormais résolu, voir le point 5) : aucun ne nuisait au fonctionnement
-(tous les logiciels du premier batch tournaient déjà), ce sont des
-approximations acceptées dont on connaît la limite. Rien n'est codé ici pour
-les six qui restent — c'est une liste de référence, pas un jalonnage figé :
-chaque point est indépendant des autres et peut être traité dans n'importe
-quel ordre, ou laissé de côté indéfiniment si rien ne le réclame.
+V1 (trois désormais résolus, voir les points 4, 5 et 7) : aucun ne nuisait au
+fonctionnement (tous les logiciels du premier batch tournaient déjà), ce sont
+des approximations acceptées dont on connaît la limite. C'est une liste de
+référence, pas un jalonnage figé : chaque point est indépendant des autres et
+peut être traité dans n'importe quel ordre, ou laissé de côté indéfiniment si
+rien ne le réclame.
 
 ## 1) FDC — écriture par secteur au lieu de l'image entière
 
@@ -50,16 +50,25 @@ des disquettes qui s'en servent.
 ATTENTION : le comportement actuel avait été retenu pour Teenage Mutant Hero
 Turtles — à retester si on y touche.
 
-## 4) Vidéo — capture de la VRAM par caractère plutôt que par ligne
+## 4) RÉSOLU — Vidéo — capture de la VRAM par caractère plutôt que par ligne
 
-Détails dans `doc/sprite-flicker.md`. Nous capturons les octets d'une ligne au
-moment où elle commence à être balayée ; le CRTC, lui, les lit au fil de la
-ligne (deux octets par position de caractère). Une écriture survenant en
-milieu de ligne n'est donc pas reflétée sur sa moitié droite.
+Détails dans `doc/sprite-flicker.md`. Nous capturions les octets d'une ligne
+au moment où elle commençait à être balayée ; le CRTC, lui, les lit au fil de
+la ligne (deux octets par position de caractère). Une écriture survenant en
+milieu de ligne n'était donc pas reflétée sur sa moitié droite.
 
-Per-ligne est déjà bien plus fidèle que per-trame (c'est ce qui a réglé
-Cauldron), per-caractère le serait davantage. Aucun symptôme connu ne le
-réclame aujourd'hui.
+La capture suit désormais le faisceau : `Machine::capture_beam_progress`
+convertit la position dans la scanline (`hsync_accumulator`) en position de
+caractère, et `video::capture_scanline_chars` n'ajoute que les positions
+nouvellement franchies. La conversion utilise la géométrie réellement
+programmée (`R0 + 1` caractères par ligne), pas une constante, pour rester
+juste quand un logiciel reprogramme R0 en cours de trame.
+
+Aucun symptôme ne le réclamait — les deux jeux témoins (Cauldron, BMX
+Simulator) étaient déjà à zéro pixel oscillant et le restent ; c'est de la
+fidélité de principe. Vérifié en plus par un test dédié : une écriture faite
+alors que le faisceau est au milieu de la ligne ne se voit que sur les
+positions pas encore balayées.
 
 ## 5) RÉSOLU — Vidéo — la vidéo doit lire les 64 premiers Ko, pas la vue bankée du Z80
 
@@ -85,10 +94,13 @@ n'existe pas dans la police de cette ROM AZERTY (`CHR$(64)` y dessine "à"),
 mais la touche émet bien le code 64. Noté ici seulement pour éviter qu'on le
 rouvre comme un bug.
 
-## 7) Son — amplitude du sifflement cassette non paramétrable
+## 7) RÉSOLU — Son — amplitude du sifflement cassette non paramétrable
 
-`TAPE_AMPLITUDE` (`sound.rs`) est figée à 0.10. À exposer dans `config.toml`,
-ou dans la fenêtre de configuration F6 prévue par `Plan V2.md` (jalon M3).
+`TAPE_AMPLITUDE` (`sound.rs`) était figée à 0.10. Réglée en passant pendant
+le jalon M3 de la V2, qui construisait justement le panneau F6 : la
+constante n'est plus que la valeur par défaut de `Sound::tape_amplitude`,
+modifiable à chaud par la commande console `tapevol <0-100>` comme par un
+curseur du panneau F6.
 
 ## Piste ouverte — lecture des snapshots .SNA (interfaçage RASM)
 

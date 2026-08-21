@@ -342,12 +342,38 @@ faisceau la balaie ; prendre un instantané unique pour toute la trame est
 l'approximation, pas le contraire. La capture ligne par ligne est donc le
 modèle juste, et il le restera quelle que soit la précision du CPU.
 
-Il reste d'ailleurs perfectible dans le même sens : nous capturons les
-octets d'une ligne au moment où elle *commence* à être balayée, alors que le
-CRTC les lit au fil de la ligne, deux octets par position de caractère. Une
-écriture survenant en milieu de ligne n'est donc pas reflétée sur sa moitié
-droite. Per-ligne est déjà bien plus fidèle que per-trame ; per-caractère le
-serait davantage.
+### De la capture par ligne à la capture par caractère
+
+Le correctif ci-dessus capturait les octets d'une ligne au moment où elle
+*commence* à être balayée, alors que le CRTC les lit au fil de la ligne,
+deux octets par position de caractère : une écriture survenant en milieu de
+ligne n'était donc pas reflétée sur sa moitié droite. Per-ligne était déjà
+bien plus fidèle que per-trame ; la capture est désormais faite par
+caractère (`Plan V3.md`, point 4).
+
+Le mécanisme suit simplement le faisceau. `Machine::step` sait combien de
+ticks se sont écoulés depuis le début de la scanline courante
+(`hsync_accumulator`) ; `Machine::capture_beam_progress` en déduit la
+position de caractère atteinte et `video::capture_scanline_chars` n'ajoute
+que les positions nouvellement franchies. Une écriture VRAM faite entre
+deux instructions ne touche donc que ce que le faisceau n'a pas encore
+peint.
+
+La conversion ticks → caractères suit la géométrie réellement programmée
+(`R0 + 1` positions par ligne) plutôt qu'une constante : une scanline dure
+toujours 256 ticks dans notre modèle, mais un logiciel qui reprogramme R0
+— ce que font les effets de rupture — change le nombre de caractères qui
+s'y logent, donc la durée de chacun.
+
+Conséquence sur le repli de `render` : il ne couvre plus seulement les
+lignes jamais capturées (bordure, tout premier appel) mais aussi la fin
+d'une ligne que le faisceau n'avait pas encore atteinte — dans les deux
+cas, une lecture directe de la VRAM, sans incidence puisque ces positions
+ne sont pas affichées.
+
+Aucun symptôme connu ne réclamait ce raffinement : les deux jeux témoins
+étaient déjà à zéro pixel oscillant, et ils le restent. C'est de la
+fidélité de principe, prise pendant qu'on y était.
 
 ### Effet de bord : le copieur de Discology a dû être recalé
 
