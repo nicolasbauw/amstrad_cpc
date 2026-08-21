@@ -1,5 +1,2 @@
-- en résolution inférieure à 4K, il ne faut pas faire de scaling sur l’écran de config (F6)
-- le point 5 du plan V3 me semble suffisamment important pour la fidélité de l’émulation pour le traiter dès maintenant.
-- dans le readme, ne pas parler de la résolution 4k pour le shader, car le rendu est très bon même sur un écran full HD, mais spécifier qu’en zoom X1 les scanlines peuvent ne pas être perceptibles.
-- ajouter dans le plan V3 l’étude de la lecture des .SNA, pour s’interfacer avec RASM.
-- vérifier que la matrice clavier de l’écran F12 soit cohérente avec les changements et fine-tuning du clavier qui ont été effectués.
+- Une manette USB n'est pas détectée par l'émulateur
+- Mettre à jour le README sur la prise en charge des manettes bluetooth (manette xbox testée) et des manettes usb (si le point ci-dessus a été réglé)
