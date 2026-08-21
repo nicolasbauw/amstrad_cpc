@@ -219,10 +219,15 @@ jobs:
   macos-homebrew:
     runs-on: macos-14
     steps:
-      # Voir le commentaire équivalent du job appimage ci-dessus.
+      # PAS de `ref: inputs.tag` ici, contrairement aux deux autres jobs :
+      # ce job ne compile jamais le checkout local (Homebrew télécharge son
+      # propre tarball, décrit par url/sha256 dans la Formula elle-même) —
+      # il n'a besoin que du dernier packaging/homebrew/bytebox.rb, pas
+      # d'une version figée au commit du tag. Fixer ce fichier pour qu'il
+      # décrive correctement un tag crée toujours un commit ultérieur à ce
+      # tag (jamais inclus dedans) : le lire depuis le tag lui-même
+      # rouvrirait ce décalage à chaque fois plutôt que de le refermer.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
 
       # Homebrew refuse désormais d'installer une formule hors tap
       # ("Homebrew requires formulae to be in a tap") : un tap local (un
