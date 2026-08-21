@@ -1,6 +1,6 @@
 # Maintainer: Nicolas BAUW <nbauw@hotmail.com>
 pkgname=bytebox
-pkgver=2.0.0
+pkgver=2.1.0
 pkgrel=1
 pkgdesc="Amstrad CPC 6128 emulator"
 arch=('x86_64')

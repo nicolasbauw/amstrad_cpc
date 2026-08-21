@@ -1,5 +1,10 @@
 # Plan V3 — ByteBox, on peaufine les détails
 
+> Le « V3 » compte les ITÉRATIONS de ce projet (V1 : l'émulateur lui-même ;
+> V2 : l'interface, voir `doc/Plan V2.md` ; V3 : ce qui suit), pas le numéro
+> de version de ByteBox — qui suit sa propre logique semver, sans rapport.
+> La lecture des `.SNA` ci-dessous a par exemple donné la 2.1.0.
+
 Sept points connus et documentés, VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
 V1 (un désormais résolu, voir le point 5) : aucun ne nuisait au fonctionnement
 (tous les logiciels du premier batch tournaient déjà), ce sont des
