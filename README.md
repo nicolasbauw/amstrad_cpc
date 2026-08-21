@@ -81,7 +81,7 @@ cargo build --release
   attempts:
 
   ```sh
-  rasm demo.asm -sna demo.sna && bytebox --snapshot=demo.sna
+  rasm demo.asm -oi demo.sna -v2 && bytebox --snapshot=demo.sna
   ```
 
 ## Function keys
