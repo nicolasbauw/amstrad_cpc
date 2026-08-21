@@ -22,9 +22,15 @@ fn main() {
     // du fingerprint de l'unité qui la consomme, sans ce genre de zone
     // grise.
     println!("cargo:rerun-if-env-changed=BYTEBOX_PACKAGED_BUILD");
-    if std::env::var_os("BYTEBOX_PACKAGED_BUILD").is_some() {
+    let packaged = std::env::var_os("BYTEBOX_PACKAGED_BUILD").is_some();
+    if packaged {
         println!("cargo:rustc-env=BYTEBOX_PACKAGED_BUILD=1");
     }
+    // Diagnostic temporaire (issue en cours : l'icône garde son cadre "dev"
+    // même quand cette variable est positionnée en CI) — visible tel quel
+    // dans le log de `cargo build`, avec le préfixe "warning:". À retirer
+    // une fois la cause trouvée.
+    println!("cargo:warning=BYTEBOX_PACKAGED_BUILD detected: {packaged}");
 
     if let Ok(output) = Command::new("git").args(["rev-parse", "HEAD"]).output()
         && output.status.success()

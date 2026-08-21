@@ -289,6 +289,14 @@ pub fn run(
     // (donc avec `.git`) tout en étant des builds officiels, qui doivent
     // afficher la version comme le ferait packaging/PKGBUILD depuis un
     // tarball sans `.git`.
+    // Diagnostic temporaire (même enquête que le "cargo:warning" de
+    // build.rs) : ce que CE BINAIRE COMPILÉ croit réellement au runtime,
+    // pas seulement ce que le log de compilation a affiché. À retirer une
+    // fois la cause trouvée.
+    app_log!(
+        "Diag: IS_PACKAGED_BUILD={IS_PACKAGED_BUILD}, BYTEBOX_GIT_HASH={:?}",
+        option_env!("BYTEBOX_GIT_HASH")
+    );
     let build_id = if IS_PACKAGED_BUILD {
         env!("CARGO_PKG_VERSION")
     } else {
