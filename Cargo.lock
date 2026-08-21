@@ -2453,9 +2453,7 @@ checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 
 [[package]]
 name = "zilog_z80"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e4f71fdd71f03e0d7762ddb5cb0af3ccfba429ce2e20d41e8752d02bc04b1b3"
+version = "1.1.0"
 
 [[package]]
 name = "zip"

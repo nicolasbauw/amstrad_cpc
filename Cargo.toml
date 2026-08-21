@@ -7,6 +7,16 @@ members = ["core", "bytebox"]
 # (`cargo run -p bytebox`, ou simplement `cargo run` puisque c'est le seul
 # membre à définir un binaire).
 
+# TEMPORAIRE — à retirer une fois zilog_z80 1.1.0 publié sur crates.io.
+# `snapshot::load` a besoin de `CPU::set_interrupt_state` (restauration de
+# IM/IFF1/IFF2 : champs privés, getters seulement jusqu'ici), ajouté dans
+# la 1.1.0 de cette crate. Un `[patch]` à la racine plutôt qu'une
+# dépendance `path` dans core/ ET bytebox/ : les deux membres gardent leur
+# `zilog_z80 = "1.0.0"` habituel (^1.0.0 accepte donc la 1.1.0 publiée le
+# jour venu), et il n'y aura que ce bloc-ci à supprimer.
+[patch.crates-io]
+zilog_z80 = { path = "../ZilogZ80" }
+
 [profile.release]
 panic = "abort"
 strip = true

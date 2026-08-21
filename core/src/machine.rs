@@ -125,6 +125,7 @@ Emulator commands:
     tape f.cdt          Loads the f.cdt tape image into the tape reader
     tape eject          Ejects the tape image
     snap f.sna          Saves a .SNA snapshot (readable by other CPC emulators)
+    snapload f.sna      Loads a .SNA snapshot and resumes from it
     pc                  Performs a power cycle
     vol                 Displays the audio output volume
     vol 30              Sets the audio output volume to 30 %
@@ -1544,6 +1545,16 @@ impl Machine {
                 let name = if arg.is_empty() { "snapshot.sna" } else { &arg };
                 if let Err(e) = crate::snapshot::save(self, name) {
                     println!("Error saving snapshot: {}", e);
+                }
+            }
+            MonitorCmd::SnapshotLoad => {
+                // "snapload f.sna" restaure un instantane, qu'il vienne d'ici,
+                // d'un autre emulateur ou d'un assembleur (RASM sait produire
+                // directement un .SNA a partir du code assemble).
+                if arg.is_empty() {
+                    println!("Usage: snapload <file.sna>");
+                } else if let Err(e) = crate::snapshot::load(self, &arg) {
+                    println!("Error loading snapshot: {}", e);
                 }
             }
             MonitorCmd::PowerCycle => {

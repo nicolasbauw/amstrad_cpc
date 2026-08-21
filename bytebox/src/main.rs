@@ -62,6 +62,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // que --disk.
     let tape = cli_value(&args, &["--tape", "-t"]);
 
+    // Reprise directe d'un instantané .SNA. Pensé pour le cycle "assemble
+    // puis teste" : RASM sait produire un .SNA prêt à tourner à partir du
+    // code assemblé, donc `bytebox --snapshot=jeu.sna` remplace tout le
+    // détour par une image disque à chaque essai.
+    let snapshot = cli_value(&args, &["--snapshot", "-s"]);
+
     // 2. Initialisation de la Machine
     let mut machine = Machine::new();
     machine.diagnostic_mode = diag_mode;
@@ -89,6 +95,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         && let Err(e) = machine.load_tape(path)
     {
         app_log!("Can't load tape '{path}': {e}");
+    }
+
+    // Après les médias, jamais avant : restaurer un instantané fait repasser
+    // la machine par un cycle d'alimentation (voir `snapshot::load`), qui
+    // conserve les disquettes et la cassette insérées mais réinitialise tout
+    // le reste — l'ordre inverse annulerait donc la restauration.
+    if let Some(path) = &snapshot
+        && let Err(e) = bytebox_core::snapshot::load(&mut machine, path)
+    {
+        app_log!("Can't load snapshot '{path}': {e}");
     }
 
     let autotyper = autocmd

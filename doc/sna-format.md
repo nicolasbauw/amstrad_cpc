@@ -1,17 +1,21 @@
-# The `.SNA` snapshot format, as written by `snap`
+# The `.SNA` snapshot format, as read and written by ByteBox
 
-The console command `snap f.sna` (see `src/console.rs`, `src/snapshot.rs`)
-writes the current machine state to disk in the `.SNA` format, the de facto
-exchange format between CPC emulators (originated by WinAPE, also produced
-and read by Caprice32 and others). This lets a state captured in ByteBox be
-reloaded in another emulator — handy on its own, but mostly useful as a
-diagnostic tool: transplant an exact state elsewhere and compare behaviour
-from the same starting point, without depending on a reproducible key
-sequence.
+The console command `snap f.sna` (see `src/snapshot.rs`) writes the current
+machine state to disk in the `.SNA` format, the de facto exchange format
+between CPC emulators (originated by WinAPE, also produced and read by
+Caprice32 and others). This lets a state captured in ByteBox be reloaded in
+another emulator — handy on its own, but mostly useful as a diagnostic
+tool: transplant an exact state elsewhere and compare behaviour from the
+same starting point, without depending on a reproducible key sequence.
 
-**Only writing is implemented, not reading.** That is all the diagnostic
-use case above needs, and a half-implemented reader would be a trap: it
-would silently accept files this emulator cannot actually resume correctly.
+`snapload f.sna`, or `--snapshot=<file>` on the command line, does the
+reverse. Reading was deliberately left out at first — a half-implemented
+reader would be a trap, silently accepting files this emulator cannot
+actually resume. It was added for a use case that justified doing it
+properly: [RASM](https://github.com/EdouardBERGE/rasm) assembles Z80 source
+straight into a ready-to-run `.SNA`, so `rasm demo.asm -sna demo.sna &&
+bytebox --snapshot=demo.sna` replaces building a disk image between two
+attempts.
 
 ## Header layout (256 bytes)
 
@@ -99,10 +103,45 @@ written: the `.SNA` format has no representation for it, and including it
 would produce a file no other emulator could read back correctly. `save()`
 only ever reads the first 128 KB of the underlying RAM buffer.
 
+## How loading restores the machine
+
+`load` mirrors Caprice32's own loader on two points that matter:
+
+1. **Power-cycle first.** The machine is reset before anything is restored,
+   so loading starts from a known state — RAM zeroed, devices at their
+   defaults, ROMs reloaded — instead of layering the snapshot over whatever
+   was running, where any field the format doesn't carry would silently
+   keep its previous value.
+2. **Replay I/O writes rather than poke fields.** The Gate Array, CRTC,
+   upper ROM, PPI and PSG are restored by writing to their ports, exactly
+   as the original program did. Everything derived from those writes — the
+   memory's ROM-enable flags, the selected keyboard line, the tape motor,
+   PSG register masks, the envelope restart on R13 — then falls into place
+   on its own.
+
+One deliberate divergence from Caprice32: the **PPI control register is
+written first**, not last. On a real 8255 (and in `Ppi::write_register`,
+where the behaviour is required by Barbarian) configuring it clears ports A
+and C, so writing it after the ports would wipe what was just restored.
+
+The interrupt state (`IM`, `IFF1`, `IFF2`) is restored through
+`CPU::set_interrupt_state`, added to the `zilog_z80` crate for this: those
+three values are otherwise only ever changed by `IM n`, `EI` and `DI`, so a
+host restoring a state had no way to put them back.
+
 ## Deliberately out of scope
 
-- **Reading `.SNA` files.** Not needed for the diagnostic use case this
-  exists for, and a partial reader is worse than none — see above.
+- **Version 3 snapshots with chunked memory.** When the RAM size at `0x6B`
+  is zero, the memory lives in `MEM0`-`MEM8` chunks after the header,
+  possibly compressed. `load` refuses these outright rather than loading a
+  machine whose memory would be entirely blank — which would look like an
+  emulator crash rather than an unsupported format. Caprice32 rejects them
+  too. Chunks *following* a normal flat dump are simply skipped, as the
+  format intends.
+- **Version 2/3 header fields.** Model, FDC state, internal CRTC counters,
+  PSG envelope step and so on are read past, not applied — except the CPC
+  model, which only produces a warning when it isn't a 6128 (a 464 snapshot
+  loads, but its firmware expectations don't match this machine).
 - **Extended RAM beyond 128 KB.** No representation in the format; silently
   truncated rather than attempted.
 - **FDC state, tape state, snapshot versions 2/3 fields.** Would require

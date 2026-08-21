@@ -54,6 +54,7 @@ pub fn parse_command(line: &str) -> MonitorMessage {
         "blank" => MonitorCmd::Blank,
         "tape" => MonitorCmd::Tape,
         "snap" => MonitorCmd::Snapshot,
+        "snapload" => MonitorCmd::SnapshotLoad,
         "pc" => MonitorCmd::PowerCycle,
         "t" => MonitorCmd::Trace,
         "mr" => MonitorCmd::ReadRam,
@@ -92,6 +93,9 @@ pub enum MonitorCmd {
     Blank,
     Tape,
     Snapshot,
+    /// Charge un instantané `.SNA` et reprend l'exécution à partir de lui
+    /// ("snapload f.sna") — la contrepartie de `Snapshot`.
+    SnapshotLoad,
     PowerCycle,
     Trace,
     ReadRam,

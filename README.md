@@ -72,6 +72,14 @@ cargo build --release
   ```sh
   bytebox --disk=Barbarian.dsk --autocmd='RUN"BARBA.I'
   ```
+- `--snapshot=<file>` / `-s <file>`: resume from a `.SNA` snapshot instead of
+  booting. Mostly for Z80 development: [RASM](https://github.com/EdouardBERGE/rasm)
+  can assemble straight to a ready-to-run snapshot, so there's no disk image
+  to build between two attempts:
+
+  ```sh
+  rasm demo.asm -sna demo.sna && bytebox --snapshot=demo.sna
+  ```
 
 ## Function keys
 
