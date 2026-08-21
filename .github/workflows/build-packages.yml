@@ -44,6 +44,15 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      # bytebox/build.rs affiche le hash de commit dans le titre de la
+      # fenêtre quand .git est présent, la version de Cargo.toml sinon
+      # (le cas d'un vrai tarball de release, sans .git — packaging/PKGBUILD,
+      # Homebrew). actions/checkout laisse .git en place même ici : sans
+      # cette suppression, ce paquet "officiel" afficherait quand même un
+      # hash, comme n'importe quel checkout git ordinaire.
+      - name: Remove .git (build like a release tarball, not a git checkout)
+        run: rm -rf .git
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -128,6 +137,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
+
+      # shell: bash (Git Bash, présent sur les runners Windows) : le rm -rf
+      # ci-dessous n'a pas d'équivalent direct dans le pwsh par défaut.
+      - name: Remove .git (build like a release tarball, not a git checkout)
+        shell: bash
+        run: rm -rf .git
 
       - uses: dtolnay/rust-toolchain@stable
 
