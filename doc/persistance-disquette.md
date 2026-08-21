@@ -64,24 +64,45 @@ depuis le disque** (pas la structure en mémoire) pour confirmer que
 l'écriture y est bien présente. Confirmé en pratique que ce test échoue
 sans le correctif et passe avec.
 
-## Optimisation non faite, à reprendre si besoin
+## Écriture ciblée d'un secteur (Plan V3.md, point 1)
 
-Chaque écriture de secteur réécrit **tout** le fichier `.dsk` (quelques
-centaines de Ko pour une disquette standard), pas seulement le secteur
-modifié. Pour une sauvegarde BASIC ponctuelle, le coût est négligeable
-(quelques écritures, fichier petit). Mais un logiciel qui écrit très
-fréquemment — un formatage complet piste par piste, un jeu qui journalise
-sa progression sur disque en continu — réécrirait le fichier entier à
-chaque secteur, ce qui pourrait devenir sensible.
+Chaque écriture de secteur réécrivait **tout** le fichier `.dsk` (160 Ko
+pour `Discology.dsk`, quelques centaines pour une disquette standard), pas
+seulement le secteur modifié. Négligeable pour une sauvegarde BASIC
+ponctuelle, mais un formatage piste par piste ou un jeu qui journalise sa
+progression réécrivait l'image entière à chaque secteur.
 
-Inscrit au chantier de finition V3 (voir `Plan V3.md`, point 1), à traiter
-après la V2.
+`Fdc::persist_sector` écrit désormais les 512 octets du secteur à son offset
+exact (`seek` + `write` ciblés), plus l'octet ST2 de son descripteur — soit
+**~320 fois moins d'octets écrits** par secteur sur une image de 160 Ko.
+`persist_drive_dsk` (réécriture complète) reste utilisée par Format Track,
+qui change la structure même des pistes.
 
-Piste si ça devient nécessaire un jour : écrire seulement l'octet modifié à
-son offset exact dans le fichier (`std::fs::File` ouvert en lecture-écriture,
-`seek` + `write` ciblés), plutôt que de reconstruire et réécrire l'image
-complète à chaque fois. Ça suppose de calculer l'offset exact du secteur
-dans le fichier `.dsk` (dépend du format Standard vs Extended DSK, de la
-taille de piste, et de la position du secteur dans sa piste) — plus
-complexe que l'écriture complète actuelle, d'où le choix de ne pas le faire
-tant qu'aucun cas d'usage réel ne le justifie.
+### Deux précautions
+
+**L'offset se calcule depuis le fichier, jamais depuis l'image en mémoire.**
+Les deux formats rangent les pistes différemment : taille uniforme annoncée
+en 0x32 pour le Standard, table de tailles à partir de 0x34 pour l'Extended,
+où une piste non formatée n'occupe carrément aucun octet du fichier. Et une
+image chargée en Extended le reste tant que personne ne l'a réécrite en
+entier — `write_dsk_file`, lui, produit toujours du Standard.
+
+**Repli systématique sur la réécriture complète** dès que la géométrie ne
+correspond pas exactement à ce qu'on croit écrire : secteur absent de la
+piste, taille différente (elle déplacerait tout ce qui suit), piste absente
+d'une image Extended, en-tête inattendu. Mieux vaut réécrire trop que
+corrompre une image ; c'est ce repli qui rend le correctif sans risque.
+
+Les autres bits de ST2 sont préservés à l'écriture : ils peuvent porter des
+indicateurs d'erreur venus d'un dump réel, qu'on n'a aucune raison
+d'effacer.
+
+### Vérification
+
+Un test dédié (`a_targeted_sector_write_lands_at_the_right_offset`) écrit un
+secteur au MILIEU d'une piste — un offset faux passerait inaperçu sur le
+premier — puis compare le fichier octet à octet avec son état précédent :
+exactement 512 octets, contigus, doivent avoir changé, et les secteurs
+voisins rester intacts. Il vérifie aussi que `persist_sector` renvoie bien
+`true`, sans quoi le test ne validerait que le repli et masquerait un calcul
+d'offset faux.

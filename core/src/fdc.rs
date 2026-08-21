@@ -1,6 +1,6 @@
 use crate::app_log;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FdcPhase {
@@ -1138,6 +1138,126 @@ impl Fdc {
         }
     }
 
+    /// Écrit UN secteur à son offset exact dans le fichier `.dsk`, au lieu de
+    /// reconstruire et réécrire toute l'image comme le fait
+    /// [`Fdc::persist_drive_dsk`] (Plan V3.md, point 1).
+    ///
+    /// Renvoie `false` quand l'écriture ciblée n'est pas sûre — à l'appelant
+    /// de retomber sur la réécriture complète. C'est le cas dès que la
+    /// géométrie du fichier ne correspond pas exactement à ce qu'on croit y
+    /// écrire : secteur absent, taille différente, piste absente d'une image
+    /// Extended, en-tête inattendu. Mieux vaut réécrire trop que corrompre
+    /// une image, et ce repli garde le correctif sans risque.
+    ///
+    /// L'offset se calcule depuis le FICHIER, jamais depuis l'image en
+    /// mémoire : les deux formats rangent les pistes différemment (taille
+    /// uniforme en Standard, table de tailles en Extended, où une piste non
+    /// formatée n'occupe carrément aucun octet), et une image chargée en
+    /// Extended le reste tant que personne ne l'a réécrite entièrement.
+    fn persist_sector(&self, track: u8, side: u8, sector_id: u8, data: &[u8], deleted: bool) -> bool {
+        let drv = self.drive();
+        if drv.current_filename == "None" {
+            return false;
+        }
+        let Ok(mut f) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&drv.current_filename)
+        else {
+            return false;
+        };
+
+        let mut header = [0u8; 0x100];
+        if f.read_exact(&mut header).is_err() {
+            return false;
+        }
+        let extended = header.starts_with(b"EXTENDED");
+        if !extended && !header.starts_with(b"MV - CPC") {
+            return false;
+        }
+
+        let sides = (header[0x31].max(1)) as usize;
+        let index = track as usize * sides + side as usize;
+
+        // Position de la piste dans le fichier.
+        let track_offset = if extended {
+            // Table des tailles à partir de 0x34, une entrée par piste, en
+            // multiples de 256 octets. Une entrée nulle = piste non formatée,
+            // absente du fichier : rien à écrire dedans.
+            if 0x34 + index >= 0x100 {
+                return false;
+            }
+            if header[0x34 + index] == 0 {
+                return false;
+            }
+            let mut off = 0x100usize;
+            for i in 0..index {
+                off += header[0x34 + i] as usize * 256;
+            }
+            off
+        } else {
+            let ts = u16::from_le_bytes([header[0x32], header[0x33]]) as usize;
+            if ts == 0 {
+                return false;
+            }
+            0x100 + index * ts
+        };
+
+        let mut th = [0u8; 0x100];
+        if f.seek(SeekFrom::Start(track_offset as u64)).is_err() || f.read_exact(&mut th).is_err() {
+            return false;
+        }
+        // Garde-fou : on doit être tombé sur l'en-tête de LA piste visée.
+        if !th.starts_with(b"Track-Info") || th[0x10] != track || th[0x11] != side {
+            return false;
+        }
+
+        // Les données des secteurs se suivent dans l'ordre du descripteur.
+        let num_sectors = th[0x15] as usize;
+        let mut data_off = track_offset + 0x100;
+        let mut found = None;
+        for i in 0..num_sectors {
+            let io = 0x18 + i * 8;
+            if io + 8 > 0x100 {
+                return false;
+            }
+            let declared = 128usize << th[io + 3].min(6);
+            let size = if extended {
+                let sz = u16::from_le_bytes([th[io + 6], th[io + 7]]) as usize;
+                if sz > 0 { sz } else { declared }
+            } else {
+                declared
+            };
+            if th[io + 2] == sector_id {
+                found = Some((data_off, size, io));
+                break;
+            }
+            data_off += size;
+        }
+        let Some((offset, size, info_offset)) = found else {
+            return false;
+        };
+        // Une taille qui a changé déplacerait tout ce qui suit dans la piste :
+        // ce n'est plus une écriture ponctuelle.
+        if size != data.len() {
+            return false;
+        }
+
+        if f.seek(SeekFrom::Start(offset as u64)).is_err() || f.write_all(data).is_err() {
+            return false;
+        }
+        // Marque "Deleted Data" (bit 6 de ST2) : elle vit dans le descripteur
+        // de secteur, pas dans les données. Les autres bits de ST2 sont
+        // préservés — ils peuvent porter des indicateurs d'erreur d'un dump
+        // réel, que nous n'avons aucune raison d'effacer.
+        let st2 = (th[info_offset + 5] & !0x40) | if deleted { 0x40 } else { 0x00 };
+        let st2_offset = (track_offset + info_offset + 5) as u64;
+        if f.seek(SeekFrom::Start(st2_offset)).is_err() || f.write_all(&[st2]).is_err() {
+            return false;
+        }
+        true
+    }
+
     /// Réécrit le fichier .dsk du lecteur sélectionné depuis l'image en
     /// mémoire, pour que les écritures faites par le logiciel émulé
     /// (SAVE BASIC, formatage...) survivent à un power cycle ou à une
@@ -1199,7 +1319,12 @@ impl Fdc {
         }
 
         if updated {
-            self.persist_drive_dsk();
+            // Écriture ciblée du seul secteur modifié, avec repli sur la
+            // réécriture complète si la géométrie du fichier ne s'y prête pas
+            // (voir `persist_sector`).
+            if !self.persist_sector(track, side, sector_id, &data, deleted) {
+                self.persist_drive_dsk();
+            }
         }
 
         self.result_buffer.clear();
@@ -1628,6 +1753,86 @@ mod tests {
     /// Une écriture de secteur (SAVE BASIC, par exemple) doit être reflétée
     /// dans le fichier .dsk sur disque, pas seulement dans l'image en
     /// mémoire — sans quoi elle ne survit pas à un power cycle ou à la
+    /// Écriture ciblée d'un seul secteur (Plan V3.md, point 1) : le fichier
+    /// ne doit être touché QU'À l'offset de ce secteur.
+    ///
+    /// Deux choses à prouver, et la seconde est la vraie : que le chemin
+    /// ciblé est bien emprunté (et pas le repli sur la réécriture complète,
+    /// qui donnerait un fichier correct en masquant un calcul d'offset faux),
+    /// et qu'un secteur au MILIEU d'une piste s'écrit au bon endroit sans
+    /// déranger ses voisins.
+    #[test]
+    fn a_targeted_sector_write_lands_at_the_right_offset() {
+        let dsk = Fdc::blank_dsk_image();
+        let path = std::env::temp_dir().join("amstrad_cpc_test_targeted_write.dsk");
+        let path = path.to_str().unwrap();
+        std::fs::remove_file(path).ok();
+        Fdc::write_dsk_file(&dsk, path).expect("ecriture du .dsk vierge");
+        let before = std::fs::read(path).expect("lecture initiale");
+
+        let mut fdc = Fdc::new();
+        fdc.load_disk(path).expect("chargement du .dsk vierge");
+
+        // Secteur 0xC3 : au milieu de la piste, pas en tête — un offset faux
+        // passerait inaperçu sur le premier secteur.
+        send_command(
+            &mut fdc,
+            &[0x05, 0x00, 0x00, 0x00, 0xC3, 0x02, 0xC3, 0x2A, 0xFF],
+        );
+        for _ in 0..512 {
+            fdc.write_data(0x5A);
+        }
+        assert_eq!(fdc.phase, FdcPhase::Result);
+
+        // Le chemin ciblé lui-même : s'il renvoyait false, le test ci-dessous
+        // ne vérifierait que le repli.
+        assert!(
+            fdc.persist_sector(0, 0, 0xC3, &vec![0x5A; 512], false),
+            "l'ecriture ciblee doit etre possible sur cette image"
+        );
+
+        let after = std::fs::read(path).expect("relecture");
+        std::fs::remove_file(path).ok();
+        assert_eq!(after.len(), before.len(), "la taille du fichier ne doit pas changer");
+
+        // Seuls les 512 octets du secteur visé (plus son octet ST2) diffèrent.
+        let differing: Vec<usize> = before
+            .iter()
+            .zip(after.iter())
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            differing.len(),
+            512,
+            "seuls les octets du secteur vise doivent changer"
+        );
+        // ...et ils doivent être contigus.
+        let first = differing[0];
+        assert_eq!(
+            differing.last().copied(),
+            Some(first + 511),
+            "les octets modifies doivent etre contigus"
+        );
+
+        // L'image relue reste cohérente : le secteur visé porte la nouvelle
+        // donnée, ses voisins sont intacts.
+        let reread = DskImage::parse(&after).expect(".dsk relu invalide");
+        let track = &reread.tracks[0];
+        for sec in &track.sectors {
+            if sec.id == 0xC3 {
+                assert_eq!(sec.data, vec![0x5A; 512], "secteur vise");
+            } else {
+                assert!(
+                    sec.data.iter().all(|&b| b == 0xE5),
+                    "le secteur {:#X} a ete abime",
+                    sec.id
+                );
+            }
+        }
+    }
+
     /// fermeture de l'émulateur, qui rechargent le fichier depuis le disque.
     #[test]
     fn writing_a_sector_persists_to_the_dsk_file_on_disk() {

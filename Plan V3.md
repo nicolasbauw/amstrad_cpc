@@ -6,7 +6,7 @@
 > La lecture des `.SNA` ci-dessous a par exemple donné la 2.1.0.
 
 Sept points connus et documentés, VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
-V1 (quatre désormais résolus — points 3, 4, 5 et 7 — et un cinquième,
+V1 (cinq désormais résolus — points 1, 3, 4, 5 et 7 — et un sixième,
 le 2, refermé comme impasse démontrée) : aucun ne nuisait au
 fonctionnement (tous les logiciels du premier batch tournaient déjà), ce sont
 des approximations acceptées dont on connaît la limite. C'est une liste de
@@ -14,20 +14,21 @@ référence, pas un jalonnage figé : chaque point est indépendant des autres e
 peut être traité dans n'importe quel ordre, ou laissé de côté indéfiniment si
 rien ne le réclame.
 
-## 1) FDC — écriture par secteur au lieu de l'image entière
+## 1) RÉSOLU — FDC — écriture par secteur au lieu de l'image entière
 
 Détails dans `doc/persistance-disquette.md`. Chaque écriture de secteur
-réécrit tout le fichier `.dsk` (quelques centaines de Ko). Négligeable pour un
-`SAVE` BASIC ponctuel, mais un logiciel qui écrit en continu (formatage piste
-par piste, jeu qui journalise sa progression) réécrirait tout à chaque
-secteur.
+réécrivait tout le fichier `.dsk` (160 Ko pour Discology.dsk). Négligeable
+pour un `SAVE` BASIC ponctuel, sensible pour un formatage piste par piste ou
+un jeu qui journalise sa progression.
 
-Piste : ouvrir le fichier en lecture-écriture et écrire à l'offset exact du
-secteur (seek + write ciblé), ce qui suppose de calculer cet offset selon le
-format (Standard vs Extended DSK, taille de piste, position du secteur dans
-sa piste).
-
-À FAIRE APRÈS LA V2, comme convenu.
+`Fdc::persist_sector` écrit désormais les 512 octets à leur offset exact
+(`seek` + `write`), plus l'octet ST2 du descripteur : ~320 fois moins
+d'octets écrits par secteur. L'offset se calcule depuis le FICHIER (les deux
+formats rangent les pistes différemment, et une image Extended le reste tant
+qu'on ne l'a pas réécrite en entier), avec repli systématique sur la
+réécriture complète dès que la géométrie ne correspond pas — c'est ce repli
+qui rend le correctif sans risque. Format Track continue de réécrire tout,
+puisqu'il change la structure des pistes.
 
 ## 2) IMPASSE DÉMONTRÉE — FDC — vrai modèle de rotation
 
@@ -124,32 +125,24 @@ constante n'est plus que la valeur par défaut de `Sound::tape_amplitude`,
 modifiable à chaud par la commande console `tapevol <0-100>` comme par un
 curseur du panneau F6.
 
-## Piste ouverte — lecture des snapshots .SNA (interfaçage RASM)
+## RÉSOLU — Lecture des snapshots .SNA (interfaçage RASM)
 
-Pas une approximation à corriger comme les sept points ci-dessus : une
-capacité qui n'existe pas encore, à étudier.
+`core/src/snapshot.rs` ne savait qu'ÉCRIRE un `.SNA` — décision d'origine
+assumée ("un format à moitié relu serait un piège"), levée par un usage qui
+justifiait de le faire correctement : RASM assemble directement vers un
+`.SNA` prêt à tourner, d'où un cycle "assemble, charge, teste" sans image
+disque.
 
-`core/src/snapshot.rs` sait déjà ÉCRIRE un `.SNA` (utile pour comparer
-notre état exact avec un autre émulateur), mais explicitement pas le LIRE —
-décision prise à l'époque pour éviter "un format à moitié relu", vu son
-absence d'utilité immédiate. Elle en gagnerait une : RASM (l'assembleur Z80/
-CPC de Roudoudou, largement utilisé dans la scène) sait produire directement
-un `.SNA` prêt à l'emploi à partir du code assemblé, RAM et PC d'entrée déjà
-en place — un cycle "assemble avec RASM, charge direct dans ByteBox" sans
-repasser par une image disque/cassette, précieux pour du développement Z80
-rapide.
+`snapshot::load` restaure l'état en rejouant les écritures d'I/O (méthode de
+Caprice32), avec deux divergences délibérées : le registre de contrôle du
+PPI est écrit EN PREMIER (le configurer remet ses ports à zéro chez nous,
+comportement exigé par Barbarian), et le port B n'est pas restauré du tout —
+c'est le câblage de la machine (straps constructeur), pas de l'état
+programme. Exposé par `snapload` en console et `--snapshot=<fichier>` en
+ligne de commande, les instantanés vivant dans `~/.bytebox/SNA`.
 
-À étudier avant de coder quoi que ce soit :
-- quelles versions du format (v1/v2/v3 — tailles d'en-tête et de RAM
-  différentes, champs Gate Array/CRTC/PSG plus ou moins complets) RASM
-  produit-il réellement, et lesquelles vaut-il la peine de couvrir en
-  lecture (pas forcément les trois) ;
-- où l'exposer côté ByteBox : un `--snapshot=<fichier.sna>` en ligne de
-  commande (même esprit que `--disk`/`--tape`, `main.rs`), une commande
-  console dédiée, ou un onglet du panneau F6 — à trancher selon l'usage
-  réel visé (dev Z80 au lancement vs charger un snapshot en cours de
-  session) ;
-- restaurer un état COMPLET (registres, RAM, configuration Gate Array/CRTC/
-  PPI/PSG/FDC) suppose de repasser la machine par un chemin d'initialisation
-  différent du power-on habituel — à concevoir avec soin plutôt qu'en
-  pièces détachées au fil des champs du format.
+Deux limites documentées dans `doc/sna-format.md` : les snapshots v3 à
+mémoire compressée (blocs `MEM0`-`MEM8`) sont refusés franchement plutôt que
+chargés à moitié — c'est le défaut de RASM, d'où le `-v2` recommandé — et
+les champs d'en-tête v2/v3 sont lus sans être appliqués, sauf le modèle de
+CPC qui produit un avertissement quand ce n'est pas un 6128.
