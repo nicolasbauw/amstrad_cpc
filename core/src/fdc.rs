@@ -541,12 +541,19 @@ impl Fdc {
                     let mut data_offset = 0x100usize;
                     for (i, sec) in track.sectors.iter().enumerate() {
                         let info_offset = 0x18 + i * 8;
-                        if info_offset + 4 <= 0x100 {
+                        if info_offset + 6 <= 0x100 {
                             track_block[info_offset] = track.number;
                             track_block[info_offset + 1] = track.side;
                             track_block[info_offset + 2] = sec.id;
                             let n = ((sec.size.max(128)) / 128).trailing_zeros() as u8;
                             track_block[info_offset + 3] = n;
+                            // ST2 (offset +5) : bit 6 = marque "Deleted Data".
+                            // Sans lui, une image réécrite perdrait la marque
+                            // que `parse_track_header` relit pourtant à cet
+                            // endroit — une copie faite sous l'émulateur
+                            // sortirait dépourvue de la protection qu'elle
+                            // était censée reproduire.
+                            track_block[info_offset + 5] = if sec.deleted { 0x40 } else { 0x00 };
                         }
                         let end = (data_offset + sec.size).min(track_block.len());
                         if data_offset < end {
@@ -706,6 +713,7 @@ impl Fdc {
                 0x06 => 9, // Read Data
                 0x0C => 9, // Read Deleted Data
                 0x05 => 9, // Write Data
+                0x09 => 9, // Write Deleted Data
                 0x0D => 6, // Format Track
                 _ => 1,    // Par défaut, commandes inconnues à 1 octet
             };
@@ -944,8 +952,10 @@ impl Fdc {
                 // indéfiniment à relire cette piste.
                 self.read_data_command(true);
             }
-            0x05 => {
-                // Write Data
+            0x05 | 0x09 => {
+                // Write Data (0x05) et Write Deleted Data (0x09) : chemin
+                // identique, seule la marque d'adresse posée sur le secteur
+                // diffère (voir `finish_write_command`).
                 // NB : contrairement à Read Data, cette implémentation ne gère
                 // qu'un seul secteur par commande (cas très largement majoritaire
                 // en usage réel — AMSDOS/CP-M écrivent secteur par secteur).
@@ -1044,14 +1054,30 @@ impl Fdc {
         self.drive_mut().current_side = side;
         self.drive_mut().current_sector = start_sector;
 
-        // Transfert de tous les secteurs consécutifs entre R et EOT (inclus)
-        // présents sur la piste ET portant la marque recherchée, comme le
-        // ferait le vrai FDC pour une commande couvrant plusieurs secteurs.
-        let (found_any, combined, last_id) = {
+        // Bit SK (Skip) de l'octet de commande : il décide de ce que fait le
+        // contrôleur en rencontrant un secteur dont la marque d'adresse n'est
+        // PAS celle que la commande cherche (un secteur "deleted" pour Read
+        // Data, ou l'inverse pour Read Deleted Data).
+        let skip = (self.command_buffer[0] & 0x20) != 0;
+
+        // Transfert des secteurs consécutifs entre R et EOT (inclus), en
+        // suivant le comportement du µPD765A face à une marque inattendue :
+        //
+        // - SK=1 : le secteur est sauté, la commande continue au suivant.
+        // - SK=0 : le secteur est lu QUAND MÊME, le bit Control Mark (bit 6
+        //   de ST2) est levé, et la commande s'arrête après lui.
+        //
+        // L'implémentation précédente filtrait strictement sur la marque, donc
+        // se comportait toujours comme SK=1 : un secteur "deleted" était
+        // purement invisible à Read Data, jamais signalé. Or c'est
+        // exactement ce signalement que cherchent les protections qui posent
+        // une marque "deleted" (voir `Sector::deleted`).
+        let (found_any, combined, last_id, control_mark) = {
             let drv = self.drive();
             let mut combined = Vec::new();
             let mut last_id = start_sector;
             let mut found_any = false;
+            let mut control_mark = false;
 
             if let Some(ref dsk) = drv.dsk
                 && let Some(t) = dsk
@@ -1059,19 +1085,29 @@ impl Fdc {
                     .iter()
                     .find(|t| t.number == track && t.side == side)
             {
-                let mut matched: Vec<&Sector> = t
+                let mut in_range: Vec<&Sector> = t
                     .sectors
                     .iter()
-                    .filter(|s| s.id >= start_sector && s.id <= eot && s.deleted == want_deleted)
+                    .filter(|s| s.id >= start_sector && s.id <= eot)
                     .collect();
-                matched.sort_by_key(|s| s.id);
-                for s in matched {
+                in_range.sort_by_key(|s| s.id);
+                for s in in_range {
+                    if s.deleted != want_deleted {
+                        if skip {
+                            continue;
+                        }
+                        combined.extend_from_slice(&s.data);
+                        last_id = s.id;
+                        found_any = true;
+                        control_mark = true;
+                        break;
+                    }
                     combined.extend_from_slice(&s.data);
                     last_id = s.id;
                     found_any = true;
                 }
             }
-            (found_any, combined, last_id)
+            (found_any, combined, last_id, control_mark)
         };
 
         if found_any {
@@ -1081,7 +1117,10 @@ impl Fdc {
 
             self.result_buffer.push(0x00); // ST0
             self.result_buffer.push(0x00); // ST1
-            self.result_buffer.push(0x00); // ST2
+            // ST2 : bit 6 (Control Mark) si la commande s'est arrêtée sur un
+            // secteur portant l'autre marque que celle demandée.
+            self.result_buffer
+                .push(if control_mark { 0x40 } else { 0x00 });
             self.result_buffer.push(track);
             self.result_buffer.push(side);
             self.result_buffer.push(last_id.wrapping_add(1)); // Secteur suivant
@@ -1131,6 +1170,12 @@ impl Fdc {
         let sector_id = self.drive().current_sector;
         let data = self.execution_buffer.clone();
         let n = *self.command_buffer.get(5).unwrap_or(&2);
+        // Write Deleted Data (0x09) pose la marque d'adresse "Deleted Data"
+        // sur le secteur écrit, Write Data (0x05) la marque normale. C'est
+        // ce qui permet à un copieur de REPRODUIRE une protection à base de
+        // secteurs "deleted" au lieu de la perdre en réécrivant tout en
+        // marque normale.
+        let deleted = (*self.command_buffer.first().unwrap_or(&0) & 0x1F) == 0x09;
 
         // Mise à jour de l'image disquette du lecteur ciblé, en mémoire
         let mut updated = false;
@@ -1143,6 +1188,7 @@ impl Fdc {
                             if s.id == sector_id {
                                 s.size = data.len();
                                 s.data = data.clone();
+                                s.deleted = deleted;
                                 updated = true;
                                 break;
                             }
@@ -1289,66 +1335,100 @@ mod tests {
         }
     }
 
-    /// Certaines protections CPC (dont Teenage Mutant Hero Turtles) marquent
-    /// volontairement un secteur avec la marque d'adresse "Deleted Data" pour
-    /// détecter une copie qui ne la préserverait pas : sans Read Deleted Data
-    /// (0x0C), le jeu boucle indéfiniment à relire la piste. Read Data
-    /// (0x06) ne doit pas voir ce secteur.
+    /// Le bit SK décide du sort d'un secteur dont la marque d'adresse n'est
+    /// pas celle que la commande cherche. Comportement du µPD765A, que cette
+    /// émulation approximait auparavant en filtrant strictement (donc en se
+    /// comportant toujours comme SK=1) :
+    ///
+    /// - SK=0 : le secteur est lu QUAND MÊME, ST2 lève Control Mark (bit 6)
+    ///   et la commande s'arrête après lui ;
+    /// - SK=1 : le secteur est sauté.
+    ///
+    /// C'est ce signalement que cherchent les protections qui posent une
+    /// marque "deleted" (dont Teenage Mutant Hero Turtles).
     #[test]
-    fn read_deleted_data_finds_a_sector_read_data_cannot_see() {
-        let mut fdc = fdc_with_track(vec![Sector {
-            id: 0x88,
-            size: 512,
-            data: vec![0x42; 512],
-            deleted: true,
-        }]);
+    fn read_data_honours_the_skip_bit_on_a_deleted_sector() {
+        let deleted_sector = || {
+            vec![Sector {
+                id: 0x88,
+                size: 512,
+                data: vec![0x42; 512],
+                deleted: true,
+            }]
+        };
 
-        // Read Data (0x06) : Cmd, Drive/HD, C, H, R, N, EOT, GPL, DTL
+        // SK=0 : Read Data lit le secteur "deleted" et signale Control Mark.
+        let mut fdc = fdc_with_track(deleted_sector());
         send_command(
             &mut fdc,
             &[0x06, 0x00, 0x01, 0x00, 0x88, 0x02, 0x88, 0x2A, 0xFF],
         );
-        assert_eq!(fdc.phase, FdcPhase::Result);
+        assert_eq!(fdc.phase, FdcPhase::ExecutionRead);
+        assert_eq!(fdc.execution_buffer, vec![0x42; 512]);
         assert_eq!(
-            fdc.result_buffer[0] & 0x40,
+            fdc.result_buffer[2] & 0x40,
             0x40,
-            "ST0 doit signaler une terminaison anormale"
+            "ST2 doit lever Control Mark"
         );
+
+        // SK=1 (bit 5 de l'octet de commande) : le secteur est sauté, il ne
+        // reste rien à transférer.
+        let mut fdc = fdc_with_track(deleted_sector());
+        send_command(
+            &mut fdc,
+            &[0x26, 0x00, 0x01, 0x00, 0x88, 0x02, 0x88, 0x2A, 0xFF],
+        );
+        assert_eq!(fdc.phase, FdcPhase::Result);
         assert_eq!(
             fdc.result_buffer[1] & 0x04,
             0x04,
             "ST1 doit signaler No Data"
         );
 
-        // Read Deleted Data (0x0C) : mêmes paramètres, doit réussir.
-        let mut fdc = fdc_with_track(vec![Sector {
-            id: 0x88,
-            size: 512,
-            data: vec![0x42; 512],
-            deleted: true,
-        }]);
+        // Read Deleted Data (0x0C) vise justement cette marque : succès, et
+        // aucun Control Mark puisque la marque est celle attendue.
+        let mut fdc = fdc_with_track(deleted_sector());
         send_command(
             &mut fdc,
             &[0x0C, 0x00, 0x01, 0x00, 0x88, 0x02, 0x88, 0x2A, 0xFF],
         );
         assert_eq!(fdc.phase, FdcPhase::ExecutionRead);
         assert_eq!(fdc.result_buffer[0], 0x00, "ST0 doit signaler un succes");
+        assert_eq!(fdc.result_buffer[2] & 0x40, 0x00, "pas de Control Mark");
         assert_eq!(fdc.execution_buffer, vec![0x42; 512]);
     }
 
-    /// Symétrique du test précédent : un secteur enregistré normalement
-    /// reste invisible à Read Deleted Data, comme sur le vrai µPD765A.
+    /// Symétrique du test précédent : c'est Read Deleted Data qui rencontre
+    /// une marque normale. Mêmes règles, marque inversée.
     #[test]
-    fn read_deleted_data_does_not_see_a_normal_sector() {
-        let mut fdc = fdc_with_track(vec![Sector {
-            id: 0x41,
-            size: 512,
-            data: vec![0x99; 512],
-            deleted: false,
-        }]);
+    fn read_deleted_data_honours_the_skip_bit_on_a_normal_sector() {
+        let normal_sector = || {
+            vec![Sector {
+                id: 0x41,
+                size: 512,
+                data: vec![0x99; 512],
+                deleted: false,
+            }]
+        };
+
+        // SK=0 : lu quand même, avec Control Mark.
+        let mut fdc = fdc_with_track(normal_sector());
         send_command(
             &mut fdc,
             &[0x0C, 0x00, 0x01, 0x00, 0x41, 0x02, 0x41, 0x2A, 0xFF],
+        );
+        assert_eq!(fdc.phase, FdcPhase::ExecutionRead);
+        assert_eq!(
+            fdc.result_buffer[2] & 0x40,
+            0x40,
+            "ST2 doit lever Control Mark"
+        );
+
+        // SK=1 : sauté.
+        let mut fdc = fdc_with_track(normal_sector());
+        send_command(
+            &mut fdc,
+            &[0x2C, 0x00, 0x01, 0x00, 0x41, 0x02, 0x41, 0x2A, 0xFF],
         );
         assert_eq!(fdc.phase, FdcPhase::Result);
         assert_eq!(
@@ -1356,6 +1436,34 @@ mod tests {
             0x04,
             "ST1 doit signaler No Data"
         );
+    }
+
+    /// Write Deleted Data (0x09) pose la marque "deleted" là où Write Data
+    /// (0x05) pose la marque normale — sans quoi un copieur réécrirait une
+    /// piste protégée en marques ordinaires, perdant la protection.
+    #[test]
+    fn write_deleted_data_marks_the_sector_deleted() {
+        let mut fdc = fdc_with_track(vec![Sector {
+            id: 0x41,
+            size: 512,
+            data: vec![0x00; 512],
+            deleted: false,
+        }]);
+
+        // N=2, donc 512 octets de données suivent la commande.
+        send_command(
+            &mut fdc,
+            &[0x09, 0x00, 0x01, 0x00, 0x41, 0x02, 0x41, 0x2A, 0xFF],
+        );
+        assert_eq!(fdc.phase, FdcPhase::ExecutionWrite);
+        for _ in 0..512 {
+            fdc.write_data(0x7E);
+        }
+        assert_eq!(fdc.phase, FdcPhase::Result, "l'ecriture doit s'etre terminee");
+
+        let sector = &fdc.drive_a.dsk.as_ref().unwrap().tracks[0].sectors[0];
+        assert!(sector.deleted, "la marque deleted doit avoir ete posee");
+        assert_eq!(sector.data, vec![0x7E; 512]);
     }
 
     /// La disquette tourne : deux Read ID consécutifs tombent sur des

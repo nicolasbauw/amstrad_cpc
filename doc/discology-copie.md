@@ -211,18 +211,33 @@ cargo test --release discology_copies -- --ignored
 Résultat : toutes les pistes sont copiées, et tous les secteurs à marque
 normale sont identiques à la source.
 
-## Ce qui reste
+## Les marques « Deleted Data » (Plan V3, point 3)
 
 Les secteurs à marque « Deleted Data » (la protection de cette disquette :
-pistes 9 à 17, secteurs 0x31-0x33 de 4 Ko) ne sont PAS reproduits. Deux
-raisons, toutes deux dans `fdc.rs` :
+pistes 9 à 17, secteurs 0x31-0x33 de 4 Ko) n'étaient pas reproduits, pour
+trois raisons — la troisième découverte en corrigeant les deux premières :
 
-- Read Data (0x06) ne voit pas du tout un secteur à marque « deleted », alors
-  qu'un vrai µPD765A le lit quand même (bit SK à 0), signale la marque via le
-  bit 6 de ST2 (Control Mark) et s'arrête après ce secteur ;
-- Write Deleted Data (0x09) n'est pas implémentée : même relus, ces secteurs
-  seraient réécrits avec une marque normale.
+- **Read Data (0x06) ne voyait pas du tout un secteur « deleted ».**
+  L'implémentation filtrait strictement sur la marque, se comportant donc
+  toujours comme si le bit SK valait 1. Un vrai µPD765A distingue les deux
+  cas : avec SK=1 il saute le secteur, avec **SK=0 il le lit quand même**,
+  lève le bit 6 de ST2 (Control Mark) et s'arrête après lui. C'est
+  précisément ce signalement que cherchent les protections.
+- **Write Deleted Data (0x09) n'existait pas.** Même relus, ces secteurs
+  auraient été réécrits en marque normale. La commande partage désormais
+  tout le chemin de Write Data (0x05), seule la marque posée diffère.
+- **L'écriture du `.dsk` ne reportait pas la marque.** `parse_track_header`
+  lit pourtant ST2 (offset +5 de chaque descripteur de secteur) au
+  chargement, mais `write_dsk_file` n'écrivait que C/H/R/N : la marque se
+  perdait à la persistance, ce qui aurait suffi à annuler les deux
+  correctifs ci-dessus.
 
-Une copie faite sous l'émulateur est donc fidèle pour une disquette ordinaire,
-mais perd la protection de celle-ci. Le comportement actuel avait été retenu
-pour Teenage Mutant Hero Turtles : le corriger demande de retester ce jeu.
+### Le risque annoncé, et sa vérification
+
+Le comportement précédent avait été retenu pour **Teenage Mutant Hero
+Turtles**, dont la protection repose sur ces marques : le plan prévenait
+qu'y toucher demandait de retester ce jeu. Fait —
+`bytebox --disk=bin/Teenage_Mutant_Hero_Turtles.dsk --autocmd='RUN"DISK'`
+atteint l'écran de titre comme avant. Discology et les tests unitaires du
+FDC (dont deux nouveaux couvrant SK=0 et SK=1 dans les deux sens) sont
+également au vert.

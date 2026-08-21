@@ -6,7 +6,8 @@
 > La lecture des `.SNA` ci-dessous a par exemple donné la 2.1.0.
 
 Sept points connus et documentés, VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
-V1 (trois désormais résolus, voir les points 4, 5 et 7) : aucun ne nuisait au
+V1 (quatre désormais résolus — points 3, 4, 5 et 7 — et un cinquième,
+le 2, refermé comme impasse démontrée) : aucun ne nuisait au
 fonctionnement (tous les logiciels du premier batch tournaient déjà), ce sont
 des approximations acceptées dont on connaît la limite. C'est une liste de
 référence, pas un jalonnage figé : chaque point est indépendant des autres et
@@ -53,16 +54,23 @@ Discology, dont la cause reste inconnue. Reprendre ce point supposerait de
 désassembler sa routine de seuil (compteur en `103E`) — chantier ouvert,
 sans garantie, et sans urgence tant qu'aucun autre logiciel n'en souffre.
 
-## 3) FDC — marques "Deleted Data"
+## 3) RÉSOLU — FDC — marques "Deleted Data"
 
-Détails dans `doc/discology-copie.md`. Read Data (0x06) ignore complètement un
-secteur "deleted", alors qu'un vrai µPD765A le lit quand même quand SK=0,
-signale la marque par le bit 6 de ST2 et s'arrête après ce secteur. Et Write
-Deleted Data (0x09) n'existe pas. En conséquence une copie perd la protection
-des disquettes qui s'en servent.
+Détails dans `doc/discology-copie.md`. Read Data (0x06) ignorait complètement
+un secteur "deleted" (donc se comportait toujours comme SK=1), et Write
+Deleted Data (0x09) n'existait pas : une copie perdait la protection des
+disquettes qui s'en servent.
 
-ATTENTION : le comportement actuel avait été retenu pour Teenage Mutant Hero
-Turtles — à retester si on y touche.
+Le bit SK est désormais respecté dans les deux sens : SK=1 saute le secteur
+à la marque inattendue, SK=0 le lit quand même, lève Control Mark (bit 6 de
+ST2) et arrête la commande après lui. Write Deleted Data partage le chemin
+de Write Data, seule la marque posée diffère. Troisième correctif découvert
+en chemin : `write_dsk_file` n'écrivait pas ST2, si bien que la marque se
+serait perdue à la persistance — annulant les deux autres.
+
+Le risque annoncé (Teenage Mutant Hero Turtles, dont la protection repose
+sur ces marques) a été vérifié : le jeu atteint son écran de titre comme
+avant.
 
 ## 4) RÉSOLU — Vidéo — capture de la VRAM par caractère plutôt que par ligne
 
