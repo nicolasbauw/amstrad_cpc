@@ -299,32 +299,35 @@ snapshots give you an edit-assemble-run loop with no disk image in the way.
 ready-to-run `.SNA` — RAM laid out and entry point already set — which
 ByteBox resumes directly:
 
+Here's a complete, working example to copy-paste. Save it as `demo.asm`:
+
+```asm
+    BUILDSNA            ; emit a snapshot, not a cartridge
+    BANK 0              ; without this, nothing is written to memory
+    ORG  #4000
+    RUN  #4000          ; where execution starts
+
+start
+    ld   bc, #7F10      ; select the border
+    out  (c), c
+    ld   bc, #7F4C      ; ink 12: bright red
+    out  (c), c
+loop
+    jr   loop           ; stay here
+```
+
+Then assemble it and run it:
+
 ```sh
 rasm demo.asm -oi demo.sna -v2 && bytebox --snapshot=demo.sna
 ```
 
-`-oi` names the snapshot RASM writes, and `-v2` asks for a version 2 one —
-see the note below, it matters. In the source, `BUILDSNA` asks for a
-snapshot rather than a cartridge, `BANK 0` puts the code in the snapshot's
-memory, and `RUN` sets the address execution starts from:
+You should get a bright red border around a blue screen. `-oi` names the
+snapshot RASM writes; `-v2` picks the format ByteBox reads — see the notes
+below, both matter more than they look.
 
-```
-    BUILDSNA
-    BANK 0
-    ORG  #4000
-    RUN  #4000
-start
-    ld   bc, #7F10      ; select the border
-    out  (c), c
-    ld   bc, #7F4C      ; ink 12 — bright red
-    out  (c), c
-loop
-    jr   loop
-```
-
-Assemble and run that, and you get a bright red border around a blue
-screen. The whole cycle is a single command away, so re-running after an
-edit costs nothing — which is the point.
+The whole cycle is a single command away, so re-running after an edit costs
+nothing — which is the point.
 
 A few things worth knowing:
 
