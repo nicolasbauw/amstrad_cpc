@@ -20,6 +20,14 @@ path = "src/main.rs"
 [features]
 static-sdl2 = ["sdl2/bundled", "sdl2/static-link"]
 
+# Icône du .exe compilé (ressource PE, voir windows.rc) — sans elle,
+# l'Explorateur Windows affiche l'icône générique par défaut pour
+# bytebox.exe, avant même de le lancer. No-op sur les autres cibles :
+# safe à garder inconditionnelle plutôt que de la limiter à
+# `[target.'cfg(windows)'.build-dependencies]`.
+[build-dependencies]
+embed-resource = "3"
+
 [dependencies]
 bytebox-core = { path = "../core" }
 zilog_z80 = "1.0.0"

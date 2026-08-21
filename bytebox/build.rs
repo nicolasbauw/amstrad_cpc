@@ -10,6 +10,23 @@ fn main() {
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/index");
 
+    // Icône du .exe compilé (ressource PE, voir windows.rc) : sans elle,
+    // l'Explorateur Windows affiche l'icône générique par défaut pour
+    // bytebox.exe, avant même de le lancer — indépendant de l'icône que
+    // set_window_icon (sdl.rs) pose sur la fenêtre une fois lancée, et de
+    // celle du raccourci Menu Démarrer (bytebox/wix/main.wxs). No-op sur
+    // les autres cibles : safe à appeler sans condition `cfg(windows)`.
+    println!("cargo:rerun-if-changed=windows.rc");
+    // manifest_optional() : seul un `Failed` (compilateur de ressources
+    // présent mais qui échoue) doit interrompre le build — `NotWindows`
+    // (toute autre cible) et `NotAttempted` (pas de compilateur trouvé, ce
+    // qui ne devrait pas arriver sur les runners CI Windows utilisés, mais
+    // ne doit pas non plus faire échouer un `cargo build` local sur une
+    // machine Windows mal équipée) sont sans conséquence.
+    embed_resource::compile("windows.rc", embed_resource::NONE)
+        .manifest_optional()
+        .unwrap();
+
     if let Ok(output) = Command::new("git").args(["rev-parse", "HEAD"]).output()
         && output.status.success()
     {
