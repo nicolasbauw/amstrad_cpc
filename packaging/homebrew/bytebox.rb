@@ -2,7 +2,7 @@ class Bytebox < Formula
   desc "Amstrad CPC 6128 emulator"
   homepage "https://github.com/nicolasbauw/amstrad_cpc"
   url "https://github.com/nicolasbauw/amstrad_cpc/archive/refs/tags/2.0.0.tar.gz"
-  sha256 "592b3d027869140a796ba5d78e1b9f87bc8c52816da2f805000d496ebb2c57fc"
+  sha256 "9fb0a4193961dd122bb0893f7f0bc57277f9e32ac754b188c5bd00580403c2df"
   license "MIT"
 
   depends_on "pkg-config" => :build
