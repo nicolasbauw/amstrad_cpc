@@ -557,6 +557,15 @@ impl Machine {
         self.bus.tape.borrow_mut().load_tape(&path)
     }
 
+    /// Charge un instantané `.SNA` et reprend l'exécution à partir de lui, en
+    /// résolvant le nom donné via `[file] sna_path` (ou `~/.bytebox/SNA`)
+    /// s'il ne désigne pas déjà un fichier existant. Utilisée aussi bien par
+    /// la commande console `snapload` que par l'option `--snapshot`.
+    pub fn load_snapshot(&mut self, filename: &str) -> Result<(), String> {
+        let path = self.config.resolve_snapshot_path(filename);
+        crate::snapshot::load(self, &path)
+    }
+
     /// Éjecte la cassette.
     pub fn eject_tape(&mut self) {
         self.bus.tape.borrow_mut().eject_tape();
@@ -1543,8 +1552,16 @@ impl Machine {
                 // "snap f.sna" ecrit un instantane relisible par les autres
                 // emulateurs CPC (Caprice32 notamment).
                 let name = if arg.is_empty() { "snapshot.sna" } else { &arg };
-                if let Err(e) = crate::snapshot::save(self, name) {
-                    println!("Error saving snapshot: {}", e);
+                // Un simple nom de fichier va dans le repertoire dedie
+                // (~/.bytebox/SNA, ou [file] sna_path), pas dans le
+                // repertoire courant du processus.
+                match self.config.snapshot_save_path(name) {
+                    Ok(path) => {
+                        if let Err(e) = crate::snapshot::save(self, &path) {
+                            println!("Error saving snapshot: {}", e);
+                        }
+                    }
+                    Err(e) => println!("Error saving snapshot: {}", e),
                 }
             }
             MonitorCmd::SnapshotLoad => {
@@ -1553,7 +1570,7 @@ impl Machine {
                 // directement un .SNA a partir du code assemble).
                 if arg.is_empty() {
                     println!("Usage: snapload <file.sna>");
-                } else if let Err(e) = crate::snapshot::load(self, &arg) {
+                } else if let Err(e) = self.load_snapshot(&arg) {
                     println!("Error loading snapshot: {}", e);
                 }
             }

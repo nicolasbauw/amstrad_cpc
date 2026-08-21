@@ -102,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // conserve les disquettes et la cassette insérées mais réinitialise tout
     // le reste — l'ordre inverse annulerait donc la restauration.
     if let Some(path) = &snapshot
-        && let Err(e) = bytebox_core::snapshot::load(&mut machine, path)
+        && let Err(e) = machine.load_snapshot(path)
     {
         app_log!("Can't load snapshot '{path}': {e}");
     }

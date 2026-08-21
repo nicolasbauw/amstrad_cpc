@@ -73,9 +73,12 @@ cargo build --release
   bytebox --disk=Barbarian.dsk --autocmd='RUN"BARBA.I'
   ```
 - `--snapshot=<file>` / `-s <file>`: resume from a `.SNA` snapshot instead of
-  booting. Mostly for Z80 development: [RASM](https://github.com/EdouardBERGE/rasm)
-  can assemble straight to a ready-to-run snapshot, so there's no disk image
-  to build between two attempts:
+  booting. A bare filename is looked up in `~/.bytebox/SNA` (or `[file]
+  sna_path` from `config.toml`), the same directory the `snap` console
+  command writes to. Mostly for Z80 development:
+  [RASM](https://github.com/EdouardBERGE/rasm) can assemble straight to a
+  ready-to-run snapshot, so there's no disk image to build between two
+  attempts:
 
   ```sh
   rasm demo.asm -sna demo.sna && bytebox --snapshot=demo.sna

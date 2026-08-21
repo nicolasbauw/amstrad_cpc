@@ -334,9 +334,16 @@ pub fn load(machine: &mut Machine, filename: &str) -> Result<(), String> {
     machine.bus.write_io(0xF700, data[off::PPI_CONTROL]);
     machine.bus.write_io(0xF400, data[off::PPI_A]);
     machine.bus.write_io(0xF600, data[off::PPI_C]);
-    // Le port B est en lecture seule sur le CPC : l'écrire via l'I/O n'aurait
-    // aucun effet, d'où l'affectation directe de l'état système qu'il porte.
-    machine.bus.ppi.port_b_input = data[off::PPI_B];
+    // Le port B est DÉLIBÉRÉMENT laissé tel quel. C'est une entrée : il ne
+    // porte pas de l'état programme mais le câblage de CETTE machine —
+    // straps constructeur (bits 1-3 : c'est ce qui fait afficher "Amstrad"
+    // au démarrage plutôt que Triumph, Saisho ou Solavox), fréquence
+    // secteur, plus des signaux vivants recalculés en permanence (VSYNC,
+    // données cassette). Le restaurer depuis un fichier revenait à laisser
+    // un instantané reconfigurer l'identité de la machine : constaté en
+    // pratique, un instantané forgé avec un port B à zéro faisait démarrer
+    // le CPC sous une autre marque. Caprice32 ne le restaure pas non plus
+    // (il l'écrit via un OUT sur &F5xx, sans effet sur les lignes d'entrée).
 
     // --- PSG ---
     // Passe par `write_current_register` plutôt que par le tableau : c'est
@@ -556,6 +563,39 @@ mod tests {
         assert!(
             distinct.len() > 1,
             "l'ecran compare est uniforme : le test ne prouverait rien"
+        );
+
+        std::fs::remove_file(path).ok();
+    }
+
+    /// Le port B du PPI porte le câblage de la machine, pas de l'état
+    /// programme : ses bits 1-3 sont les straps constructeur, ceux qui font
+    /// afficher "Amstrad" au démarrage. Un instantané ne doit donc PAS
+    /// pouvoir les changer — une première version de `load` les restaurait,
+    /// et un fichier au port B nul faisait démarrer le CPC sous une autre
+    /// marque.
+    #[test]
+    fn loading_never_lets_a_snapshot_rewire_the_machine_identity() {
+        let mut header = [0u8; HEADER_LEN];
+        header[..8].copy_from_slice(b"MV - SNA");
+        header[off::VERSION] = 1;
+        header[off::RAM_SIZE..off::RAM_SIZE + 2].copy_from_slice(&128u16.to_le_bytes());
+        header[off::PPI_B] = 0x00; // straps constructeur à zéro
+
+        let path = std::env::temp_dir().join("bytebox_test_portb.sna");
+        let path = path.to_str().unwrap();
+        let mut file = header.to_vec();
+        file.extend(std::iter::repeat_n(0u8, 128 * 1024));
+        std::fs::write(path, file).unwrap();
+
+        let mut machine = Machine::new();
+        let expected = machine.bus.ppi.port_b_input;
+        load(&mut machine, path).expect("lecture de l'instantane");
+
+        assert_eq!(
+            (machine.bus.ppi.port_b_input >> 1) & 0x07,
+            (expected >> 1) & 0x07,
+            "les straps constructeur ont ete ecrases par l'instantane"
         );
 
         std::fs::remove_file(path).ok();

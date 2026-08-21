@@ -119,10 +119,30 @@ only ever reads the first 128 KB of the underlying RAM buffer.
    PSG register masks, the envelope restart on R13 — then falls into place
    on its own.
 
-One deliberate divergence from Caprice32: the **PPI control register is
-written first**, not last. On a real 8255 (and in `Ppi::write_register`,
-where the behaviour is required by Barbarian) configuring it clears ports A
-and C, so writing it after the ports would wipe what was just restored.
+Two deliberate divergences from Caprice32:
+
+- The **PPI control register is written first**, not last. On a real 8255
+  (and in `Ppi::write_register`, where the behaviour is required by
+  Barbarian) configuring it clears ports A and C, so writing it after the
+  ports would wipe what was just restored.
+- **PPI port B is not restored at all.** It is an *input*: bits 1-3 are the
+  manufacturer links — what makes the boot screen read "Amstrad" rather
+  than Triumph or Saisho — alongside the mains frequency and live signals
+  (VSYNC, tape data). None of that is program state; it describes the
+  machine the snapshot is being loaded *onto*. An earlier version of `load`
+  restored it, and a snapshot carrying a zeroed port B made the CPC boot
+  under a different brand. Caprice32 doesn't restore it either (it writes
+  it with an `OUT` to &F5xx, which does nothing to input lines).
+
+## Where snapshots live
+
+`~/.bytebox/SNA`, or `[file] sna_path` in `config.toml` if set. Unlike
+`dsk_path`/`cdt_path`, this one also decides where snapshots are *written*,
+and has a built-in fallback rather than being optional: `snap` has to put
+its file somewhere, and the process's current directory is meaningless for
+an application started from a desktop menu. A name that already contains a
+path separator is honoured as-is, so `snap /tmp/try.sna` still works. The
+directory is created when a snapshot is first saved, never ahead of time.
 
 The interrupt state (`IM`, `IFF1`, `IFF2`) is restored through
 `CPU::set_interrupt_state`, added to the `zilog_z80` crate for this: those

@@ -92,6 +92,17 @@ pub struct FileConfig {
     /// distincts (`~/.bytebox/DSK` et `~/.bytebox/CDT`).
     #[serde(default)]
     pub cdt_path: Option<String>,
+    /// Même rôle pour les instantanés `.SNA` (console `snap`/`snapload`,
+    /// option `--snapshot`), à une différence près : ce répertoire sert
+    /// aussi à ÉCRIRE, pas seulement à chercher. Et contrairement aux deux
+    /// ci-dessus, son absence de `config.toml` ne désactive rien —
+    /// `~/.bytebox/SNA` prend alors le relais (voir
+    /// [`Config::snapshot_dir`]), pour que les instantanés aient toujours
+    /// un emplacement dédié plutôt que d'atterrir dans le répertoire
+    /// courant, qui n'a aucun sens pour une application lancée depuis un
+    /// menu.
+    #[serde(default)]
+    pub sna_path: Option<String>,
 }
 
 /// `Serialize` en plus de `Deserialize`, comme `CrtConfig`/`KeyboardConfig` :
@@ -229,6 +240,53 @@ impl Config {
             }
         }
         filename.to_string()
+    }
+
+    /// Répertoire dédié aux instantanés `.SNA` : `[file] sna_path` s'il est
+    /// renseigné, sinon `~/.bytebox/SNA`.
+    ///
+    /// Toujours une valeur utilisable, contrairement à `dsk_path`/`cdt_path`
+    /// qui peuvent rester sans équivalent : `snap` doit savoir où écrire même
+    /// sans `config.toml`, et le répertoire courant n'est pas une réponse
+    /// acceptable pour une application lancée depuis un menu ou un `.desktop`.
+    pub fn snapshot_dir(&self) -> PathBuf {
+        match &self.file.sna_path {
+            Some(dir) => expand_tilde(dir),
+            None => default_resource_dir("SNA"),
+        }
+    }
+
+    /// Chemin d'un instantané à LIRE, sur le même principe que
+    /// [`Config::resolve_disk_path`] : un chemin qui désigne déjà un fichier
+    /// existant est pris tel quel, sinon on le cherche dans
+    /// [`Config::snapshot_dir`].
+    pub fn resolve_snapshot_path(&self, filename: &str) -> String {
+        if Path::new(filename).is_file() {
+            return filename.to_string();
+        }
+        let candidate = self.snapshot_dir().join(filename);
+        if candidate.is_file() {
+            return candidate.to_string_lossy().into_owned();
+        }
+        filename.to_string()
+    }
+
+    /// Chemin d'un instantané à ÉCRIRE. Un simple nom de fichier atterrit
+    /// dans [`Config::snapshot_dir`] (créé au besoin) ; un nom comportant
+    /// déjà un séparateur de chemin est respecté tel quel, pour garder
+    /// possible un `snap /tmp/essai.sna` ponctuel.
+    ///
+    /// Le répertoire n'est créé qu'ici, au moment d'écrire : même principe
+    /// que le reste de `~/.bytebox` (voir `rom_installer`), qui n'existe
+    /// jamais « au cas où » mais seulement quand quelque chose doit
+    /// réellement y aller.
+    pub fn snapshot_save_path(&self, filename: &str) -> Result<String, MachineError> {
+        if Path::new(filename).parent().is_some_and(|p| !p.as_os_str().is_empty()) {
+            return Ok(filename.to_string());
+        }
+        let dir = self.snapshot_dir();
+        fs::create_dir_all(&dir)?;
+        Ok(dir.join(filename).to_string_lossy().into_owned())
     }
 }
 
@@ -411,6 +469,25 @@ fn replace_section(content: &str, section: &str, body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Configuration minimale à ajuster champ par champ, pour les tests qui
+    /// ne s'intéressent qu'à une seule section — plus lisible que réécrire
+    /// les sept sections à chaque fois.
+    fn sample_config() -> Config {
+        Config {
+            drives: DriveConfig { drive_b: false },
+            debugger: Debugger {
+                keyboard: false,
+                audio: false,
+            },
+            file: FileConfig::default(),
+            display: DisplayConfig::default(),
+            memory: MemoryConfig::default(),
+            rom: RomConfig::default(),
+            crt: CrtConfig::default(),
+            keyboard: KeyboardConfig::default(),
+        }
+    }
 
     /// Le bug qui a motivé `write_config_section`/`write_config_section_at` :
     /// sur un clone tout frais (jamais lancé, `~/.config/bytebox`
@@ -614,6 +691,7 @@ mod tests {
             file: FileConfig {
                 dsk_path: Some("bin".to_string()),
                 cdt_path: None,
+                sna_path: None,
             },
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),
@@ -652,6 +730,7 @@ mod tests {
             file: FileConfig {
                 dsk_path: Some("bin".to_string()),
                 cdt_path: Some("dossier_cdt_qui_n_existe_pas".to_string()),
+                sna_path: None,
             },
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),
@@ -683,6 +762,7 @@ mod tests {
             file: FileConfig {
                 dsk_path: None,
                 cdt_path: Some("bin".to_string()),
+                sna_path: None,
             },
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),
@@ -694,6 +774,39 @@ mod tests {
             config.resolve_tape_path("AmstradDiag.cdt"),
             "bin/AmstradDiag.cdt"
         );
+    }
+
+    /// Contrairement à `dsk_path`/`cdt_path`, l'absence de `sna_path` ne doit
+    /// pas laisser les instantanés sans domicile : `~/.bytebox/SNA` prend le
+    /// relais, sinon `snap` écrirait dans le répertoire courant du processus
+    /// — sans signification pour une application lancée depuis un menu.
+    #[test]
+    fn snapshot_dir_falls_back_to_the_dedicated_directory() {
+        let mut config = sample_config();
+        config.file.sna_path = None;
+        assert_eq!(config.snapshot_dir(), default_resource_dir("SNA"));
+
+        config.file.sna_path = Some("~/ailleurs/SNA".to_string());
+        assert_eq!(config.snapshot_dir(), expand_tilde("~/ailleurs/SNA"));
+    }
+
+    /// Un simple nom de fichier atterrit dans le répertoire dédié ; un nom
+    /// qui porte déjà un chemin est respecté tel quel, pour qu'un
+    /// `snap /tmp/essai.sna` ponctuel reste possible.
+    #[test]
+    fn a_bare_filename_is_saved_in_the_snapshot_directory_a_path_is_not() {
+        let dir = std::env::temp_dir().join("bytebox_test_sna_dir");
+        let mut config = sample_config();
+        config.file.sna_path = Some(dir.to_string_lossy().into_owned());
+
+        let bare = config.snapshot_save_path("essai.sna").unwrap();
+        assert_eq!(bare, dir.join("essai.sna").to_string_lossy());
+        assert!(dir.is_dir(), "le repertoire doit etre cree au moment d'ecrire");
+
+        let explicit = config.snapshot_save_path("/tmp/ailleurs.sna").unwrap();
+        assert_eq!(explicit, "/tmp/ailleurs.sna");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -730,6 +843,7 @@ mod tests {
             file: FileConfig {
                 dsk_path: Some("~/.bytebox/DSK".to_string()),
                 cdt_path: None,
+                sna_path: None,
             },
             display: DisplayConfig::default(),
             memory: MemoryConfig::default(),

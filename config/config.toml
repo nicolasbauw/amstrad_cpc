@@ -24,6 +24,13 @@ dsk_path = "~/.bytebox/DSK"
 # or --tape) — a separate directory rather than reusing dsk_path, since disk
 # and tape images live in different folders.
 cdt_path = "~/.bytebox/CDT"
+# Same again for .SNA snapshots (console "snap"/"snapload", or --snapshot),
+# with one difference: this directory is also where snapshots are WRITTEN,
+# not just searched. Unlike the two above, leaving it out doesn't disable
+# anything — ~/.bytebox/SNA is used instead, so snapshots never end up in
+# whatever directory the emulator happened to be started from. The
+# directory is created when a snapshot is first saved, not before.
+sna_path = "~/.bytebox/SNA"
 
 [display]
 # Window zoom level at startup: "x1", "x2", "x3" or "fullscreen". Same
