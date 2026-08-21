@@ -30,7 +30,7 @@ embed-resource = "3"
 
 [dependencies]
 bytebox-core = { path = "../core" }
-zilog_z80 = "1.0.0"
+zilog_z80 = "1.1.0"
 sdl2 = { version = "0.38.0", features = ["raw-window-handle"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # M0 a demarre sur la version utilisee par l'exemple officiel

@@ -291,6 +291,59 @@ A concrete example of combined usage:
 
 ![Screenshot](assets/machine_status.png)
 
+## Writing Z80 code for the CPC
+
+If you're developing *for* the CPC rather than just running software on it,
+snapshots give you an edit-assemble-run loop with no disk image in the way.
+[RASM](https://github.com/EdouardBERGE/rasm) assembles straight into a
+ready-to-run `.SNA` — RAM laid out and entry point already set — which
+ByteBox resumes directly:
+
+```sh
+rasm demo.asm -oi demo.sna && bytebox --snapshot=demo.sna
+```
+
+`-oi` names the snapshot RASM writes. In the source, `BUILDSNA` asks for a
+snapshot rather than a cartridge, and `RUN` sets the address execution
+starts from:
+
+```
+    BUILDSNA
+    ORG  #4000
+    RUN  #4000
+start
+    ld   bc, #7F10      ; select the border
+    out  (c), c
+    ld   bc, #7F4C      ; ink 12 — bright red
+    out  (c), c
+loop
+    jr   loop
+```
+
+The whole cycle is a single command away, so re-running after an edit costs
+nothing — which is the point.
+
+A few things worth knowing:
+
+- **If a snapshot is refused as compressed**, assemble a version 2 one
+  instead: `BUILDSNA V2` in the source, or `-v2` on the command line. RASM
+  defaults to version 3, whose memory may be stored in compressed
+  `MEM0`-`MEM8` chunks; ByteBox refuses those outright rather than loading
+  a machine with blank memory (see `doc/sna-format.md`). Version 3 files
+  with a plain memory dump load normally.
+- **Where snapshots live.** A bare filename is looked up in
+  `~/.bytebox/SNA` (override with `[file] sna_path` in `config.toml`), the
+  same directory the `snap` console command writes to. A name containing a
+  path is used as-is, so `--snapshot=./demo.sna` works from a build
+  directory.
+- **Snapshots go both ways.** `snap f.sna` from the console (`F10`/`F11`)
+  captures the current state, `snapload f.sna` restores it. Handy to park a
+  hard-to-reach state — a level, a crash, a specific interrupt moment — and
+  come back to it, in ByteBox or in another emulator.
+- **The debugger is right there.** Since a snapshot restores registers,
+  RAM and hardware state exactly, `F12` (machine status), breakpoints and
+  single-stepping (`F8`) all work from the moment it loads.
+
 ## Development builds
 
 The window title carries a build identifier, so a build in progress is
