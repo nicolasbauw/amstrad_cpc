@@ -227,7 +227,16 @@ jobs:
       # décrive correctement un tag crée toujours un commit ultérieur à ce
       # tag (jamais inclus dedans) : le lire depuis le tag lui-même
       # rouvrirait ce décalage à chaque fois plutôt que de le refermer.
+      #
+      # `ref: master` explicite plutôt que de compter sur le défaut de
+      # actions/checkout (github.sha) : ce défaut suit le sélecteur "Use
+      # workflow from" de l'interface de déclenchement manuel, un réglage
+      # SÉPARÉ de notre propre entrée `tag` — laissé sur un tag d'un run
+      # précédent, il fige quand même ce checkout sur ce commit-là, aussi
+      # sûrement que le `ref: inputs.tag` qu'on vient de retirer.
       - uses: actions/checkout@v4
+        with:
+          ref: master
 
       # Homebrew refuse désormais d'installer une formule hors tap
       # ("Homebrew requires formulae to be in a tap") : un tap local (un
