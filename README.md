@@ -300,15 +300,17 @@ ready-to-run `.SNA` — RAM laid out and entry point already set — which
 ByteBox resumes directly:
 
 ```sh
-rasm demo.asm -oi demo.sna && bytebox --snapshot=demo.sna
+rasm demo.asm -oi demo.sna -v2 && bytebox --snapshot=demo.sna
 ```
 
-`-oi` names the snapshot RASM writes. In the source, `BUILDSNA` asks for a
-snapshot rather than a cartridge, and `RUN` sets the address execution
-starts from:
+`-oi` names the snapshot RASM writes, and `-v2` asks for a version 2 one —
+see the note below, it matters. In the source, `BUILDSNA` asks for a
+snapshot rather than a cartridge, `BANK 0` puts the code in the snapshot's
+memory, and `RUN` sets the address execution starts from:
 
 ```
     BUILDSNA
+    BANK 0
     ORG  #4000
     RUN  #4000
 start
@@ -320,17 +322,21 @@ loop
     jr   loop
 ```
 
-The whole cycle is a single command away, so re-running after an edit costs
-nothing — which is the point.
+Assemble and run that, and you get a bright red border around a blue
+screen. The whole cycle is a single command away, so re-running after an
+edit costs nothing — which is the point.
 
 A few things worth knowing:
 
-- **If a snapshot is refused as compressed**, assemble a version 2 one
-  instead: `BUILDSNA V2` in the source, or `-v2` on the command line. RASM
-  defaults to version 3, whose memory may be stored in compressed
-  `MEM0`-`MEM8` chunks; ByteBox refuses those outright rather than loading
-  a machine with blank memory (see `doc/sna-format.md`). Version 3 files
-  with a plain memory dump load normally.
+- **Use `-v2`.** RASM defaults to version 3 snapshots, which store memory
+  in compressed `MEM0`-`MEM8` chunks (the RAM size field is left at zero).
+  ByteBox refuses those outright rather than loading a machine with blank
+  memory — see `doc/sna-format.md`. Version 2 writes a plain memory dump
+  and loads fine. `BUILDSNA V2` in the source does the same as `-v2`.
+- **Don't forget `BANK 0`.** Without it RASM assembles your code but writes
+  nothing into the snapshot's memory, and says so only through a
+  `Warning: No byte were written in snapshot memory` — no file is produced
+  at all.
 - **Where snapshots live.** A bare filename is looked up in
   `~/.bytebox/SNA` (override with `[file] sna_path` in `config.toml`), the
   same directory the `snap` console command writes to. A name containing a

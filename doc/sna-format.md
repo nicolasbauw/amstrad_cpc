@@ -158,6 +158,26 @@ host restoring a state had no way to put them back.
   emulator crash rather than an unsupported format. Caprice32 rejects them
   too. Chunks *following* a normal flat dump are simply skipped, as the
   format intends.
+
+  This is not a theoretical case: **RASM produces exactly that by
+  default.** Verified against RASM v3.2.7, and visible in its source
+  (`rasm.c`, snapshot construction) — version 2 sets the dump size to 64 or
+  128 KB, anything else sets it to zero:
+
+  ```c
+  if (ae->snapshot.version==2) {
+      if (maxrom>=4)      ae->snapshot.dumpsize[0]=128;
+      else if (maxrom>=0) ae->snapshot.dumpsize[0]=64;
+  } else {
+      ae->snapshot.dumpsize[0]=0;
+  }
+  ```
+
+  Measured on the same source assembled both ways: 1089 bytes in v3
+  (compressed chunks) against 65792 — exactly `256 + 64 × 1024` — in v2.
+  Hence the `-v2` advice in the README. Supporting the chunked form would
+  mean implementing the chunk walk *and* its decompression; worth doing
+  only if the `-v2` detour becomes a real nuisance.
 - **Version 2/3 header fields.** Model, FDC state, internal CRTC counters,
   PSG envelope step and so on are read past, not applied — except the CPC
   model, which only produces a warning when it isn't a 6128 (a 464 snapshot
