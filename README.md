@@ -26,6 +26,9 @@ brew tap nicolasbauw/bytebox
 brew install bytebox
 ```
 
+Recent Homebrew versions ask you to explicitly trust a third-party tap the
+first time (it'll print the exact command) — expected, not an error.
+
 This builds from source (`rust`, pulled in automatically, is the only
 non-trivial dependency) and also installs `ByteBox.app`; see the
 "Caveats" note `brew` prints at the end for the one extra command to add
