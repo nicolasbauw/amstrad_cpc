@@ -28,16 +28,30 @@ sa piste).
 
 À FAIRE APRÈS LA V2, comme convenu.
 
-## 2) FDC — vrai modèle de rotation
+## 2) IMPASSE DÉMONTRÉE — FDC — vrai modèle de rotation
 
-Détails dans `doc/discology-copie.md`. L'espacement des secteurs vient d'une
-constante globale empirique (`SECTOR_OVERHEAD_BYTES` = 100, dans `fdc.rs`),
-non monotone et sans plage stable, qui a déjà dû être recalée quand le temps
-CPU a été corrigé (voir `doc/sprite-flicker.md`).
+L'espacement des secteurs vient d'une constante globale empirique
+(`SECTOR_OVERHEAD_BYTES` = 100, dans `fdc.rs`), non monotone et sans plage
+stable, qui a déjà dû être recalée quand le temps CPU a été corrigé.
 
-Le correctif de fond : donner à chaque secteur sa position angulaire réelle,
-lue dans l'image `.dsk`. Supprimerait le paramètre et rendrait le test
-Discology robuste.
+Le correctif envisagé — donner à chaque secteur sa position angulaire réelle,
+lue dans l'image `.dsk` — **a été instrumenté et invalidé**. Mesures
+détaillées dans `doc/discology-copie.md` ; en résumé :
+
+- la valeur physiquement exacte (144) casse la copie, aujourd'hui encore ;
+- le champ GAP#3 du `.dsk` n'est pas exploitable : `Discology.dsk` déclare 78
+  partout, ce qui donnerait 6520 octets sur une piste qui n'en contient
+  que 6250 — la géométrie déclarée ne rentre pas dans un tour ;
+- le seul modèle sans paramètre ("une piste = un tour") échoue aussi ;
+- le temps CPU est hors de cause : notre boucle de sondage vaut exactement
+  celle de Caprice32, opcode par opcode ;
+- Caprice32 ne peut pas servir de référence : il n'a **aucun** modèle de
+  rotation (Read ID instantané, simple compteur d'index).
+
+La constante compense en réalité un budget angulaire trop court côté
+Discology, dont la cause reste inconnue. Reprendre ce point supposerait de
+désassembler sa routine de seuil (compteur en `103E`) — chantier ouvert,
+sans garantie, et sans urgence tant qu'aucun autre logiciel n'en souffre.
 
 ## 3) FDC — marques "Deleted Data"
 

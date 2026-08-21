@@ -129,19 +129,72 @@ C'est le signe que ce paramètre compense l'imprécision du modèle de rotation
 plutôt qu'il ne décrit une réalité physique : toute modification du temps
 CPU le remettra en cause.
 
-### À faire un jour : un vrai modèle de rotation
+### Le "vrai modèle de rotation" est une impasse — mesuré
 
-Le correctif de fond serait de donner à chaque secteur sa **position
-angulaire réelle** sur la piste, lue dans l'image `.dsk` (ordre physique des
-secteurs, tailles réelles, et pour l'Extended DSK les tailles non standard),
-plutôt que de déduire un espacement uniforme d'une constante globale. Le
-temps d'attente d'un Read ID deviendrait alors « temps jusqu'à ce que le
-prochain identifiant passe sous la tête », sans paramètre à régler, et le
-test de Discology cesserait d'être un équilibre instable.
+L'idée paraissait évidente : donner à chaque secteur sa **position angulaire
+réelle**, lue dans l'image `.dsk`, plutôt que de déduire un espacement
+uniforme d'une constante globale. Le temps d'attente d'un Read ID
+deviendrait « temps jusqu'à ce que le prochain identifiant passe sous la
+tête », sans paramètre à régler.
 
-Tant qu'aucun autre logiciel n'en souffre, ça reste un chantier de finition
-(V3), pas un correctif urgent : la copie fonctionne, et le réglage actuel est
-verrouillé par le test de bout en bout.
+Trois mesures l'ont invalidée. Elles sont consignées ici pour que personne
+ne recommence.
+
+**1. La valeur physiquement exacte échoue toujours.** Avec
+`SECTOR_OVERHEAD_BYTES = 144` (les gaps AMSDOS standard), la copie ressort
+vide. Pire que « il manque le dernier secteur » : l'instrumentation montre
+que Discology n'émet que **2 Read ID** au lieu d'entamer un relevé — son
+budget est épuisé bien avant.
+
+**2. La donnée de l'image n'est pas exploitable.** L'en-tête de piste du
+`.dsk` porte bien un champ GAP#3 (offset 0x16), que notre parseur ignorait.
+Le lire ne servirait à rien : `bin/Discology.dsk` déclare `GAP#3 = 78`
+partout, y compris sur sa piste 0 qui loge **10 secteurs** de 512 octets.
+Soit 10 × (512 + ~140) = 6520 octets, pour une capacité de piste de 6250 à
+250 kbit/s. **La géométrie déclarée ne rentre pas dans un tour** : c'est une
+valeur nominale, pas une description du tracé réel.
+
+**3. Le seul modèle sans paramètre échoue aussi.** « Une piste occupe
+exactement un tour » (physiquement vrai, et qui supprimerait la constante) :
+copie en échec également.
+
+### Ce que l'instrumentation a montré du mécanisme réel
+
+En traçant chaque Read ID (delta de temps, index de secteur, sondages MSR) :
+
+- Discology relève une piste en exactement autant de Read ID qu'elle a de
+  secteurs, les index défilant proprement (`0,1,2…8,0`) — le modèle de
+  rotation fait donc bien son travail.
+- Chaque Read ID coûte ~**1666 sondages MSR** à ~**45 cycles** l'un.
+- Un relevé de 9 secteurs occupe ~705 000 cycles, soit **0,88 tour**, avec la
+  constante à 100. Une piste physiquement réelle en occuperait 0,945.
+
+### Deux causes éliminées
+
+**Le temps CPU est hors de cause.** La boucle de sondage de Discology coûte
+chez nous exactement ce qu'elle coûte chez Caprice32, opcode par opcode :
+`IN A,(C)` = 16 (leur `Ix` = 12, plus 4 pour le préfixe `ED`) et `JR` pris =
+12 (leur `cc_op` = 8 plus `cc_ex` = 4). Aucun écart à récupérer de ce côté.
+
+**Caprice32 ne peut pas servir de référence ici : il n'a aucun modèle de
+rotation.** Son `fdc_readID` (`src/fdc.cpp`) renvoie le secteur suivant
+*instantanément*, via un simple compteur d'index remis à zéro en fin de
+piste — ni attente, ni position angulaire. Notre modèle est donc un ajout
+par rapport à l'émulateur de référence, et c'est lui qui rend Discology
+sensible à un budget temps que Caprice32 n'exerce jamais.
+
+### Où ça en reste
+
+La constante ne compense pas une imprécision de la géométrie du disque,
+comme on l'a d'abord cru : elle compense le fait que **Discology dispose de
+moins de marge angulaire chez nous que sur une vraie machine**, pour une
+raison qui n'est ni le temps CPU ni les données de l'image. Resserrer les
+secteurs sous leur espacement physique lui rend cette marge.
+
+La suite logique serait de désassembler la routine de seuil (le compteur en
+`103E`) pour savoir ce qu'elle attend exactement. Chantier ouvert, sans
+garantie : tant qu'aucun autre logiciel ne souffre du réglage actuel, la
+copie fonctionne et le test de bout en bout le verrouille.
 
 ## Vérification
 
