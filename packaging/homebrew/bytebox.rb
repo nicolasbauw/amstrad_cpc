@@ -10,11 +10,8 @@ class Bytebox < Formula
   depends_on "sdl2"
 
   def install
-    # Marque ce build comme "officiel" : sans ça, l'icône de fenêtre/dock
-    # porte un cadre rouge de "dev build" (voir README, "Development
-    # builds"). --profile dist : profil réservé aux binaires distribués
-    # (LTO, un seul codegen-unit), voir le Cargo.toml racine.
-    ENV["BYTEBOX_PACKAGED_BUILD"] = "1"
+    # --profile dist : profil réservé aux binaires distribués (LTO, un seul
+    # codegen-unit), voir le Cargo.toml racine.
     system "cargo", "build", "--profile", "dist", "--locked", "-p", "bytebox"
     bin.install "target/dist/bytebox"
 

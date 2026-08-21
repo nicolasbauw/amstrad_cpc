@@ -3,8 +3,8 @@
 Original draft generated from a web search; reviewed and rewritten here
 against ByteBox's actual `Cargo.toml`, `packaging/bytebox.desktop`, and
 build setup — a few things in the generic version didn't hold up (missing
-`build()`/`package()` functions, no mention of the `BYTEBOX_PACKAGED_BUILD`
-build flag, no checksums, generic paths instead of this project's own).
+`build()`/`package()` functions, no checksums, generic paths instead of
+this project's own).
 
 ## Step 1 — Prerequisites
 
@@ -86,12 +86,10 @@ build() {
   # Archive source, not a git clone: the extracted directory keeps the
   # GitHub repo's name (amstrad_cpc), not the package's (bytebox).
   cd "amstrad_cpc-$pkgver"
-  # Marks this as an official build: without it, the window/taskbar icon
-  # carries a red "dev build" border (see README, "Development
-  # builds"). --profile dist (not --release): a slower-to-compile but
-  # smaller/faster profile reserved for distributed binaries (LTO, single
-  # codegen unit — see the root Cargo.toml).
-  export BYTEBOX_PACKAGED_BUILD=1
+  # --profile dist (not --release): a slower-to-compile but smaller/faster
+  # profile reserved for distributed binaries (LTO, single codegen unit —
+  # see the root Cargo.toml).
+  #
   # makepkg.conf's LTOFLAGS ("-flto=auto") ends up in CFLAGS/CXXFLAGS: with
   # this profile's own Rust-side LTO (`dist` = `lto = "thin"`), cargo
   # detects both and auto-enables cross-language LTO (-C linker-plugin-lto)

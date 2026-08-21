@@ -29,23 +29,19 @@ use sdl2::surface::Surface;
 /// pixels (barre des tâches, alt-tab, titre de fenêtre) : `bytebox_icon.png`
 /// (256×256) est une version pré-réduite de `bytebox.png` (1254×1254, gardé
 /// pour d'autres usages éventuels — capture d'écran du README, etc.), pour
-/// ne pas décoder ni parcourir pixel par pixel (voir
-/// `recolor_border_for_dev_build` plus bas) une image ~24× plus grande que
-/// nécessaire, trois fois de suite (une par fenêtre) à chaque lancement.
+/// ne pas décoder une image ~24× plus grande que nécessaire, trois fois de
+/// suite (une par fenêtre) à chaque lancement.
 ///
-/// Tout ce qui n'est pas construit par le paquet officiel — un `cargo
-/// build`/`cargo run` en debug COMME en `--release` — a en plus son cadre
-/// recoloré en rouge (voir `recolor_border_for_dev_build`) : seul un
-/// vrai paquet installé (PKGBUILD ou équivalent) compte comme version
-/// "officielle", même principe que Caprice32. `--release` seul n'en fait
-/// donc pas foi : c'est `BYTEBOX_PACKAGED_BUILD`, une variable
-/// d'environnement lue À LA COMPILATION (`option_env!`, pas `env!` : son
-/// absence ne doit pas empêcher de compiler), que seule la recette de
-/// packaging doit positionner (README, section "Development builds"). Le
-/// paquet installé et la version en cours de travail seraient sinon
-/// indissociables l'un de l'autre.
-const IS_PACKAGED_BUILD: bool = option_env!("BYTEBOX_PACKAGED_BUILD").is_some();
-
+/// Une version antérieure distinguait ici les builds "officiels" (paquet
+/// installé) des builds de développement, en recolorant en rouge le cadre
+/// de l'icône pour ces derniers, selon une variable d'environnement
+/// `BYTEBOX_PACKAGED_BUILD` positionnée par les recettes de packaging.
+/// Abandonné : le mécanisme n'a jamais fonctionné de façon fiable en CI
+/// (l'AppImage gardait le cadre rouge alors que la variable était bien vue
+/// par le build script), pour un bénéfice qui ne valait pas cette
+/// complexité. Qui veut distinguer son build local peut le faire
+/// localement, dans son propre lanceur `.desktop`, sans que le code de
+/// l'émulateur ait à en connaître quoi que ce soit.
 fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
     // Sous macOS, SDL n'a pas de notion d'icône par fenêtre (NSWindow n'en
     // affiche pas dans sa barre de titre) : sa moulinette Cocoa fait donc
@@ -71,43 +67,11 @@ fn set_window_icon(window: &mut sdl2::video::Window) -> Result<(), String> {
         .into_rgba8();
     let (width, height) = img.dimensions();
     let mut pixels = img.into_raw();
-    if !IS_PACKAGED_BUILD {
-        recolor_border_for_dev_build(&mut pixels);
-    }
     let pitch = width * 4;
     let surface = Surface::from_data(&mut pixels, width, height, pitch, PixelFormatEnum::RGBA32)
         .map_err(|e| e.to_string())?;
     window.set_icon(&surface);
     Ok(())
-}
-
-/// Repeint en rouge le cadre gris arrondi déjà dessiné dans
-/// `assets/bytebox_icon.png`, sur un buffer RGBA8, 4 octets par pixel.
-///
-/// Une première version dessinait un nouveau cadre rouge au bord du
-/// canevas, par-dessus le fond noir — visuellement correct, mais un second
-/// cadre distinct de celui du logo, pas franchement élégant. Celui-ci
-/// recolore directement le cadre existant : un seul cadre, à la même
-/// place, juste d'une autre couleur selon le type de build.
-///
-/// Détection par couleur plutôt que par géométrie (pas de rectangle à
-/// coordonnées codées en dur, qui casserait si l'artwork changeait) : le
-/// cadre est gris neutre (R≈G≈B), à mi-clarté — jamais confondu avec le
-/// fond noir, le jaune/bleu du logo "BB" ou les bandes de couleur, aucun de
-/// ces éléments n'étant proche du gris neutre.
-fn recolor_border_for_dev_build(pixels: &mut [u8]) {
-    for px in pixels.chunks_exact_mut(4) {
-        let [r, g, b, _a] = [px[0], px[1], px[2], px[3]];
-        let max = r.max(g).max(b);
-        let min = r.min(g).min(b);
-        let desaturated = max - min <= 12;
-        let mid_lightness = (40..=235).contains(&max);
-        if desaturated && mid_lightness {
-            px[0] = 220;
-            px[1] = 20;
-            px[2] = 20;
-        }
-    }
 }
 
 /// Niveau de zoom de la fenêtre d'affichage (touches F1-F4, ou
@@ -279,29 +243,12 @@ pub fn run(
     let console_window_id = console_win.id();
     let mut console_window = ConsoleWindow::new(console_win)?;
 
-    // Identifiant de build (build.rs) : le numéro de version pour un build
-    // "officiel" (IS_PACKAGED_BUILD — même signal que le cadre rouge de
-    // l'icône, voir plus haut), sinon le hash court du commit s'il est
-    // disponible (dépôt cloné, `cargo build` local ou
-    // packaging/PKGBUILD-git), sinon encore la version en repli. Un simple
-    // `.git` présent ne suffit PAS à lui seul à afficher le hash : nos
-    // propres CI de packaging (AppImage, MSI) clonent via `actions/checkout`
-    // (donc avec `.git`) tout en étant des builds officiels, qui doivent
-    // afficher la version comme le ferait packaging/PKGBUILD depuis un
-    // tarball sans `.git`.
-    // Diagnostic temporaire (même enquête que le "cargo:warning" de
-    // build.rs) : ce que CE BINAIRE COMPILÉ croit réellement au runtime,
-    // pas seulement ce que le log de compilation a affiché. À retirer une
-    // fois la cause trouvée.
-    app_log!(
-        "Diag: IS_PACKAGED_BUILD={IS_PACKAGED_BUILD}, BYTEBOX_GIT_HASH={:?}",
-        option_env!("BYTEBOX_GIT_HASH")
-    );
-    let build_id = if IS_PACKAGED_BUILD {
-        env!("CARGO_PKG_VERSION")
-    } else {
-        option_env!("BYTEBOX_GIT_HASH").unwrap_or(env!("CARGO_PKG_VERSION"))
-    };
+    // Identifiant de build (build.rs) : le hash court du commit quand il est
+    // disponible (dépôt cloné — `cargo build` local, packaging/PKGBUILD-git,
+    // ou nos jobs CI, qui clonent via `actions/checkout`), sinon le numéro
+    // de version de Cargo.toml (archive d'une release taguée, dont le
+    // tarball n'embarque pas `.git` — packaging/PKGBUILD, Homebrew).
+    let build_id = option_env!("BYTEBOX_GIT_HASH").unwrap_or(env!("CARGO_PKG_VERSION"));
     let window_title = if machine.diagnostic_mode {
         format!("ByteBox - {build_id} - Diag ROM")
     } else {
@@ -1210,27 +1157,6 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Un pixel gris neutre (le cadre) doit devenir rouge, alpha préservé ;
-    /// le fond noir et une couleur saturée (jaune/bleu du logo) doivent
-    /// rester intacts.
-    #[test]
-    fn recolor_border_for_dev_build_only_touches_neutral_grey_pixels() {
-        #[rustfmt::skip]
-        let mut pixels: Vec<u8> = vec![
-            180, 178, 182, 200, // cadre : gris neutre, mi-clarté
-              0,   0,   0, 255, // fond noir
-            254, 213,   3, 255, // jaune saturé (logo)
-             20,  85, 224, 255, // bleu saturé (logo)
-        ];
-
-        recolor_border_for_dev_build(&mut pixels);
-
-        assert_eq!(&pixels[0..4], [220, 20, 20, 200], "cadre gris non recolore");
-        assert_eq!(&pixels[4..8], [0, 0, 0, 255], "fond noir repeint a tort");
-        assert_eq!(&pixels[8..12], [254, 213, 3, 255], "jaune repeint a tort");
-        assert_eq!(&pixels[12..16], [20, 85, 224, 255], "bleu repeint a tort");
-    }
 
     #[test]
     fn display_mode_recognizes_the_four_config_values() {

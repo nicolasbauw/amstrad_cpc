@@ -68,9 +68,8 @@ jobs:
       # CMake lui-même reconnaît (ajoutée par Kitware justement pour ce genre
       # de cas), pas un `-D` à passer à la main : le crate `cmake` (via
       # sdl2-sys) invoque `cmake` en sous-processus, qui hérite de l'env.
-      - name: Build (SDL2 statique, build "officiel")
+      - name: Build (SDL2 statique)
         env:
-          BYTEBOX_PACKAGED_BUILD: "1"
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --profile dist --locked -p bytebox --features static-sdl2
 
@@ -150,16 +149,15 @@ jobs:
       # Voir le commentaire équivalent du job appimage ci-dessus : même
       # incompatibilité CMake 4 / cmake_minimum_required trop ancien de SDL2,
       # côté Windows aussi.
-      - name: Build (SDL2 statique, build "officiel")
+      - name: Build (SDL2 statique)
         env:
-          BYTEBOX_PACKAGED_BUILD: "1"
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --profile dist --locked -p bytebox --features static-sdl2
 
       # --no-build : on a déjà compilé nous-mêmes juste au-dessus, avec la
-      # feature static-sdl2 et BYTEBOX_PACKAGED_BUILD — cargo-wix ne doit pas
-      # relancer son propre `cargo build` par défaut (profil Release, sans
-      # ces réglages), qui produirait un binaire différent de celui empaqueté.
+      # feature static-sdl2 — cargo-wix ne doit pas relancer son propre
+      # `cargo build` par défaut (profil Release, sans cette feature), qui
+      # produirait un binaire différent de celui empaqueté.
       #
       # working-directory: bytebox — bytebox/wix/main.wxs référence
       # "wix\License.rtf" et "..\assets\bytebox_icon.ico", des chemins

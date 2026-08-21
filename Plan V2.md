@@ -258,10 +258,13 @@ dépassée sur plusieurs points) :**
   compilation (`include_bytes!`) — ni CWD, ni `~/.bytebox/assets/` (l'ancien
   emplacement attendu, jamais créé ni peuplé par personne) n'entrent plus en
   jeu. Rien à installer pour ces deux fichiers.
-- **`BYTEBOX_PACKAGED_BUILD`** : la recette de packaging doit positionner
-  cette variable d'environnement avant `cargo build --release` (voir
-  README, section "Development builds") — sans elle, l'icône du paquet
-  porterait la bande rouge diagonale réservée aux builds de développement.
+- Une variable `BYTEBOX_PACKAGED_BUILD`, que chaque recette de packaging
+  devait positionner pour distinguer un build "officiel" d'un build de
+  développement (cadre rouge sur l'icône), a existé puis été **abandonnée** :
+  jamais fiable en CI, pour un bénéfice qui ne valait pas la complexité.
+  Plus rien à positionner côté packaging ; le titre de la fenêtre porte
+  désormais seul cette distinction (hash de commit vs numéro de version,
+  voir README, section "Development builds").
 
 Un unique workflow GitHub Actions (`release.yml`, déclenché sur un tag),
 matrice par OS, peut produire tous les formats retenus — GitHub fournit de

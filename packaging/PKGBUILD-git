@@ -22,12 +22,10 @@ pkgver() {
 
 build() {
   cd "$pkgname"
-  # Marks this as an official build: without it, the window/taskbar icon
-  # carries a red "dev build" border (see README, "Development
-  # builds"). --profile dist (not --release): a slower-to-compile but
-  # smaller/faster profile reserved for distributed binaries (LTO, single
-  # codegen unit — see the root Cargo.toml).
-  export BYTEBOX_PACKAGED_BUILD=1
+  # --profile dist (not --release): a slower-to-compile but smaller/faster
+  # profile reserved for distributed binaries (LTO, single codegen unit —
+  # see the root Cargo.toml).
+  #
   # makepkg.conf's LTOFLAGS ("-flto=auto") ends up in CFLAGS/CXXFLAGS: with
   # this profile's own Rust-side LTO (`dist` = `lto = "thin"`), cargo
   # detects both and auto-enables cross-language LTO (-C linker-plugin-lto)
