@@ -6,13 +6,13 @@
 > La lecture des `.SNA` ci-dessous a par exemple donné la 2.1.0.
 
 Sept points connus et documentés, VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
-V1 (cinq désormais résolus — points 1, 3, 4, 5 et 7 — et un sixième,
-le 2, refermé comme impasse démontrée) : aucun ne nuisait au
-fonctionnement (tous les logiciels du premier batch tournaient déjà), ce sont
-des approximations acceptées dont on connaît la limite. C'est une liste de
-référence, pas un jalonnage figé : chaque point est indépendant des autres et
-peut être traité dans n'importe quel ordre, ou laissé de côté indéfiniment si
-rien ne le réclame.
+V1 (cinq désormais résolus — points 1, 3, 4, 5 et 7 — et le point 2 en cours
+d'investigation, repris par désassemblage de Discology pour la rigueur de
+l'émulation) : aucun ne nuisait au fonctionnement (tous les logiciels du
+premier batch tournaient déjà), ce sont des approximations acceptées dont on
+connaît la limite. C'est une liste de référence, pas un jalonnage figé :
+chaque point est indépendant des autres et peut être traité dans n'importe
+quel ordre, ou laissé de côté indéfiniment si rien ne le réclame.
 
 ## 1) RÉSOLU — FDC — écriture par secteur au lieu de l'image entière
 
@@ -30,30 +30,44 @@ réécriture complète dès que la géométrie ne correspond pas — c'est ce re
 qui rend le correctif sans risque. Format Track continue de réécrire tout,
 puisqu'il change la structure des pistes.
 
-## 2) IMPASSE DÉMONTRÉE — FDC — vrai modèle de rotation
+## 2) EN COURS — FDC — vrai modèle de rotation (désassemblage de Discology)
 
 L'espacement des secteurs vient d'une constante globale empirique
 (`SECTOR_OVERHEAD_BYTES` = 100, dans `fdc.rs`), non monotone et sans plage
 stable, qui a déjà dû être recalée quand le temps CPU a été corrigé.
 
 Le correctif envisagé — donner à chaque secteur sa position angulaire réelle,
-lue dans l'image `.dsk` — **a été instrumenté et invalidé**. Mesures
-détaillées dans `doc/discology-copie.md` ; en résumé :
+lue dans l'image `.dsk` — a d'abord semblé être une impasse (trois modèles
+testés, tous en échec). Repris ensuite via un désassemblage complet des
+routines concernées, qui a nettement affiné le diagnostic. Détails et
+mesures précises dans `doc/discology-copie.md` ; en résumé :
 
-- la valeur physiquement exacte (144) casse la copie, aujourd'hui encore ;
-- le champ GAP#3 du `.dsk` n'est pas exploitable : `Discology.dsk` déclare 78
-  partout, ce qui donnerait 6520 octets sur une piste qui n'en contient
-  que 6250 — la géométrie déclarée ne rentre pas dans un tour ;
-- le seul modèle sans paramètre ("une piste = un tour") échoue aussi ;
-- le temps CPU est hors de cause : notre boucle de sondage vaut exactement
-  celle de Caprice32, opcode par opcode ;
-- Caprice32 ne peut pas servir de référence : il n'a **aucun** modèle de
-  rotation (Read ID instantané, simple compteur d'index).
+- **Le mécanisme réel (overhead=100, celui qui fonctionne) est maintenant
+  entièrement compris et mesuré au cycle près**, pas juste approximé : la
+  piste 0 (9 secteurs de 512 octets + 1 de 256, pas 10×512 comme supposé
+  d'abord) déclenche 11 Read ID, dont 10 tiennent sous le budget de 16 640
+  sondages (marge de 1,8 % sur le dernier utile) et le 11ᵉ — un appel de
+  confirmation, pas une lecture nécessaire — dépasse sans dommage.
+- **La valeur physiquement exacte (144) échoue toujours, mais pas pour la
+  raison d'abord supposée.** Ce n'est pas la piste 0 qui manque de budget :
+  elle n'atteint jamais sa boucle de relevé, même avec beaucoup plus de
+  temps laissé à l'émulation. Un Read ID sur la piste 3 (géométrie standard,
+  probablement une détection de format) intervient juste avant et n'a pas
+  encore été rattaché à une routine précise.
+- **La géométrie non standard n'est pas propre à Discology.** Confronté aux
+  24 images du dépôt : 20 sont parfaitement uniformes (9×512 partout), et
+  les deux seules qui dérogent (Discology et Teenage Mutant Hero Turtles)
+  sont toutes deux liées à une protection, concentrée sur les premières
+  pistes — cohérent avec une technique de protection connue, pas un hasard.
+- Deux causes déjà éliminées : le temps CPU (notre boucle de sondage vaut
+  exactement celle de Caprice32, opcode par opcode) et Caprice32 comme
+  référence (il n'a **aucun** modèle de rotation — Read ID instantané, simple
+  compteur d'index).
 
-La constante compense en réalité un budget angulaire trop court côté
-Discology, dont la cause reste inconnue. Reprendre ce point supposerait de
-désassembler sa routine de seuil (compteur en `103E`) — chantier ouvert,
-sans garantie, et sans urgence tant qu'aucun autre logiciel n'en souffre.
+Prochaine étape : tracer l'appel sur la piste 3. Pas de garantie d'aboutir,
+et pas d'urgence — le réglage actuel (100) fonctionne, verrouillé par le
+test de bout en bout. Repris pour la rigueur de l'émulation, sans cas
+d'usage réel qui le réclame.
 
 ## 3) RÉSOLU — FDC — marques "Deleted Data"
 

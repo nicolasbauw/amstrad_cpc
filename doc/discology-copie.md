@@ -142,9 +142,16 @@ ne recommence.
 
 **1. La valeur physiquement exacte échoue toujours.** Avec
 `SECTOR_OVERHEAD_BYTES = 144` (les gaps AMSDOS standard), la copie ressort
-vide. Pire que « il manque le dernier secteur » : l'instrumentation montre
-que Discology n'émet que **2 Read ID** au lieu d'entamer un relevé — son
-budget est épuisé bien avant.
+vide, et l'instrumentation ne relève que **2 Read ID** sur toute
+l'exécution — mais PAS pour la raison d'abord supposée. Une reprise avec le
+désassemblage en main (voir plus bas, « Piste 3 : la question ouverte »)
+montre que ce n'est pas le budget de la piste 0 qui est épuisé après
+seulement 2 appels : la piste 0 n'atteint même jamais sa boucle de relevé
+complète, y compris en laissant délibérément beaucoup plus de temps
+s'écouler (fenêtre élargie ×3,6 sans que ça change quoi que ce soit).
+Quelque chose diverge plus tôt, sur un chemin de code qui n'a pas encore
+été identifié. Le "budget trop court" reste probablement en cause, mais pas
+seul — et pas nécessairement au premier endroit où on l'attendait.
 
 **2. La donnée de l'image n'est pas exploitable.** L'en-tête de piste du
 `.dsk` porte bien un champ GAP#3 (offset 0x16), que notre parseur ignorait.
@@ -160,14 +167,30 @@ copie en échec également.
 
 ### Ce que l'instrumentation a montré du mécanisme réel
 
-En traçant chaque Read ID (delta de temps, index de secteur, sondages MSR) :
+Repris depuis, avec le désassemblage complet des routines concernées
+(`121E` Read ID, `111C-1128` compteur, `12FA-1318` boucle de relevé, `1441`
+dédoublonnage) plutôt qu'une estimation approximative — les chiffres
+ci-dessous remplacent les précédents, mesurés en direct sur la vraie piste 0
+de `Discology.dsk` :
 
-- Discology relève une piste en exactement autant de Read ID qu'elle a de
-  secteurs, les index défilant proprement (`0,1,2…8,0`) — le modèle de
-  rotation fait donc bien son travail.
-- Chaque Read ID coûte ~**1666 sondages MSR** à ~**45 cycles** l'un.
-- Un relevé de 9 secteurs occupe ~705 000 cycles, soit **0,88 tour**, avec la
-  constante à 100. Une piste physiquement réelle en occuperait 0,945.
+- **Le coût d'une itération de la boucle de sondage est exactement 44
+  cycles**, pas une approximation : `IN A,(C)` (16 = 12 nominal + 4, le
+  préfixe `ED` étant l'une des familles corrigées par
+  `cpc_mcycle_extra`), `INC HL` (8, l'arrondi seul de
+  `cpc_instruction_time` suffit ici), `CP $C0` (8) et `JR C` pris (12).
+  Retrouvé indépendamment en additionnant les coûts opcode par opcode,
+  confirmant l'estimation de la version précédente de cette section.
+- **La piste 0 ne fait pas 10 secteurs de 512 octets : 9 de 512 et un
+  dernier de 256.** Une différence qui change le calcul de l'espacement
+  réel (`sector_pitch_ticks`) et qui manquait à la version précédente de
+  cette section.
+- **Discology émet 11 Read ID pour cette piste à 10 secteurs, pas 10.** Les
+  10 premiers tiennent sous le budget (16 640 sondages) — le 10ᵉ arrive à
+  16 313, une marge de 327 sondages (1,8 %) — et sont stockés. Le 11ᵉ
+  dépasse le budget (≈17 968) mais ne casse rien : c'est un appel de
+  confirmation qui retombe sur un identifiant déjà vu (signe que le tour
+  est bouclé), son test de seuil est vérifié *avant* le stockage, et
+  aucun 11ᵉ secteur réel n'existe de toute façon pour qu'il manque.
 
 ### Deux causes éliminées
 
@@ -183,18 +206,71 @@ piste — ni attente, ni position angulaire. Notre modèle est donc un ajout
 par rapport à l'émulateur de référence, et c'est lui qui rend Discology
 sensible à un budget temps que Caprice32 n'exerce jamais.
 
+### La géométrie non standard n'est pas propre à la piste 0 — c'est une
+technique de protection, confirmée en confrontant 24 images
+
+Le format `.dsk` (Standard comme Extended) permet en principe une géométrie
+différente par piste : nombre de secteurs, taille, tout est décrit dans
+l'en-tête de chaque piste plutôt que fixé une fois pour toutes. Reste à
+savoir si la piste 0 à 10 secteurs de `Discology.dsk` est une bizarrerie
+isolée ou une pratique répandue — vérifié en confrontant les 24 images du
+dépôt (`bin/*.dsk`) plutôt qu'en le supposant :
+
+- **20 disques sur 24 sont parfaitement uniformes** : 9 secteurs de 512
+  octets, sur toutes les pistes, sans exception. C'est le format AMSDOS
+  Data standard, et l'écrasante majorité des jeux du commerce l'utilise tel
+  quel.
+- **Seuls deux disques dérogent, tous deux liés à une protection** :
+  `Discology.dsk` (piste 0 à 10 secteurs, dont un seul de 256 octets — pas
+  seulement un secteur de plus, une taille différente) et
+  `Teenage_Mutant_Hero_Turtles.dsk` (pistes 0 **et** 1 à 10 secteurs, tous
+  de 512 octets cette fois). TMHT est le jeu dont la protection à marques
+  "Deleted Data" a motivé le point 3 du Plan V3 (voir plus haut) : ce
+  n'est pas une coïncidence que le même disque cumule les deux techniques.
+
+Dans les deux cas l'anomalie se concentre sur les toutes premières pistes —
+cohérent avec une technique de protection connue sur CPC (secteurs
+supplémentaires ou de taille inhabituelle sur la piste 0, pour piéger un
+copieur qui suppose la géométrie standard partout) plutôt qu'avec une
+caractéristique du format lui-même.
+
+(Anecdote relevée en vérifiant ce relevé : au-delà de ses 4 premières
+pistes — le programme copieur lui-même — le reste de `Discology.dsk`
+(pistes 4 à 42) stocke des données en gros blocs de 4096 octets par piste,
+pas des secteurs AMSDOS classiques. Sans rapport avec le mécanisme de
+relevé étudié ici, mais ça explique une bizarrerie de lecture rapide du
+fichier si quelqu'un la recroise.)
+
+### Piste 3 : la question ouverte
+
+En reprenant l'investigation du point 1 avec une fenêtre de temps large,
+l'instrumentation montre Discology interroger la **piste 3** (Read ID,
+géométrie standard 9×512, donc conforme) juste après avoir sondé la piste 0
+— avant même d'entamer la vraie boucle de relevé `12FA`. Cet appel n'a pas
+encore été rattaché à un point précis du désassemblage : ni la routine de
+chargement initial, ni la boucle de relevé documentée ci-dessus ne
+l'expliquent en l'état des recherches.
+
+Hypothèse la plus probable, à vérifier : une détection du format du disque
+qui compare une piste "connue" (la 3, uniforme) à la piste 0 avant de
+lancer la copie proprement dite — ce qui expliquerait pourquoi une piste 0
+physiquement plus tendue (144) empêche tout, pas seulement son propre
+relevé. Reste à tracer d'où vient cet appel et ce qu'il fait du résultat.
+
 ### Où ça en reste
 
 La constante ne compense pas une imprécision de la géométrie du disque,
 comme on l'a d'abord cru : elle compense le fait que **Discology dispose de
 moins de marge angulaire chez nous que sur une vraie machine**, pour une
 raison qui n'est ni le temps CPU ni les données de l'image. Resserrer les
-secteurs sous leur espacement physique lui rend cette marge.
+secteurs sous leur espacement physique lui rend cette marge — avec 1,8 % de
+marge réelle sur la piste 0 pour la valeur actuelle (100), désormais mesuré
+précisément plutôt qu'approximé.
 
-La suite logique serait de désassembler la routine de seuil (le compteur en
-`103E`) pour savoir ce qu'elle attend exactement. Chantier ouvert, sans
-garantie : tant qu'aucun autre logiciel ne souffre du réglage actuel, la
-copie fonctionne et le test de bout en bout le verrouille.
+Chantier repris (Plan V3, point 2) mais pas terminé : la suite logique est
+de tracer l'appel sur la piste 3 ci-dessus. Sans garantie d'aboutir, et sans
+urgence — le réglage actuel fonctionne, verrouillé par le test de bout en
+bout.
 
 ## Vérification
 
