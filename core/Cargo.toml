@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-zilog_z80 = "1.1.0"
+zilog_z80 = "1.1.1"
 # Uniquement pour Keycode/Scancode (matrice clavier du PSG) : la coquille de
 # présentation (bytebox/) est seule à avoir besoin des features graphiques
 # de sdl2 (raw-window-handle...).
