@@ -152,6 +152,115 @@ fn apply_display_mode(window: &mut sdl2::video::Window, mode: DisplayMode) {
     );
 }
 
+/// Traduit un `Keycode` SDL2 vers celui, propre à `core`, que
+/// `Psg::set_key_state` attend (voir `bytebox_core::keys`). `core` ne
+/// connaît pas SDL2 : c'est à cette façade de faire cette traduction, pas
+/// à `core` de l'accepter tel quel. `None` pour tout ce que la matrice
+/// clavier du CPC ne mappe pas — la très large majorité des touches SDL2.
+fn to_core_keycode(kc: sdl2::keyboard::Keycode) -> Option<bytebox_core::keys::Keycode> {
+    use bytebox_core::keys::Keycode as K;
+    use sdl2::keyboard::Keycode as SdlK;
+    Some(match kc {
+        SdlK::A => K::A,
+        SdlK::B => K::B,
+        SdlK::C => K::C,
+        SdlK::D => K::D,
+        SdlK::E => K::E,
+        SdlK::F => K::F,
+        SdlK::G => K::G,
+        SdlK::H => K::H,
+        SdlK::I => K::I,
+        SdlK::J => K::J,
+        SdlK::K => K::K,
+        SdlK::L => K::L,
+        SdlK::M => K::M,
+        SdlK::N => K::N,
+        SdlK::O => K::O,
+        SdlK::P => K::P,
+        SdlK::Q => K::Q,
+        SdlK::R => K::R,
+        SdlK::S => K::S,
+        SdlK::T => K::T,
+        SdlK::U => K::U,
+        SdlK::V => K::V,
+        SdlK::W => K::W,
+        SdlK::X => K::X,
+        SdlK::Y => K::Y,
+        SdlK::Z => K::Z,
+        SdlK::Num0 => K::Num0,
+        SdlK::Num1 => K::Num1,
+        SdlK::Num2 => K::Num2,
+        SdlK::Num3 => K::Num3,
+        SdlK::Num4 => K::Num4,
+        SdlK::Num5 => K::Num5,
+        SdlK::Num6 => K::Num6,
+        SdlK::Num7 => K::Num7,
+        SdlK::Num8 => K::Num8,
+        SdlK::Num9 => K::Num9,
+        SdlK::Up => K::Up,
+        SdlK::Down => K::Down,
+        SdlK::Left => K::Left,
+        SdlK::Right => K::Right,
+        SdlK::Return => K::Return,
+        SdlK::Backspace => K::Backspace,
+        SdlK::Delete => K::Delete,
+        SdlK::Escape => K::Escape,
+        SdlK::Tab => K::Tab,
+        SdlK::Space => K::Space,
+        SdlK::CapsLock => K::CapsLock,
+        SdlK::LShift => K::LShift,
+        SdlK::RShift => K::RShift,
+        SdlK::LCtrl => K::LCtrl,
+        SdlK::RCtrl => K::RCtrl,
+        SdlK::LAlt => K::LAlt,
+        SdlK::RAlt => K::RAlt,
+        SdlK::Minus => K::Minus,
+        SdlK::Equals => K::Equals,
+        SdlK::Plus => K::Plus,
+        SdlK::Colon => K::Colon,
+        SdlK::Slash => K::Slash,
+        SdlK::Percent => K::Percent,
+        SdlK::Comma => K::Comma,
+        SdlK::Period => K::Period,
+        SdlK::Semicolon => K::Semicolon,
+        SdlK::RightParen => K::RightParen,
+        SdlK::Kp0 => K::Kp0,
+        SdlK::Kp1 => K::Kp1,
+        SdlK::Kp2 => K::Kp2,
+        SdlK::Kp3 => K::Kp3,
+        SdlK::Kp4 => K::Kp4,
+        SdlK::Kp5 => K::Kp5,
+        SdlK::Kp6 => K::Kp6,
+        SdlK::Kp7 => K::Kp7,
+        SdlK::Kp8 => K::Kp8,
+        SdlK::Kp9 => K::Kp9,
+        SdlK::KpEnter => K::KpEnter,
+        SdlK::KpPeriod => K::KpPeriod,
+        SdlK::KpMultiply => K::KpMultiply,
+        SdlK::KpDivide => K::KpDivide,
+        SdlK::KpEquals => K::KpEquals,
+        SdlK::KpPlus => K::KpPlus,
+        SdlK::KpMinus => K::KpMinus,
+        _ => return None,
+    })
+}
+
+/// Même principe que `to_core_keycode`, pour les quelques touches gérées
+/// par position physique plutôt que par caractère (voir la doc de
+/// `Psg::set_key_state_scancode`).
+fn to_core_scancode(sc: sdl2::keyboard::Scancode) -> Option<bytebox_core::keys::Scancode> {
+    use bytebox_core::keys::Scancode as S;
+    use sdl2::keyboard::Scancode as SdlS;
+    Some(match sc {
+        SdlS::Apostrophe => S::Apostrophe,
+        SdlS::LeftBracket => S::LeftBracket,
+        SdlS::Grave => S::Grave,
+        SdlS::RightBracket => S::RightBracket,
+        SdlS::NonUsBackslash => S::NonUsBackslash,
+        _ => return None,
+    })
+}
+
 /// Ouvre les fenêtres SDL2 et fait tourner la machine jusqu'à la fermeture.
 /// `machine` doit déjà avoir ses ROMs (et, le cas échéant, sa disquette)
 /// chargées ; `autotyper`, s'il y en a un, tape sa commande au clavier
@@ -819,7 +928,9 @@ pub fn run(
                     let shift_held = keymod.intersects(
                         sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
                     );
-                    if !machine.bus.psg.set_key_state_scancode(sc, true, shift_held) {
+                    if let Some(sc) = to_core_scancode(sc) {
+                        machine.bus.psg.set_key_state_scancode(sc, true, shift_held);
+                    } else if let Some(kc) = to_core_keycode(kc) {
                         machine.bus.psg.set_key_state(kc, true);
                     }
                 }
@@ -832,7 +943,9 @@ pub fn run(
                     let shift_held = keymod.intersects(
                         sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
                     );
-                    if !machine.bus.psg.set_key_state_scancode(sc, false, shift_held) {
+                    if let Some(sc) = to_core_scancode(sc) {
+                        machine.bus.psg.set_key_state_scancode(sc, false, shift_held);
+                    } else if let Some(kc) = to_core_keycode(kc) {
                         machine.bus.psg.set_key_state(kc, false);
                     }
                 }

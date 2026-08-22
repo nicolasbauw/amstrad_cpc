@@ -19,6 +19,7 @@ pub mod crtc;
 pub mod fdc;
 pub mod gate_array;
 pub mod hexconversion;
+pub mod keys;
 pub mod machine;
 pub mod memory;
 pub mod monitor;

@@ -1,5 +1,5 @@
+use crate::keys::{Keycode, Scancode};
 use crate::sound::Sound;
-use sdl2::keyboard::{Keycode, Scancode};
 use std::collections::HashSet;
 
 /// Largeur réelle de chaque registre du PSG. Les bits en trop sont perdus à
@@ -257,23 +257,23 @@ impl Psg {
     /// de `Psg::deferred` pour pourquoi ce n'est pas un simple bit posé au même
     /// instant que la position.
     ///
-    /// Retourne `true` si la touche a été prise en charge ici.
-    pub fn set_key_state_scancode(
-        &mut self,
-        scancode: Scancode,
-        pressed: bool,
-        shift_held: bool,
-    ) -> bool {
+    /// `crate::keys::Scancode` ne contient QUE les quelques touches gérées ici
+    /// (contrairement au `Scancode` complet d'une boîte à outils de fenêtrage,
+    /// qui en a des dizaines) : toute façade appelante doit donc déjà avoir
+    /// traduit son propre scancode en `Option<crate::keys::Scancode>` avant
+    /// d'appeler cette fonction, et ne l'appeler que si cette traduction a
+    /// réussi. C'est ce qui rend cette fonction exhaustive sans variante
+    /// `_`, et pourquoi elle n'a plus besoin de renvoyer "pris en charge ou
+    /// non" : la question a déjà sa réponse au moment où elle est appelée.
+    pub fn set_key_state_scancode(&mut self, scancode: Scancode, pressed: bool, shift_held: bool) {
         match scancode {
             // "ù / %" -> position du "'" en disposition US
             Scancode::Apostrophe => {
                 self.apply_bits(&[(3, 4)], pressed);
-                true
             }
             // touche morte "^ / ¨" -> position du "[" en disposition US
             Scancode::LeftBracket => {
                 self.apply_bits(&[(3, 2)], pressed);
-                true
             }
 
             // Touche ISO supplémentaire "# / @" (en haut à gauche) -> position du "`"
@@ -292,7 +292,6 @@ impl Psg {
                     self.set_bit_now(2, 3, false);
                     self.set_bit_now(2, 5, false);
                 }
-                true
             }
 
             // Touche "$ / * / €" du Mac, juste après la touche morte "^/¨" en position
@@ -324,7 +323,6 @@ impl Psg {
                     self.set_bit_now(bit.0, bit.1, false);
                     self.set_bit_now(2, 5, false);
                 }
-                true
             }
 
             // Touche ISO "< / >" du Mac (bas de clavier, à côté de SHIFT gauche). Le
@@ -365,10 +363,7 @@ impl Psg {
                         self.set_bit_now(2, 5, false);
                     }
                 }
-                true
             }
-
-            _ => false,
         }
     }
 
@@ -484,8 +479,6 @@ impl Psg {
             Keycode::Q => Some(&[(8, 5)]), // position physique "A" -> "Q" en AZERTY
             Keycode::CapsLock => Some(&[(8, 6)]),
             Keycode::W => Some(&[(8, 7)]), // position physique "Z" -> "W" en AZERTY
-
-            _ => None,
         };
 
         if let Some(bits) = cpc_key {
