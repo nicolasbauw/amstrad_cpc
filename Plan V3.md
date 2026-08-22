@@ -6,9 +6,9 @@
 > La lecture des `.SNA` ci-dessous a par exemple donné la 2.1.0.
 
 Sept points connus et documentés, VOLONTAIREMENT LAISSÉS EN L'ÉTAT depuis la
-V1 (cinq désormais résolus — points 1, 3, 4, 5 et 7 — et le point 2 en cours
-d'investigation, repris par désassemblage de Discology pour la rigueur de
-l'émulation) : aucun ne nuisait au fonctionnement (tous les logiciels du
+V1 (cinq résolus — points 1, 3, 4, 5 et 7 — et le point 2 caractérisé
+jusqu'au bout par désassemblage de Discology, sans correctif praticable
+identifié) : aucun ne nuisait au fonctionnement (tous les logiciels du
 premier batch tournaient déjà), ce sont des approximations acceptées dont on
 connaît la limite. C'est une liste de référence, pas un jalonnage figé :
 chaque point est indépendant des autres et peut être traité dans n'importe
@@ -30,7 +30,7 @@ réécriture complète dès que la géométrie ne correspond pas — c'est ce re
 qui rend le correctif sans risque. Format Track continue de réécrire tout,
 puisqu'il change la structure des pistes.
 
-## 2) EN COURS — FDC — vrai modèle de rotation (désassemblage de Discology)
+## 2) CARACTÉRISÉ (pas corrigé) — FDC — vrai modèle de rotation
 
 L'espacement des secteurs vient d'une constante globale empirique
 (`SECTOR_OVERHEAD_BYTES` = 100, dans `fdc.rs`), non monotone et sans plage
@@ -71,19 +71,34 @@ mesures précises dans `doc/discology-copie.md` ; en résumé :
   référence (il n'a **aucun** modèle de rotation — Read ID instantané, simple
   compteur d'index).
 
-- **La décision est désormais localisée au byte près.** `$C900`-`$C950`
-  désassemblé (instantané pris au bon moment : ce code aussi est réécrit
-  en cours d'exécution) : le Read ID lui-même réussit (`ST0` normal, sinon
-  un simple `RET NZ` en `$C90B` aurait suffi) ; c'est une vérification
-  commune à `$CA7A`, appelée avec l'un de deux codes d'erreur/mode
-  (0x12/0x13 selon le chemin), qui décide d'abandonner — un `JP Z` vers
-  `$C9AD`, qui restaure une pile sauvegardée (un "longjmp") avant d'afficher
-  du texte via un appel firmware. `$CA7A` lui-même reste à désassembler.
+- **`$C900`/`$CA7A` : une fausse piste, écartée par la mesure.** Ce bloc est
+  réel (désassemblé au bon moment) mais une trace d'exécution complète a
+  montré qu'il n'est **jamais appelé** sur le chemin réellement emprunté.
+  La cascade réellement exécutée après le second Read ID (une comparaison
+  sur l'octet "Secteur" du résultat, suivie d'une restauration de pile et
+  d'un affichage de texte) se produit à l'**identique**, mêmes valeurs même
+  instant, dans le cas qui fonctionne (100) — ce n'est donc pas non plus le
+  point de décision.
+- **La vraie réponse : le minutage des interruptions, pas une différence de
+  logique.** 3000 instructions consécutives capturées après le second Read
+  ID, interruptions maintenues coupées de force sur toute la fenêtre
+  (Discology réactive les siennes en cours de route) : les traces pour
+  overhead=100 et 144 sont **rigoureusement identiques**. Le code CPU de
+  Discology ne bifurque nulle part selon la constante. La divergence
+  observée sans cette précaution (une interruption qui tombe à un instant
+  différent selon le temps réel total consommé par les deux Read ID) est
+  une vraie IRQ matérielle, pas un branchement de Discology — et c'est elle
+  qui fait dériver un état interne cadencé par l'IRQ 300 Hz (compteur de
+  trames ou anti-rebond clavier, non identifié précisément) jusqu'à décider
+  si l'écran de copie s'affiche.
 
-Prochaine étape : désassembler `$CA7A`, la vérification qui tranche
-réellement. Pas de garantie d'aboutir, et pas d'urgence — le réglage actuel
-(100) fonctionne, verrouillé par le test de bout en bout. Repris pour la
-rigueur de l'émulation, sans cas d'usage réel qui le réclame.
+**Refermé, pas résolu** : caractérisé jusqu'au bout plutôt qu'abandonné en
+cours de route, mais sans correctif praticable identifié — on ne peut pas
+garantir un minutage d'interruption identique à un vrai CPC tout en gardant
+un modèle de rotation fidèle. Aller plus loin (désassembler le gestionnaire
+d'interruption lui-même) n'apporterait vraisemblablement qu'une explication
+plus fine du même phénomène. Non repris : le réglage actuel (100)
+fonctionne, verrouillé par le test de bout en bout.
 
 ## 3) RÉSOLU — FDC — marques "Deleted Data"
 

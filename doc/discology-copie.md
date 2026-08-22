@@ -315,14 +315,63 @@ C9B6  CALL $C9CD          ; -> RST $08 (appel firmware) -> copie/affichage de te
 `$121E` copie bien le premier octet du résultat (ST0) dans son masque
 `AND $C0` (Interrupt Code du µPD765A : 00 = terminaison normale, tout le
 reste = anormal) — c'est ce test, en `C90B`, qui court-circuite
-immédiatement en cas de statut FDC anormal. Mais dans notre cas
-(overhead=144), le Read ID en lui-même **réussit** (ST0 normal, sinon `RET
-NZ` aurait suffi à tout expliquer) : c'est la vérification commune à
-`$CA7A` — appelée avec le code 0x12 ou 0x13 selon le chemin — qui décide,
-et dont le contenu n'a pas été désassemblé. Deux codes d'erreur/mode
-distincts, une seule routine de décision partagée : cohérent avec une
-validation qui compare quelque chose entre les deux pistes sondées (0 et
-3), pas seulement le succès brut de chaque lecture.
+immédiatement en cas de statut FDC anormal. Ce bloc est bien réel et
+présent en mémoire à l'instant où il a été capturé, mais — voir la section
+suivante — il s'est avéré ne PAS être sur le chemin réellement emprunté par
+l'exécution qui échoue : `$CA7A` n'a jamais été appelé dans les traces
+d'exécution complètes qui ont suivi. Gardé ici tel quel plutôt que
+supprimé, avec cet avertissement, pour que personne ne reparte sur cette
+fausse piste.
+
+### `$CA7A` n'était pas la bonne piste — et la vraie réponse est ailleurs
+
+Reprise avec un marqueur qui ne dépend d'aucune adresse fixe cette fois
+(l'indicateur `debug_read_id_fired` posé dans `Fdc::write_data`, doublé
+d'une trace d'INSTRUCTIONS complètes — pas seulement les branchements —
+déclenchée précisément à la sortie de la boucle d'attente `$C944`) : le
+chemin réellement executé après le second Read ID ne passe PAS par
+`$C900`/`$CA7A`. Il passe par une cascade différente
+(`C8FC→C75C→C75E→C72E→C706→C57D`) qui mène à une comparaison concrète —
+`($BE51) AND $C0` contre `$40`, où `$BE51` s'est avéré être l'octet
+« Secteur » (R) du résultat Read ID lui-même (buffer `$BE4C`-`$BE52` =
+ST0/ST1/ST2/C/H/R/N), suivie d'une restauration de pile (`$C9AD`,
+`LD SP,($BE64)`) et d'un appel firmware qui affiche du texte.
+
+Tentant d'y voir le point de décision — jusqu'à ce qu'une vérification
+directe l'infirme : **cette cascade entière, avec les mêmes valeurs
+(piste 0 secteur `0xC7`, puis piste 3 secteur `0xC1`, au même instant
+`t≈27 132 340`), se produit à l'identique dans le cas qui fonctionne
+(overhead=100).** Ce n'est donc pas un chemin d'échec — c'est du code
+commun aux deux scénarios, sans rapport avec ce qui décide de basculer ou
+non vers l'écran de copie. Deuxième fausse piste identifiée et écartée par
+la mesure plutôt que devinée.
+
+### La vraie réponse : ce n'est pas une différence de logique, c'est le minutage des interruptions
+
+Comparaison directe : capture de 3000 instructions consécutives suivant le
+second Read ID, pour overhead=100 et 144, **avec les interruptions
+maintenues coupées de force sur toute la fenêtre** (pas seulement à
+l'instant du second Read ID — Discology réactive les siennes via son
+propre `EI` quelque part dans cette fenêtre, et laisser faire aurait
+réintroduit exactly le bruit qu'on cherche à éliminer). Résultat : **les
+deux traces sont rigoureusement identiques**, à un décalage de démarrage de
+3 instructions près (un simple artefact du point d'accrochage du
+marqueur).
+
+Autrement dit : le code CPU de Discology, pris isolément, ne bifurque nulle
+part sur ces 3000 instructions selon la valeur de la constante. La
+divergence qu'on observait plus tôt (piste 3, `PC=0x1BC5` suivi
+immédiatement de `$0038` dans un cas, de quatre instructions
+supplémentaires puis `$0038` dans l'autre) n'était pas un branchement de
+Discology — c'était une **vraie interruption matérielle qui tombe à un
+instant légèrement différent** selon le temps réel total consommé par les
+deux Read ID (qui dépend directement d'`overhead`, donc de
+`sector_pitch_ticks`). Deux minutages d'interruption légèrement décalés
+suffisent à faire dériver l'état interne (compteur de trames, anti-rebond
+clavier, ou autre logique cadencée par l'IRQ 300 Hz) que le gestionnaire
+d'interruption de Discology entretient — et c'est CETTE dérive, pas une
+comparaison de données ratée, qui finit par décider si l'écran de
+« DUPLICATION » s'affiche ou non.
 
 ### Où ça en reste
 
@@ -334,16 +383,22 @@ secteurs sous leur espacement physique lui rend cette marge — avec 1,8 % de
 marge réelle sur la piste 0 pour la valeur actuelle (100), désormais mesuré
 précisément plutôt qu'approximé.
 
-Chantier repris (Plan V3, point 2) mais pas terminé. Le mécanisme de
-décision est désormais localisé au byte près (`$C900`-`$C950`, deux codes
-d'erreur/mode 0x12/0x13, une vérification commune à `$CA7A`) et le
-comportement observé exclut définitivement le budget de la boucle
-principale — mais `$CA7A` lui-même, la vérification qui tranche
-réellement, n'a pas encore été désassemblé. La suite logique est là : ce
-qu'elle compare exactement, et si un correctif de `sector_pitch_ticks`
-(plutôt qu'un désassemblage plus poussé) pourrait suffire à la satisfaire.
-Sans garantie d'aboutir, et sans urgence — le réglage actuel fonctionne,
-verrouillé par le test de bout en bout.
+**Chantier refermé (Plan V3, point 2).** Pas résolu au sens où l'on
+saurait faire fonctionner la valeur physique — mais entièrement caractérisé,
+ce qui était le but réel : ce n'est ni le budget de la boucle de relevé
+principale (`$121E`/`$103E`), ni une comparaison de données dans le code de
+validation de format (`$C900`, `$CA7A` — chemins réels mais non
+déterminants, tous deux vérifiés puis écartés), qui décide. C'est une
+sensibilité au minutage des interruptions, elle-même conséquence de la
+différence de temps réel qu'`overhead` introduit. Remonter jusqu'au
+compteur ou drapeau exact que cette dérive affecte demanderait de
+désassembler le gestionnaire d'interruption lui-même — un chantier distinct,
+qui n'apporterait vraisemblablement qu'une explication plus fine du MÊME
+phénomène, pas un correctif praticable (on ne peut pas garantir un minutage
+d'interruption identique à un vrai CPC tout en gardant un modèle de rotation
+fidèle). Non repris : le réglage actuel (100) fonctionne, verrouillé par le
+test de bout en bout, et la question posée au départ — pourquoi la valeur
+physique échoue — a sa réponse.
 
 ## Vérification
 
