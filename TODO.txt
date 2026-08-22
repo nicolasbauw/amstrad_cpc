@@ -1,3 +1,1 @@
 - commencons le désassemblage de discology (voir plan v3)
-- les snapshots qu'on sauvegarde via la commande snap sont bien des snapshots v2 ? je ne suis pas sûr qu'on ait ré-évalué cela suite à l'ajout de la fonctionnalité de lecture des .sna (rasm) hier.
-- quel serait l'effort à fournir pour créer une web app à partir de notre core compilé en web assembly ? juste à titre informatif : pour le moment je n'ai pas l'ambition de me lancer dans un tel projet. Est-ce même faisable ?
