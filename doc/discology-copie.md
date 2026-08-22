@@ -241,21 +241,46 @@ pas des secteurs AMSDOS classiques. Sans rapport avec le mécanisme de
 relevé étudié ici, mais ça explique une bizarrerie de lecture rapide du
 fichier si quelqu'un la recroise.)
 
-### Piste 3 : la question ouverte
+### Piste 3 : identifiée — une validation de format, PAS la boucle de copie
 
-En reprenant l'investigation du point 1 avec une fenêtre de temps large,
-l'instrumentation montre Discology interroger la **piste 3** (Read ID,
-géométrie standard 9×512, donc conforme) juste après avoir sondé la piste 0
-— avant même d'entamer la vraie boucle de relevé `12FA`. Cet appel n'a pas
-encore été rattaché à un point précis du désassemblage : ni la routine de
-chargement initial, ni la boucle de relevé documentée ci-dessus ne
-l'expliquent en l'état des recherches.
+Reprise avec un marqueur fiable (un indicateur posé directement dans
+`Fdc::write_data` au moment où une commande Read ID est réellement
+dispatchée, plutôt qu'un point d'arrêt sur une adresse fixe — piège
+rencontré en cours de route : le code RAM de Discology est en partie
+réécrit d'une phase à l'autre du programme, si bien qu'une adresse qui
+contenait la routine Read ID à un instant donné peut contenir tout autre
+chose un peu plus tard).
 
-Hypothèse la plus probable, à vérifier : une détection du format du disque
-qui compare une piste "connue" (la 3, uniforme) à la piste 0 avant de
-lancer la copie proprement dite — ce qui expliquerait pourquoi une piste 0
-physiquement plus tendue (144) empêche tout, pas seulement son propre
-relevé. Reste à tracer d'où vient cet appel et ce qu'il fait du résultat.
+**Le mécanisme des pistes 0 et 3 n'est PAS celui décrit plus haut.** Les
+deux Read ID observés partent tous les deux de la même instruction, `OUT
+(C),A` à l'adresse `$C96B` — une zone entièrement différente de `$121E` et
+de sa boucle de comptage `$103E`/`$111C`. C'est une routine bas niveau
+distincte, sans doute générique (peut-être partagée avec un accès disque
+standard), utilisée uniquement pour ces deux sondages *avant* que
+Discology ne bascule vers son propre copieur rapide.
+
+**Comparaison visuelle, au même point exact du scénario (juste après avoir
+validé "Copie Intégrale", avant toute attente supplémentaire) :**
+
+- avec `SECTOR_OVERHEAD_BYTES = 100` (qui fonctionne), l'écran affiche déjà
+  le panneau "DUPLICATION" en cours, piste 2 sur 39 — la copie a démarré ;
+- avec `144` (qui échoue), l'écran reste sur le navigateur de fichiers
+  générique ("Disquette / Fichier / Options / Aide / Menu") — Discology
+  **n'entre jamais dans l'écran de copie**, et n'en bougera plus même après
+  une attente 200 fois plus longue que d'ordinaire (200 M cycles, écran
+  strictement identique avant/après).
+
+Conclusion directe : ce n'est **pas** le budget de la boucle de relevé
+principale qui est en cause avec la valeur physique — cette boucle n'est
+même jamais atteinte. C'est une étape de VALIDATION DU FORMAT, antérieure,
+qui échoue silencieusement (ou reste bloquée) et empêche Discology de
+basculer vers son copieur. L'hypothèse la plus probable reste qu'il s'agit
+d'une détection de format comparant une piste "de référence" (la 3,
+géométrie standard) à la piste 0 — mais la routine à `$C96B` et son
+appelant n'ont pas encore été désassemblés en détail : reste à savoir
+exactement ce que cette validation vérifie, et pourquoi une piste 0 plus
+tendue la fait échouer alors que son propre budget (loin d'être le
+problème ici) ne serait probablement pas en cause.
 
 ### Où ça en reste
 
@@ -267,10 +292,12 @@ secteurs sous leur espacement physique lui rend cette marge — avec 1,8 % de
 marge réelle sur la piste 0 pour la valeur actuelle (100), désormais mesuré
 précisément plutôt qu'approximé.
 
-Chantier repris (Plan V3, point 2) mais pas terminé : la suite logique est
-de tracer l'appel sur la piste 3 ci-dessus. Sans garantie d'aboutir, et sans
-urgence — le réglage actuel fonctionne, verrouillé par le test de bout en
-bout.
+Chantier repris (Plan V3, point 2) mais pas terminé. La suite logique est
+maintenant précise : désassembler la routine à `$C96B` et son appelant
+(identifiée, pas encore analysée) pour comprendre ce que cette validation
+de format vérifie réellement, et pourquoi elle échoue avec la piste 0
+physiquement tendue. Sans garantie d'aboutir, et sans urgence — le réglage
+actuel fonctionne, verrouillé par le test de bout en bout.
 
 ## Vérification
 

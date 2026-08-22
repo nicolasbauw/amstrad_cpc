@@ -48,12 +48,19 @@ mesures précises dans `doc/discology-copie.md` ; en résumé :
   d'abord) déclenche 11 Read ID, dont 10 tiennent sous le budget de 16 640
   sondages (marge de 1,8 % sur le dernier utile) et le 11ᵉ — un appel de
   confirmation, pas une lecture nécessaire — dépasse sans dommage.
-- **La valeur physiquement exacte (144) échoue toujours, mais pas pour la
-  raison d'abord supposée.** Ce n'est pas la piste 0 qui manque de budget :
-  elle n'atteint jamais sa boucle de relevé, même avec beaucoup plus de
-  temps laissé à l'émulation. Un Read ID sur la piste 3 (géométrie standard,
-  probablement une détection de format) intervient juste avant et n'a pas
-  encore été rattaché à une routine précise.
+- **La valeur physiquement exacte (144) échoue toujours, et on sait
+  maintenant pourquoi ce n'est pas un problème de budget.** Un marqueur
+  fiable posé directement dans le code de dispatch FDC (les points d'arrêt
+  sur une adresse fixe ne tiennent pas : le code RAM de Discology est
+  réécrit d'une phase à l'autre) montre que la piste 0 (100 comme 144)
+  déclenche deux Read ID via une routine à `$C96B`, entièrement DIFFÉRENTE
+  de `$121E`/`$103E` — une étape de VALIDATION DE FORMAT antérieure au
+  copieur proprement dit. Comparaison visuelle au même point du scénario :
+  avec 100, l'écran affiche déjà "DUPLICATION" en cours (piste 2/39) ; avec
+  144, il reste bloqué sur le navigateur de fichiers générique, même après
+  une attente 200 fois plus longue que d'ordinaire. Le budget de la boucle
+  de relevé principale n'est donc pas en cause — cette boucle n'est même
+  jamais atteinte avec 144.
 - **La géométrie non standard n'est pas propre à Discology.** Confronté aux
   24 images du dépôt : 20 sont parfaitement uniformes (9×512 partout), et
   les deux seules qui dérogent (Discology et Teenage Mutant Hero Turtles)
@@ -64,9 +71,10 @@ mesures précises dans `doc/discology-copie.md` ; en résumé :
   référence (il n'a **aucun** modèle de rotation — Read ID instantané, simple
   compteur d'index).
 
-Prochaine étape : tracer l'appel sur la piste 3. Pas de garantie d'aboutir,
-et pas d'urgence — le réglage actuel (100) fonctionne, verrouillé par le
-test de bout en bout. Repris pour la rigueur de l'émulation, sans cas
+Prochaine étape : désassembler `$C96B` et son appelant pour comprendre ce
+que cette validation de format vérifie exactement. Pas de garantie
+d'aboutir, et pas d'urgence — le réglage actuel (100) fonctionne, verrouillé
+par le test de bout en bout. Repris pour la rigueur de l'émulation, sans cas
 d'usage réel qui le réclame.
 
 ## 3) RÉSOLU — FDC — marques "Deleted Data"
