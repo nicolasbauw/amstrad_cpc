@@ -274,13 +274,55 @@ Conclusion directe : ce n'est **pas** le budget de la boucle de relevé
 principale qui est en cause avec la valeur physique — cette boucle n'est
 même jamais atteinte. C'est une étape de VALIDATION DU FORMAT, antérieure,
 qui échoue silencieusement (ou reste bloquée) et empêche Discology de
-basculer vers son copieur. L'hypothèse la plus probable reste qu'il s'agit
-d'une détection de format comparant une piste "de référence" (la 3,
-géométrie standard) à la piste 0 — mais la routine à `$C96B` et son
-appelant n'ont pas encore été désassemblés en détail : reste à savoir
-exactement ce que cette validation vérifie, et pourquoi une piste 0 plus
-tendue la fait échouer alors que son propre budget (loin d'être le
-problème ici) ne serait probablement pas en cause.
+basculer vers son copieur.
+
+### `$C900`-`$C950` désassemblé : la décision, au byte près
+
+Un instantané capturé au bon moment (le code de cette zone est lui aussi
+réécrit au fil de l'exécution — désassembler après coup y trouve des `NOP`
+et des `RST $38` de remplissage, pas le vrai contenu) donne le mécanisme
+complet :
+
+```
+C900  AND $08           ; teste un bit du paramètre reçu
+C902  RET Z
+C903  LD A,$13          ; code 0x13 ...
+C905  JR $C914           ; ... porté directement à la vérification commune
+
+C907  CALL $C8F9         ; envoie Read ID et attend le résultat (voir plus haut)
+C90A  RET C
+C90B  RET NZ             ; ST0 anormal (Interrupt Code != 00) : abandon immédiat
+C90C  LD A,($BE4D)
+C90F  AND $02            ; teste un autre bit de statut
+C911  RET Z
+C912  LD A,$12          ; ... ou code 0x12, selon le chemin emprunté
+
+C914  CALL $CA7A         ; vérification commune, paramétrée par le code (0x12/0x13)
+C917  RET C
+C918  JP Z,$C9AD         ; échec -> déroute vers le point d'abandon
+C91B  RET                ; succès : suite normale
+```
+
+Et le point d'abandon, atteint directement par un `JP Z` (pas un simple
+déroulement de pile) :
+
+```
+C9AD  LD SP,($BE64)      ; restaure une pile sauvegardée plus tôt — un "longjmp"
+C9B2  LD DE,($BE46)
+C9B6  CALL $C9CD          ; -> RST $08 (appel firmware) -> copie/affichage de texte
+```
+
+`$121E` copie bien le premier octet du résultat (ST0) dans son masque
+`AND $C0` (Interrupt Code du µPD765A : 00 = terminaison normale, tout le
+reste = anormal) — c'est ce test, en `C90B`, qui court-circuite
+immédiatement en cas de statut FDC anormal. Mais dans notre cas
+(overhead=144), le Read ID en lui-même **réussit** (ST0 normal, sinon `RET
+NZ` aurait suffi à tout expliquer) : c'est la vérification commune à
+`$CA7A` — appelée avec le code 0x12 ou 0x13 selon le chemin — qui décide,
+et dont le contenu n'a pas été désassemblé. Deux codes d'erreur/mode
+distincts, une seule routine de décision partagée : cohérent avec une
+validation qui compare quelque chose entre les deux pistes sondées (0 et
+3), pas seulement le succès brut de chaque lecture.
 
 ### Où ça en reste
 
@@ -292,12 +334,16 @@ secteurs sous leur espacement physique lui rend cette marge — avec 1,8 % de
 marge réelle sur la piste 0 pour la valeur actuelle (100), désormais mesuré
 précisément plutôt qu'approximé.
 
-Chantier repris (Plan V3, point 2) mais pas terminé. La suite logique est
-maintenant précise : désassembler la routine à `$C96B` et son appelant
-(identifiée, pas encore analysée) pour comprendre ce que cette validation
-de format vérifie réellement, et pourquoi elle échoue avec la piste 0
-physiquement tendue. Sans garantie d'aboutir, et sans urgence — le réglage
-actuel fonctionne, verrouillé par le test de bout en bout.
+Chantier repris (Plan V3, point 2) mais pas terminé. Le mécanisme de
+décision est désormais localisé au byte près (`$C900`-`$C950`, deux codes
+d'erreur/mode 0x12/0x13, une vérification commune à `$CA7A`) et le
+comportement observé exclut définitivement le budget de la boucle
+principale — mais `$CA7A` lui-même, la vérification qui tranche
+réellement, n'a pas encore été désassemblé. La suite logique est là : ce
+qu'elle compare exactement, et si un correctif de `sector_pitch_ticks`
+(plutôt qu'un désassemblage plus poussé) pourrait suffire à la satisfaire.
+Sans garantie d'aboutir, et sans urgence — le réglage actuel fonctionne,
+verrouillé par le test de bout en bout.
 
 ## Vérification
 

@@ -71,11 +71,19 @@ mesures précises dans `doc/discology-copie.md` ; en résumé :
   référence (il n'a **aucun** modèle de rotation — Read ID instantané, simple
   compteur d'index).
 
-Prochaine étape : désassembler `$C96B` et son appelant pour comprendre ce
-que cette validation de format vérifie exactement. Pas de garantie
-d'aboutir, et pas d'urgence — le réglage actuel (100) fonctionne, verrouillé
-par le test de bout en bout. Repris pour la rigueur de l'émulation, sans cas
-d'usage réel qui le réclame.
+- **La décision est désormais localisée au byte près.** `$C900`-`$C950`
+  désassemblé (instantané pris au bon moment : ce code aussi est réécrit
+  en cours d'exécution) : le Read ID lui-même réussit (`ST0` normal, sinon
+  un simple `RET NZ` en `$C90B` aurait suffi) ; c'est une vérification
+  commune à `$CA7A`, appelée avec l'un de deux codes d'erreur/mode
+  (0x12/0x13 selon le chemin), qui décide d'abandonner — un `JP Z` vers
+  `$C9AD`, qui restaure une pile sauvegardée (un "longjmp") avant d'afficher
+  du texte via un appel firmware. `$CA7A` lui-même reste à désassembler.
+
+Prochaine étape : désassembler `$CA7A`, la vérification qui tranche
+réellement. Pas de garantie d'aboutir, et pas d'urgence — le réglage actuel
+(100) fonctionne, verrouillé par le test de bout en bout. Repris pour la
+rigueur de l'émulation, sans cas d'usage réel qui le réclame.
 
 ## 3) RÉSOLU — FDC — marques "Deleted Data"
 
