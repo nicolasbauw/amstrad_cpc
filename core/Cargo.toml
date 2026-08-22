@@ -4,14 +4,25 @@ version = "2.0.0"
 edition = "2024"
 license = "MIT"
 
+# "native" couvre tout ce qui suppose un vrai système de fichiers/réseau :
+# répertoire personnel (config.toml, ~/.bytebox/...) et installeur de ROMs.
+# Activée par défaut (le build desktop actuel n'a rien à changer), mais
+# désactivable par une façade qui n'en a pas l'usage — une cible wasm en
+# premier lieu : `directories` et `ureq` (via `ring`/`getrandom`) ne
+# compilent pas pour `wasm32-unknown-unknown`, et `zip` (via `zstd-sys`)
+# réclame un compilateur C absent de ce genre de cible.
+[features]
+default = ["native"]
+native = ["dep:directories", "dep:ureq", "dep:zip", "dep:crc32fast"]
+
 [dependencies]
 zilog_z80 = "1.1.1"
 toml = "1.1.4"
 serde = { version = "1.0.229", features = ["derive"] }
-directories = "6.0.0"
+directories = { version = "6.0.0", optional = true }
 # Installeur de ROMs (rom_installer.rs) : téléchargement synchrone (appelé
 # depuis un thread dédié côté bytebox/, jamais la boucle egui elle-même),
 # extraction du zip source, et vérification d'intégrité.
-ureq = "3"
-zip = "8"
-crc32fast = "1"
+ureq = { version = "3", optional = true }
+zip = { version = "8", optional = true }
+crc32fast = { version = "1", optional = true }

@@ -1,9 +1,30 @@
+#[cfg(feature = "native")]
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::machine::MachineError;
+
+/// Sans la fonctionnalité "native" (une façade qui n'a pas de vrai
+/// répertoire personnel — le web, en premier lieu), aucune notion de
+/// répertoire personnel n'existe : ce godet se comporte comme un
+/// `UserDirs` qui n'en trouverait jamais — un cas que tous les appelants
+/// gèrent déjà proprement (`expand_tilde`, `config_path`,
+/// `default_resource_dir` ci-dessous), puisqu'un vrai système peut
+/// lui-même se retrouver sans `$HOME` (utilisateur système, conteneur
+/// minimal...).
+#[cfg(not(feature = "native"))]
+struct UserDirs;
+#[cfg(not(feature = "native"))]
+impl UserDirs {
+    fn new() -> Option<Self> {
+        None
+    }
+    fn home_dir(&self) -> &Path {
+        unreachable!("UserDirs::new() renvoie toujours None sans la fonctionnalite native")
+    }
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -810,6 +831,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn expand_tilde_replaces_a_leading_tilde_with_the_home_directory() {
         let home = UserDirs::new().expect("pas de repertoire personnel").home_dir().to_path_buf();
         assert_eq!(expand_tilde("~/.bytebox/DSK"), home.join(".bytebox/DSK"));
@@ -832,6 +854,7 @@ mod tests {
     /// silencieusement sur les chemins par defaut, `~` n'etant jamais un
     /// dossier reel.
     #[test]
+    #[cfg(feature = "native")]
     fn resolve_new_disk_path_expands_a_tilde_in_dsk_path() {
         let home = UserDirs::new().expect("pas de repertoire personnel").home_dir().to_path_buf();
         let config = Config {
