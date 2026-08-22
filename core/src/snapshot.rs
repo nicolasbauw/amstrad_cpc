@@ -200,6 +200,15 @@ pub fn save(machine: &Machine, filename: &str) -> Result<(), String> {
 /// champ par champ ni à se souvenir de ce qui découle de quoi.
 pub fn load(machine: &mut Machine, filename: &str) -> Result<(), String> {
     let data = std::fs::read(filename).map_err(|e| e.to_string())?;
+    load_from_bytes(machine, filename, &data)
+}
+
+/// Cœur de [`load`], sans lecture disque : `filename` ne sert plus qu'aux
+/// messages d'erreur/journal, pas à ouvrir quoi que ce soit — utilisable
+/// tel quel là où il n'y a pas de vrai système de fichiers (le glisser-
+/// déposer du front web, par exemple, qui reçoit déjà les octets via
+/// `FileReader`).
+pub fn load_from_bytes(machine: &mut Machine, filename: &str, data: &[u8]) -> Result<(), String> {
     if data.len() < HEADER_LEN || &data[..8] != b"MV - SNA" {
         return Err(format!("{filename} is not a .SNA snapshot"));
     }

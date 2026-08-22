@@ -318,15 +318,21 @@ impl Tape {
         let mut f = File::open(filename).map_err(|e| e.to_string())?;
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
-        let image = CdtImage::parse(&buffer)?;
+        self.load_tape_from_bytes(filename, &buffer)
+    }
+
+    /// Équivalent de [`Self::load_tape`] sans lecture disque : `name` ne
+    /// sert plus qu'au journal — voir `snapshot::load_from_bytes`.
+    pub fn load_tape_from_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let image = CdtImage::parse(bytes)?;
 
         self.pending_blocks = image.blocks.into();
         self.pulses.clear();
         self.pulse_countdown = 0;
         self.current_level = false;
         self.stopped = false;
-        self.current_filename = Some(filename.to_string());
-        app_log!("Tape CDT Loaded: {filename}");
+        self.current_filename = Some(name.to_string());
+        app_log!("Tape CDT Loaded: {name}");
         Ok(())
     }
 

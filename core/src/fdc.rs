@@ -397,8 +397,13 @@ impl Fdc {
         let mut f = File::open(filename).map_err(|e| e.to_string())?;
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
+        Self::load_disk_bytes_into(drive, filename, &buffer)
+    }
 
-        let dsk = DskImage::parse(&buffer)?;
+    /// Cœur de [`Self::load_disk_into`], sans lecture disque — voir
+    /// `snapshot::load_from_bytes` pour la même idée appliquée aux .SNA.
+    fn load_disk_bytes_into(drive: &mut Drive, filename: &str, buffer: &[u8]) -> Result<(), String> {
+        let dsk = DskImage::parse(buffer)?;
         drive.dsk = Some(dsk);
         drive.disk_loaded = true;
         drive.current_filename = filename.to_string();
@@ -420,6 +425,16 @@ impl Fdc {
         Ok(())
     }
 
+    /// Équivalent de [`Self::load_disk`] sans lecture disque : `name` ne
+    /// sert plus qu'au journal/à l'affichage — voir
+    /// `snapshot::load_from_bytes`.
+    pub fn load_disk_from_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        Self::load_disk_bytes_into(&mut self.drive_a, name, bytes)?;
+        self.reset_transient_state();
+        app_log!("Floppy DSK Loaded on drive A: {}", name);
+        Ok(())
+    }
+
     /// Charge un fichier disquette .dsk sur le lecteur B.
     /// Échoue si le lecteur B n'a pas été activé dans config.toml.
     pub fn load_disk_b(&mut self, filename: &str) -> Result<(), String> {
@@ -432,6 +447,20 @@ impl Fdc {
         Self::load_disk_into(&mut self.drive_b, filename)?;
         self.reset_transient_state();
         app_log!("Floppy DSK Loaded on drive B: {}", filename);
+        Ok(())
+    }
+
+    /// Équivalent de [`Self::load_disk_b`] sans lecture disque.
+    pub fn load_disk_b_from_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        if !self.drive_b_enabled {
+            return Err(
+                "Drive B is not enabled in the configuration (config.toml: [drives] drive_b = true)"
+                    .to_string(),
+            );
+        }
+        Self::load_disk_bytes_into(&mut self.drive_b, name, bytes)?;
+        self.reset_transient_state();
+        app_log!("Floppy DSK Loaded on drive B: {}", name);
         Ok(())
     }
 

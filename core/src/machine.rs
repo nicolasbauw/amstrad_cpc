@@ -533,6 +533,22 @@ impl Machine {
         self.bus.fdc.borrow_mut().load_disk_b(&path)
     }
 
+    /// Équivalent de [`Machine::load_disk`] sans lecture disque, ni
+    /// résolution de chemin (pas de sens sans vrai système de fichiers) :
+    /// pour un hôte qui a déjà les octets en main, comme le glisser-déposer
+    /// du front web.
+    pub fn load_disk_from_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        self.bus.fdc.borrow_mut().load_disk_from_bytes(name, bytes)
+    }
+
+    /// Équivalent de [`Machine::load_disk_from_bytes`] pour le lecteur B.
+    pub fn load_disk_b_from_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        self.bus
+            .fdc
+            .borrow_mut()
+            .load_disk_b_from_bytes(name, bytes)
+    }
+
     /// Charge un fichier .cdt dans le lecteur de cassettes, en résolvant le
     /// nom donné via `[file] cdt_path` s'il ne désigne pas déjà un fichier
     /// existant. Utilisée aussi bien par la commande console `tape` que par
@@ -542,6 +558,11 @@ impl Machine {
         self.bus.tape.borrow_mut().load_tape(&path)
     }
 
+    /// Équivalent de [`Machine::load_tape`] sans lecture disque.
+    pub fn load_tape_from_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        self.bus.tape.borrow_mut().load_tape_from_bytes(name, bytes)
+    }
+
     /// Charge un instantané `.SNA` et reprend l'exécution à partir de lui, en
     /// résolvant le nom donné via `[file] sna_path` (ou `~/.bytebox/SNA`)
     /// s'il ne désigne pas déjà un fichier existant. Utilisée aussi bien par
@@ -549,6 +570,11 @@ impl Machine {
     pub fn load_snapshot(&mut self, filename: &str) -> Result<(), String> {
         let path = self.config.resolve_snapshot_path(filename);
         crate::snapshot::load(self, &path)
+    }
+
+    /// Équivalent de [`Machine::load_snapshot`] sans lecture disque.
+    pub fn load_snapshot_from_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        crate::snapshot::load_from_bytes(self, name, bytes)
     }
 
     /// Éjecte la cassette.
