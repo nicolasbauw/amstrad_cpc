@@ -16,7 +16,7 @@ default = ["native"]
 native = ["dep:directories", "dep:ureq", "dep:zip", "dep:crc32fast"]
 
 [dependencies]
-zilog_z80 = "1.1.1"
+zilog_z80 = "1.1.2"
 toml = "1.1.4"
 serde = { version = "1.0.229", features = ["derive"] }
 directories = { version = "6.0.0", optional = true }
