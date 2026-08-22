@@ -26,7 +26,7 @@ impl UserDirs {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     pub drives: DriveConfig,
     pub debugger: Debugger,
@@ -98,7 +98,7 @@ pub struct CrtConfig {
     pub enabled_at_startup: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct FileConfig {
     /// Répertoire où chercher une image disque désignée par son seul nom de
     /// fichier (console `disk`, option `--disk`), à la manière du
@@ -145,7 +145,7 @@ pub struct DisplayConfig {
     pub show_disk_access_indicator: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct RomConfig {
     /// ROM basse (système/OS, 16 Ko). Certains dumps (ex. Caprice32,
     /// rom/cpc6128.rom) empaquettent le système et le BASIC en un seul
@@ -167,7 +167,7 @@ pub struct RomConfig {
     pub diagnostic_upper: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct MemoryConfig {
     /// Nombre de banques de 64 Ko supplémentaires au-delà des 128 Ko
     /// standard du 6128. Visibles par le protocole d'extension mémoire
@@ -309,14 +309,34 @@ impl Config {
         fs::create_dir_all(&dir)?;
         Ok(dir.join(filename).to_string_lossy().into_owned())
     }
+
+    /// Aller-retour TOML complet, indépendant de tout support de stockage —
+    /// contrairement à `load_config_file`/`save_crt_config` et consorts, qui
+    /// supposent un vrai fichier sur disque (et, pour la sauvegarde,
+    /// réécrivent une seule section pour préserver le reste du fichier —
+    /// commentaires compris — un souci qui n'a pas de sens pour un support
+    /// qu'on ne modifie jamais à la main). Une façade dont le support est
+    /// différent (le `localStorage` d'un navigateur, par exemple) récupère
+    /// elle-même la chaîne, par son propre moyen, et n'a besoin que de ces
+    /// deux fonctions pour la traduire en `Config` et inversement.
+    pub fn from_toml_str(s: &str) -> Result<Config, MachineError> {
+        toml::from_str(s).map_err(|_e| MachineError::ConfigFileFmt)
+    }
+
+    /// Voir [`Config::from_toml_str`]. Sérialise la configuration entière en
+    /// une seule chaîne, à l'inverse de `save_crt_config`/consorts qui ne
+    /// touchent qu'une section à la fois.
+    pub fn to_toml_string(&self) -> Result<String, MachineError> {
+        toml::to_string(self).map_err(|_e| MachineError::ConfigFileFmt)
+    }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DriveConfig {
     pub drive_b: bool,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Debugger {
     pub keyboard: bool,
     /// Signale sur la console les interventions de la régulation audio.
@@ -386,8 +406,7 @@ pub fn default_resource_dir(subdir: &str) -> PathBuf {
 
 pub fn load_config_file() -> Result<Config, MachineError> {
     let buf = fs::read_to_string(config_path()?)?;
-    let config: Config = toml::from_str(&buf).map_err(|_e| MachineError::ConfigFileFmt)?;
-    Ok(config)
+    Config::from_toml_str(&buf)
 }
 
 /// Réécrit une seule section du fichier de configuration, en laissant tout
@@ -508,6 +527,38 @@ mod tests {
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
         }
+    }
+
+    /// Aller-retour complet, indépendant de tout fichier — c'est justement
+    /// le point de `to_toml_string`/`from_toml_str` : une façade dont le
+    /// support n'est pas un fichier (le `localStorage` d'un navigateur,
+    /// visé par cette paire de fonctions) doit pouvoir round-tripper une
+    /// configuration entière sans jamais toucher au système de fichiers.
+    #[test]
+    fn a_config_survives_a_full_toml_round_trip() {
+        let mut config = sample_config();
+        config.drives.drive_b = true;
+        config.debugger.audio = true;
+        config.file.dsk_path = Some("~/mes/disquettes".to_string());
+        config.rom.amsdos = Some("mon_amsdos.rom".to_string());
+        config.memory.extra_ram_banks = 3;
+
+        let toml = config.to_toml_string().expect("serialisation");
+        let restored = Config::from_toml_str(&toml).expect("relecture");
+
+        assert!(restored.drives.drive_b);
+        assert!(restored.debugger.audio);
+        assert_eq!(restored.file.dsk_path.as_deref(), Some("~/mes/disquettes"));
+        assert_eq!(restored.rom.amsdos.as_deref(), Some("mon_amsdos.rom"));
+        assert_eq!(restored.memory.extra_ram_banks, 3);
+    }
+
+    /// `from_toml_str` doit échouer franchement sur du TOML mal formé,
+    /// plutôt que de faire semblant d'avoir compris — le même repli que
+    /// `load_config_file` applique déjà pour un fichier absent ou invalide.
+    #[test]
+    fn from_toml_str_rejects_malformed_toml() {
+        assert!(Config::from_toml_str("ceci n'est pas du toml valide [[[").is_err());
     }
 
     /// Le bug qui a motivé `write_config_section`/`write_config_section_at` :
