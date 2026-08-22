@@ -652,6 +652,37 @@ impl Machine {
         Ok(())
     }
 
+    /// Charge les ROMs directement depuis des tranches d'octets déjà en
+    /// mémoire, plutôt que depuis des fichiers sur disque (voir `load_roms`
+    /// ci-dessus) — pour une façade qui les embarque à la compilation
+    /// (`include_bytes!`) plutôt que de les installer sur un vrai système de
+    /// fichiers, comme le fera une façade web.
+    ///
+    /// Même découpage que `load_roms` : un `system` de 32 Ko ou plus est un
+    /// dump combiné OS+BASIC (Caprice32, `rom/cpc6128.rom`...), scindé en
+    /// deux automatiquement — `basic` n'est alors pas utilisé. Aucune E/S
+    /// possible ici (une simple copie en mémoire), donc pas de `Result` à
+    /// gérer contrairement à `load_roms`.
+    pub fn load_roms_from_bytes(
+        &mut self,
+        system: &[u8],
+        basic: &[u8],
+        amsdos: &[u8],
+        diagnostic_upper: Option<&[u8]>,
+    ) {
+        if system.len() >= 32 * 1024 {
+            self.bus.memory.load_low_rom(&system[..16 * 1024]);
+            self.bus.memory.load_high_rom(0, &system[16 * 1024..32 * 1024]);
+        } else {
+            self.bus.memory.load_low_rom(system);
+            self.bus.memory.load_high_rom(0, basic);
+        }
+        self.bus.memory.load_high_rom(7, amsdos);
+        if let Some(diag) = diagnostic_upper {
+            self.bus.memory.load_high_rom(15, diag);
+        }
+    }
+
     /// Vrai si `load_roms` réussirait avec la configuration actuelle — sans
     /// réellement rien charger (juste l'existence des fichiers concernés,
     /// et pour `system`, sa taille pour savoir si `basic` compte aussi).
@@ -1758,6 +1789,59 @@ mod tests {
     /// `None`, qui ferait dépendre le résultat de l'environnement réel.
     fn nonexistent_path(dir: &std::path::Path, name: &str) -> String {
         dir.join(name).to_string_lossy().into_owned()
+    }
+
+    /// `load_roms_from_bytes` doit reproduire exactement le découpage de
+    /// `load_roms` : un `system` de 16 Ko charge `basic` séparément dans la
+    /// ROM haute 0, un `system` de 32 Ko ou plus (dump combiné) le scinde
+    /// lui-même et ignore `basic`. Aucun fichier réel nécessaire — c'est
+    /// tout l'intérêt de cette méthode — donc pas de "ROMs absentes : test
+    /// ignoré" comme pour les tests qui passent par `load_roms`.
+    #[test]
+    fn load_roms_from_bytes_splits_a_combined_system_dump_like_load_roms_does() {
+        let mut machine = Machine::new();
+
+        // Cas 16 Ko : system et basic distincts.
+        let system = vec![0xAAu8; 16 * 1024];
+        let basic = vec![0xBBu8; 16 * 1024];
+        let amsdos = vec![0xCCu8; 16 * 1024];
+        machine.load_roms_from_bytes(&system, &basic, &amsdos, None);
+        assert!(machine.bus.memory.rom_low.iter().all(|&b| b == 0xAA));
+        assert!(
+            machine.bus.memory.rom_high[..16 * 1024]
+                .iter()
+                .all(|&b| b == 0xBB),
+            "basic doit finir en ROM haute 0"
+        );
+        assert!(
+            machine.bus.memory.rom_high[7 * 16 * 1024..8 * 16 * 1024]
+                .iter()
+                .all(|&b| b == 0xCC),
+            "amsdos doit finir en ROM haute 7"
+        );
+        assert!(!machine.bus.memory.rom_high_present[15], "pas de diagnostic ici");
+
+        // Cas 32 Ko : dump combine, "basic" (volontairement une valeur
+        // differente) ne doit PAS se retrouver charge.
+        let mut machine = Machine::new();
+        let mut combined = vec![0xDDu8; 16 * 1024]; // moitie "system"
+        combined.extend(vec![0xEEu8; 16 * 1024]); // moitie "basic"
+        let unused_basic = vec![0xFFu8; 16 * 1024];
+        let diag = vec![0x11u8; 16 * 1024];
+        machine.load_roms_from_bytes(&combined, &unused_basic, &amsdos, Some(&diag));
+        assert!(machine.bus.memory.rom_low.iter().all(|&b| b == 0xDD));
+        assert!(
+            machine.bus.memory.rom_high[..16 * 1024]
+                .iter()
+                .all(|&b| b == 0xEE),
+            "la moitie haute du dump combine doit finir en ROM haute 0"
+        );
+        assert!(
+            machine.bus.memory.rom_high[15 * 16 * 1024..16 * 16 * 1024]
+                .iter()
+                .all(|&b| b == 0x11),
+            "diagnostic_upper doit finir en ROM haute 15 quand fourni"
+        );
     }
 
     #[test]
