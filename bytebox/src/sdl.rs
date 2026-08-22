@@ -165,6 +165,7 @@ pub fn run(
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
     let controller_subsystem = sdl_context.game_controller()?;
+    let joystick_subsystem = sdl_context.joystick()?;
 
     // Tentative d'ouverture de la première manette disponible. Réutilisée
     // aussi bien ici, au démarrage, que dans la boucle d'événements sur
@@ -187,6 +188,46 @@ pub fn run(
             None
         };
     let mut active_controller = open_first_controller(&controller_subsystem);
+
+    // Repli sur l'API Joystick brute : `is_game_controller` ne dit vrai que
+    // pour les manettes présentes dans la base de mappings intégrée à SDL2
+    // (SDL_GameControllerDB), qui ne couvre que les modèles les plus
+    // répandus. Une manette USB "générique" ou simplement absente de cette
+    // base (constaté avec une Logitech Precision Gamepad : vue par SDL comme
+    // joystick à 2 axes/10 boutons, mais `is_game_controller` renvoie false)
+    // n'était donc jamais ouverte, silencieusement — le symptôme rapporté
+    // ("une manette USB n'est pas détectée").
+    //
+    // Sans mapping, impossible de connaître la disposition réelle des
+    // boutons (pas de nom "A"/"B"/DPad comme sur l'API Controller) : schéma
+    // générique adapté à l'usage CPC (croix directionnelle + 1-3 boutons de
+    // tir), suffisant pour la plupart des manettes de jeu simples. Une
+    // manette dotée d'un vrai stick analogique fonctionnera aussi (axes 0/1
+    // pris comme abscisse/ordonnée), juste sans les autres axes/boutons.
+    let open_first_joystick = |controller_subsystem: &sdl2::GameControllerSubsystem,
+                                joystick_subsystem: &sdl2::JoystickSubsystem|
+     -> Option<sdl2::joystick::Joystick> {
+        let num_joysticks = joystick_subsystem.num_joysticks().unwrap_or(0);
+        for i in 0..num_joysticks {
+            // Déjà pris en charge par l'API Controller : pas de double emploi.
+            if controller_subsystem.is_game_controller(i) {
+                continue;
+            }
+            match joystick_subsystem.open(i) {
+                Ok(j) => {
+                    app_log!("Joystick opened (generic mapping): {}", j.name());
+                    return Some(j);
+                }
+                Err(e) => app_log!("Failed to open joystick {}: {}", i, e),
+            }
+        }
+        None
+    };
+    let mut active_joystick = if active_controller.is_none() {
+        open_first_joystick(&controller_subsystem, &joystick_subsystem)
+    } else {
+        None
+    };
 
     // 4. Ouverture de la sortie audio. Une machine sans carte son utilisable
     // ne doit pas empêcher l'émulateur de démarrer : on continue en silence.
@@ -308,6 +349,8 @@ pub fn run(
     let mut osd = crate::osd::Osd::new();
     if let Some(controller) = &active_controller {
         osd.show(format!("Controller connected: {}", controller.name()));
+    } else if let Some(joystick) = &active_joystick {
+        osd.show(format!("Controller connected: {}", joystick.name()));
     }
 
     // Barre de commande rapide (F10, console_panel.rs) et console complète
@@ -883,6 +926,117 @@ pub fn run(
                         // Une direction ou un tir resté "enfoncé" au moment
                         // du débranchement resterait sinon bloqué indéfiniment
                         // dans la matrice clavier émulée.
+                        for button in 0..7 {
+                            machine.bus.psg.set_controller_button(button, false);
+                        }
+                    }
+                }
+                // Repli manette non reconnue par l'API Controller (voir la
+                // doc d'`open_first_joystick` plus haut) : mêmes gestes,
+                // schéma générique faute de mapping. `which` désigne l'ID
+                // d'instance pour ces trois événements (contrairement à
+                // `JoyDeviceAdded` ci-dessous), donc comparable directement à
+                // `instance_id()`.
+                Event::JoyAxisMotion {
+                    which,
+                    axis_idx,
+                    value,
+                    ..
+                } => {
+                    if active_joystick
+                        .as_ref()
+                        .is_some_and(|j| j.instance_id() == which)
+                    {
+                        let threshold = 10000;
+                        match axis_idx {
+                            0 => {
+                                if value > threshold {
+                                    machine.bus.psg.set_controller_button(3, true); // Right
+                                    machine.bus.psg.set_controller_button(2, false);
+                                } else if value < -threshold {
+                                    machine.bus.psg.set_controller_button(2, true); // Left
+                                    machine.bus.psg.set_controller_button(3, false);
+                                } else {
+                                    machine.bus.psg.set_controller_button(2, false);
+                                    machine.bus.psg.set_controller_button(3, false);
+                                }
+                            }
+                            1 => {
+                                if value > threshold {
+                                    machine.bus.psg.set_controller_button(1, true); // Down
+                                    machine.bus.psg.set_controller_button(0, false);
+                                } else if value < -threshold {
+                                    machine.bus.psg.set_controller_button(0, true); // Up
+                                    machine.bus.psg.set_controller_button(1, false);
+                                } else {
+                                    machine.bus.psg.set_controller_button(0, false);
+                                    machine.bus.psg.set_controller_button(1, false);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Event::JoyButtonDown {
+                    which, button_idx, ..
+                } => {
+                    if active_joystick
+                        .as_ref()
+                        .is_some_and(|j| j.instance_id() == which)
+                    {
+                        // Pas de nom de bouton sans mapping : les trois
+                        // premiers de la manette servent de tir 1/2/3, comme
+                        // A/B/X côté API Controller.
+                        if let 0..=2 = button_idx {
+                            machine
+                                .bus
+                                .psg
+                                .set_controller_button(4 + button_idx as usize, true);
+                        }
+                    }
+                }
+                Event::JoyButtonUp {
+                    which, button_idx, ..
+                } => {
+                    if active_joystick
+                        .as_ref()
+                        .is_some_and(|j| j.instance_id() == which)
+                        && let 0..=2 = button_idx
+                    {
+                        machine
+                            .bus
+                            .psg
+                            .set_controller_button(4 + button_idx as usize, false);
+                    }
+                }
+                Event::JoyDeviceAdded { which, .. } => {
+                    // Ici `which` est un INDEX de périphérique (comme pour
+                    // `ControllerDeviceAdded`), pas un ID d'instance : cet
+                    // événement est émis pour tout joystick qui apparaît, y
+                    // compris ceux reconnus par l'API Controller — dont
+                    // l'ouverture est déjà gérée par `ControllerDeviceAdded`.
+                    if active_controller.is_none()
+                        && active_joystick.is_none()
+                        && !controller_subsystem.is_game_controller(which)
+                    {
+                        match joystick_subsystem.open(which) {
+                            Ok(j) => {
+                                app_log!("Joystick opened (generic mapping): {}", j.name());
+                                osd.show(format!("Controller connected: {}", j.name()));
+                                active_joystick = Some(j);
+                            }
+                            Err(e) => app_log!("Failed to open joystick {which}: {e}"),
+                        }
+                    }
+                }
+                Event::JoyDeviceRemoved { which, .. } => {
+                    let was_active = active_joystick
+                        .as_ref()
+                        .is_some_and(|j| j.instance_id() == which);
+                    if was_active {
+                        app_log!("Controller disconnected");
+                        osd.show("Controller disconnected");
+                        active_joystick = None;
                         for button in 0..7 {
                             machine.bus.psg.set_controller_button(button, false);
                         }
