@@ -8,7 +8,6 @@ use crate::monitor::{MonitorCmd, MonitorMessage};
 use crate::trace::{TraceMode, Tracer};
 use std::{
     collections::HashSet, error, error::Error, fmt, fs::File, io::Read, path::PathBuf, sync::mpsc,
-    sync::mpsc::SendError,
 };
 use zilog_z80::{bus::Bus, cpu::CPU};
 
@@ -174,10 +173,6 @@ pub enum MachineError {
     ConfigFile,
     ConfigFileFmt,
     IOError,
-    SendMsgError,
-    SnapshotError,
-    DisplayError,
-    FontError,
 }
 
 impl fmt::Display for MachineError {
@@ -186,10 +181,6 @@ impl fmt::Display for MachineError {
             MachineError::ConfigFileFmt => "Bad config file format",
             MachineError::ConfigFile => "Can't load config file",
             MachineError::IOError => "I/O Error",
-            MachineError::SendMsgError => "Message not sent",
-            MachineError::SnapshotError => "Snapshot I/O error",
-            MachineError::DisplayError => "SDL3 error",
-            MachineError::FontError => "Can't load font",
         })
     }
 }
@@ -197,12 +188,6 @@ impl fmt::Display for MachineError {
 impl From<std::io::Error> for MachineError {
     fn from(_e: std::io::Error) -> MachineError {
         MachineError::IOError
-    }
-}
-
-impl From<SendError<(String, String, String)>> for MachineError {
-    fn from(_e: SendError<(String, String, String)>) -> MachineError {
-        MachineError::SendMsgError
     }
 }
 
