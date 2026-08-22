@@ -1,1 +1,2 @@
 - commencons le désassemblage de discology (voir plan v3)
+- les snapshots qu'on sauvegarde via la commande snap sont bien des snapshots v2 ? je ne suis pas sûr qu'on ait ré-évalué cela suite à l'ajout de la fonctionnalité de lecture des .sna (rasm) hier.
