@@ -246,7 +246,31 @@ Once a tape is inserted, this is normally followed by "Press PLAY then any
 key", after which the emulated datacorder starts feeding the firmware.
 
 ![Screenshot](assets/tape.png)
-  
+
+## Joystick / game controller
+
+The first controller detected when the emulator starts is mapped to the
+CPC's joystick port: D-pad or left stick for direction, three buttons for
+fire 1/2/3. Plugging one in while the emulator is already running works too
+(hot-plug) — an on-screen message names the controller once it's picked up.
+Only one controller is active at a time; the first one detected keeps it, so
+turning on a second controller (Bluetooth or USB) alongside an
+already-active one doesn't interfere.
+
+Two detection paths, tried in this order:
+
+- **SDL's `GameController` API**, for controllers recognized by SDL2's
+  built-in mapping database — the common case for name-brand controllers.
+  Tested with a Bluetooth Xbox controller.
+- **A generic fallback** for anything SDL2 doesn't recognize as a
+  `GameController` — which turns out to include plenty of ordinary USB
+  gamepads, since that database only covers so many models. Without a
+  mapping there's no way to know which physical button is "A" or where the
+  D-pad is, so this path assumes a simple layout: the first two axes as
+  direction, the first three buttons as fire 1/2/3. Tested with a wired USB
+  gamepad (Logitech Precision Gamepad) that SDL2 doesn't recognize as a
+  `GameController` at all.
+
 ## Emulator monitor commands
   
     d 0x0000          disassembles code at 0x0000 and the 20 next

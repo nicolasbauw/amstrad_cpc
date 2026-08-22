@@ -1,3 +1,1 @@
-- Une manette USB n'est pas détectée par l'émulateur
-- Mettre à jour le README sur la prise en charge des manettes bluetooth (manette xbox testée) et des manettes usb (si le point ci-dessus a été réglé)
 - commencons le désassemblage de discology (voir plan v3)
