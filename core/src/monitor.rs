@@ -60,6 +60,7 @@ pub fn parse_command(line: &str) -> MonitorMessage {
         "mr" => MonitorCmd::ReadRam,
         "vol" | "volume" => MonitorCmd::Volume,
         "driveb" => MonitorCmd::DriveB,
+        "mouse" => MonitorCmd::Mouse,
         "ram" => MonitorCmd::ExtraRamBanks,
         "tapevol" => MonitorCmd::TapeAmplitude,
         "diag" => MonitorCmd::DiagnosticMode,
@@ -105,6 +106,11 @@ pub enum MonitorCmd {
     /// redémarrage. Introduite pour le panneau de configuration (F6, Plan
     /// V2.md jalon M3).
     DriveB,
+    /// Active/désactive la souris logicielle ByteBox ("mouse on"/"mouse
+    /// off") — même principe que `DriveB` : effet immédiat, sans
+    /// redémarrage, introduite pour le panneau de configuration (F6). Voir
+    /// `crate::mouse::Mouse`.
+    Mouse,
     /// Change le nombre de banques de RAM étendue ("ram <n>"). Ne peut pas
     /// avoir d'effet immédiat : `Memory` est dimensionnée à la construction
     /// (voir `Machine::power_on`), donc la nouvelle valeur ne s'applique

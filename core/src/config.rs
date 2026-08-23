@@ -45,6 +45,17 @@ pub struct Config {
     pub crt: CrtConfig,
     #[serde(default)]
     pub keyboard: KeyboardConfig,
+    #[serde(default)]
+    pub mouse: MouseConfig,
+}
+
+/// Souris logicielle ByteBox (voir `crate::mouse::Mouse`) — désactivée par
+/// défaut, comme `drives.drive_b`, pour ne rien changer au comportement
+/// existant tant que l'utilisateur ne l'a pas explicitement activée.
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
+pub struct MouseConfig {
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// Réglages du clavier virtuel (F7) enregistrés depuis le panneau F6, sur le
@@ -526,6 +537,7 @@ mod tests {
             rom: RomConfig::default(),
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
+            mouse: MouseConfig::default(),
         }
     }
 
@@ -770,6 +782,7 @@ mod tests {
             rom: RomConfig::default(),
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
+            mouse: MouseConfig::default(),
         };
         assert_eq!(config.resolve_new_disk_path("d.dsk"), "bin/d.dsk");
 
@@ -809,6 +822,7 @@ mod tests {
             rom: RomConfig::default(),
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
+            mouse: MouseConfig::default(),
         };
         // AmstradDiag.cdt existe bien dans bin/ (dsk_path), mais
         // resolve_tape_path ne doit chercher que dans cdt_path : le nom doit
@@ -841,6 +855,7 @@ mod tests {
             rom: RomConfig::default(),
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
+            mouse: MouseConfig::default(),
         };
         assert_eq!(
             config.resolve_tape_path("AmstradDiag.cdt"),
@@ -924,6 +939,7 @@ mod tests {
             rom: RomConfig::default(),
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
+            mouse: MouseConfig::default(),
         };
         assert_eq!(
             config.resolve_new_disk_path("d.dsk"),

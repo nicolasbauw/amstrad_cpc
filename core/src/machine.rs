@@ -295,6 +295,7 @@ impl Machine {
                 rom: config::RomConfig::default(),
                 crt: config::CrtConfig::default(),
                 keyboard: config::KeyboardConfig::default(),
+                mouse: config::MouseConfig::default(),
             }
         });
 
@@ -335,6 +336,11 @@ impl Machine {
             .set_drive_b_enabled(m.config.drives.drive_b);
         if m.config.drives.drive_b {
             app_log!("Drive B enabled (config.toml)");
+        }
+
+        m.bus.mouse.borrow_mut().enabled = m.config.mouse.enabled;
+        if m.config.mouse.enabled {
+            app_log!("Mouse enabled (config.toml)");
         }
 
         m
@@ -1717,6 +1723,17 @@ impl Machine {
                     println!("Drive B disabled");
                 }
                 _ => println!("Usage: driveb on | driveb off"),
+            },
+            MonitorCmd::Mouse => match arg.as_str() {
+                "on" => {
+                    self.bus.mouse.borrow_mut().enabled = true;
+                    println!("Mouse enabled");
+                }
+                "off" => {
+                    self.bus.mouse.borrow_mut().enabled = false;
+                    println!("Mouse disabled");
+                }
+                _ => println!("Usage: mouse on | mouse off"),
             },
             MonitorCmd::ExtraRamBanks => match arg.parse::<u32>() {
                 Ok(banks) => {

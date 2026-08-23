@@ -2,6 +2,7 @@ use crate::crtc::Crtc;
 use crate::fdc::Fdc;
 use crate::gate_array::GateArray;
 use crate::memory::Memory;
+use crate::mouse::Mouse;
 use crate::ppi::Ppi;
 use crate::psg::Psg;
 use crate::tape::Tape;
@@ -18,6 +19,21 @@ fn fdc_selected(port: u16) -> bool {
     (port & 0x0480) == 0
 }
 
+/// Page de ports &FC00-&FCFF, réservée aux périphériques logiciels propres à
+/// ByteBox (sans équivalent matériel réel) — la souris aujourd'hui, d'autres
+/// possibles plus tard. Choisie car elle ne recoupe aucun décodage matériel
+/// existant : bit11=1 (hors PPI, qui répond à bit11=0), bit14=1 (hors CRTC,
+/// bit14=0), bit10=1 (hors FDC, qui exige bit10=0 ET bit7=0 — voir
+/// `fdc_selected`). Vérifié par le test `bytebox_ports_do_not_collide_with_
+/// real_hardware_decoding` ci-dessous.
+fn bytebox_mouse_selected(port: u16) -> bool {
+    (port & 0xFF00) == 0xFC00
+}
+
+const MOUSE_DX_PORT: u16 = 0xFC00;
+const MOUSE_DY_PORT: u16 = 0xFC01;
+const MOUSE_BUTTONS_PORT: u16 = 0xFC02;
+
 /// Le Bus système du CPC qui interconnecte tous les composants matériels.
 pub struct CpcBus {
     pub memory: Memory,
@@ -27,6 +43,10 @@ pub struct CpcBus {
     pub ppi: Ppi,
     pub fdc: RefCell<Fdc>,
     pub tape: RefCell<Tape>,
+    /// `RefCell`, comme `fdc`/`tape` ci-dessus : `read_io` du trait `Bus` ne
+    /// prend `&self`, alors que lire un delta le consomme (voir
+    /// `Mouse::read_dx`/`read_dy`).
+    pub mouse: RefCell<Mouse>,
     pub watchpoints: HashSet<u16>,
     pub watchpoint_hit: Option<u16>,
 }
@@ -42,6 +62,7 @@ impl CpcBus {
             ppi: Ppi::new(),
             fdc: RefCell::new(Fdc::new()),
             tape: RefCell::new(Tape::new()),
+            mouse: RefCell::new(Mouse::new()),
             watchpoints: HashSet::new(),
             watchpoint_hit: None,
         }
@@ -104,6 +125,23 @@ impl Bus for CpcBus {
                 } else {
                     return self.fdc.borrow().read_msr();
                 }
+            }
+        }
+
+        // 4. Souris logicielle ByteBox (voir `bytebox_mouse_selected`).
+        // Silencieuse (0xFF, comme un port non décodé) si désactivée, plutôt
+        // que de rendre 0 : un pilote qui sonderait le port pour détecter la
+        // présence de la souris avant de s'en servir ne doit pas confondre
+        // "absente" et "immobile".
+        if bytebox_mouse_selected(port) {
+            let mut mouse = self.mouse.borrow_mut();
+            if mouse.enabled {
+                return match port {
+                    MOUSE_DX_PORT => mouse.read_dx(),
+                    MOUSE_DY_PORT => mouse.read_dy(),
+                    MOUSE_BUTTONS_PORT => mouse.read_buttons(),
+                    _ => 0xFF,
+                };
             }
         }
 
@@ -262,5 +300,56 @@ mod tests {
                 "{port:#06X} ne devrait pas atteindre le FDC"
             );
         }
+    }
+
+    /// La page &FC00-&FCFF ne doit recouper le décodage d'aucun composant
+    /// matériel réel — voir le commentaire de `bytebox_mouse_selected`.
+    #[test]
+    fn the_bytebox_mouse_page_does_not_collide_with_real_hardware_decoding() {
+        for port in [0xFC00, MOUSE_DX_PORT, MOUSE_DY_PORT, MOUSE_BUTTONS_PORT, 0xFCFF] {
+            assert!(bytebox_mouse_selected(port), "{port:#06X} devrait atteindre la souris");
+            assert!(!fdc_selected(port), "{port:#06X} ne devrait pas atteindre le FDC");
+        }
+
+        for port in [
+            0x79FF, 0x7BFF, 0x7F00, // Gate Array
+            0xBC00, 0xBD00, 0xBE00, 0xBF00, 0xDF00, // CRTC / sélection ROM haute
+            0xF400, 0xF500, 0xF600, 0xF700, // PPI
+            0xFA7E, 0xFB7E, 0xFB7F, // FDC
+        ] {
+            assert!(
+                !bytebox_mouse_selected(port),
+                "{port:#06X} ne devrait pas atteindre la souris"
+            );
+        }
+    }
+
+    /// Souris désactivée (comportement par défaut) : le port se comporte
+    /// comme n'importe quel port non décodé (0xFF), sans distinguer "absente"
+    /// de "immobile".
+    #[test]
+    fn a_disabled_mouse_reads_as_an_undecoded_port() {
+        let bus = CpcBus::new(Memory::new(0));
+        assert_eq!(bus.read_io(MOUSE_DX_PORT), 0xFF);
+        assert_eq!(bus.read_io(MOUSE_DY_PORT), 0xFF);
+        assert_eq!(bus.read_io(MOUSE_BUTTONS_PORT), 0xFF);
+    }
+
+    /// Une fois activée, chaque registre rend le champ attendu, et la lecture
+    /// d'un delta le consomme (voir `mouse.rs`).
+    #[test]
+    fn an_enabled_mouse_exposes_deltas_and_buttons_through_its_three_ports() {
+        let bus = CpcBus::new(Memory::new(0));
+        {
+            let mut mouse = bus.mouse.borrow_mut();
+            mouse.enabled = true;
+            mouse.on_motion(5, -2);
+            mouse.set_button(0, true);
+        }
+
+        assert_eq!(bus.read_io(MOUSE_DX_PORT), 5);
+        assert_eq!(bus.read_io(MOUSE_DX_PORT), 0, "le delta doit etre consomme");
+        assert_eq!(bus.read_io(MOUSE_DY_PORT) as i8, -2);
+        assert_eq!(bus.read_io(MOUSE_BUTTONS_PORT), 0b001);
     }
 }

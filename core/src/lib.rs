@@ -23,6 +23,7 @@ pub mod keys;
 pub mod machine;
 pub mod memory;
 pub mod monitor;
+pub mod mouse;
 pub mod ppi;
 pub mod psg;
 #[cfg(feature = "native")]
