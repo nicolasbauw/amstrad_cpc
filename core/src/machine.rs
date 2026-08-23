@@ -466,6 +466,37 @@ impl Machine {
     /// (comme sur le matériel réel : couper le courant ne fait pas sortir
     /// un média de son lecteur).
     pub fn power_on(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.power_on_with(Self::load_roms)
+    }
+
+    /// Équivalent de [`Machine::power_on`], mais recharge les ROMs depuis
+    /// des tranches d'octets déjà en mémoire (`load_roms_from_bytes`)
+    /// plutôt que depuis le système de fichiers — pour une façade qui les
+    /// embarque à la compilation, comme la façade web (pas de vrai système
+    /// de fichiers dans un navigateur, donc `power_on`/`power_cycle` tels
+    /// quels y échouaient, `load_roms` ne trouvant jamais rien à ouvrir —
+    /// symptôme : écran magenta après un "Power cycle", les ROMs étant
+    /// restées vides après le `CpcBus::new` interne).
+    pub fn power_on_from_bytes(
+        &mut self,
+        system: &[u8],
+        basic: &[u8],
+        amsdos: &[u8],
+        diagnostic_upper: Option<&[u8]>,
+    ) {
+        self.power_on_with(|m| {
+            m.load_roms_from_bytes(system, basic, amsdos, diagnostic_upper);
+            Ok(())
+        })
+        .expect("load_roms_from_bytes ne renvoie jamais d'erreur");
+    }
+
+    /// Partie commune à `power_on`/`power_on_from_bytes` : tout sauf le
+    /// rechargement des ROMs proprement dit, confié à `load_roms`.
+    fn power_on_with(
+        &mut self,
+        load_roms: impl FnOnce(&mut Self) -> Result<(), Box<dyn std::error::Error>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (disk_a, disk_b, drive_b_enabled) = {
             let fdc = self.bus.fdc.borrow();
             (
@@ -512,7 +543,7 @@ impl Machine {
             let _ = self.bus.tape.borrow_mut().load_tape(&filename);
         }
 
-        self.load_roms()?;
+        load_roms(self)?;
         self.start();
         app_log!("Power on.");
         Ok(())
@@ -604,6 +635,21 @@ impl Machine {
         } else {
             app_log!("Power cycle complete.");
         }
+    }
+
+    /// Équivalent de [`Machine::power_cycle`], pour une façade qui embarque
+    /// ses ROMs en mémoire plutôt que sur le système de fichiers — voir
+    /// `power_on_from_bytes`.
+    pub fn power_cycle_from_bytes(
+        &mut self,
+        system: &[u8],
+        basic: &[u8],
+        amsdos: &[u8],
+        diagnostic_upper: Option<&[u8]>,
+    ) {
+        self.power_off();
+        self.power_on_from_bytes(system, basic, amsdos, diagnostic_upper);
+        app_log!("Power cycle complete.");
     }
 
     /// Résout le chemin d'une ROM : l'entrée `[rom]` de `config.toml` si
