@@ -371,6 +371,12 @@ impl ConfigPanel {
             let _ = cmd_sender.send((MonitorCmd::DriveB, arg.to_string(), String::new()));
         }
 
+        let mut mouse_enabled = machine.bus.mouse.borrow().enabled;
+        if ui.checkbox(&mut mouse_enabled, "Enable mouse").changed() {
+            let arg = if mouse_enabled { "on" } else { "off" };
+            let _ = cmd_sender.send((MonitorCmd::Mouse, arg.to_string(), String::new()));
+        }
+
         let mut diagnostic_mode = machine.diagnostic_mode;
         if ui
             .checkbox(&mut diagnostic_mode, "Diagnostic ROM at slot 0F")

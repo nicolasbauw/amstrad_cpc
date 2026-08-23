@@ -14,6 +14,7 @@ use bytebox_core::machine::{self, Machine};
 use crate::renderer::{CrtSettings, Renderer};
 use bytebox_core::video;
 use sdl2::event::Event;
+use sdl2::mouse::MouseButton;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::surface::Surface;
 
@@ -150,6 +151,21 @@ fn apply_display_mode(window: &mut sdl2::video::Window, mode: DisplayMode) {
         sdl2::video::WindowPos::Centered,
         sdl2::video::WindowPos::Centered,
     );
+}
+
+/// Traduit un bouton SDL2 vers l'index attendu par `Mouse::set_button`
+/// (0 = gauche, 1 = droit, 2 = milieu — voir `bytebox_core::mouse`). Le clic
+/// gauche/milieu qui capture ou relâche la souris n'atteint jamais cette
+/// fonction (interceptés avant, voir la boucle d'évènements) ; ce qui reste
+/// couvre le clic droit et les boutons latéraux, ignorés faute d'équivalent
+/// dans le protocole à 3 boutons.
+fn mouse_button_index(button: MouseButton) -> Option<u8> {
+    match button {
+        MouseButton::Left => Some(0),
+        MouseButton::Right => Some(1),
+        MouseButton::Middle => Some(2),
+        _ => None,
+    }
 }
 
 /// Traduit un `Keycode` SDL2 vers celui, propre à `core`, que
@@ -503,6 +519,15 @@ pub fn run(
     let mut keyboard_settings = KeyboardSettings::from_config(machine.keyboard_config());
     // Voir le commentaire sur les évènements Enter/Leave plus bas.
     let mut mouse_over_main_window = false;
+    // Capture souris de la souris logicielle ByteBox (voir `bytebox_core::
+    // mouse`) : clic gauche sur la fenêtre principale pour capturer (mode
+    // relatif SDL2, curseur système déjà masqué au survol — voir plus bas),
+    // clic milieu pour relâcher. Indépendant de `mouse_over_main_window`,
+    // qui ne sert qu'à masquer le curseur : une fois capturée, la souris
+    // n'émet plus d'évènements Enter/Leave fiables (le pointeur ne "sort"
+    // jamais vraiment de la fenêtre en mode relatif), donc cet état a besoin
+    // de son propre booléen plutôt que de se déduire de mouse_over_main_window.
+    let mut mouse_captured = false;
     // Tout ce qui a été journalisé avant l'ouverture des fenêtres (bannière
     // de démarrage, config invalide, --disk/--tape en ligne de commande...)
     // attendait dans la file globale (voir applog.rs) : on le récupère ici,
@@ -660,6 +685,84 @@ pub fn run(
                     ..
                 } if window_id == main_window_id => {
                     mouse_over_main_window = false;
+                }
+                // Perte de focus (alt-tab, clic sur une autre fenêtre...) :
+                // filet de sécurité pour ne jamais laisser la souris captée
+                // — sans curseur visible ni fenêtre au premier plan — alors
+                // que l'utilisateur est parti faire autre chose.
+                Event::Window {
+                    win_event: sdl2::event::WindowEvent::FocusLost,
+                    window_id,
+                    ..
+                } if window_id == main_window_id && mouse_captured => {
+                    sdl_context.mouse().set_relative_mouse_mode(false);
+                    mouse_captured = false;
+                }
+                // Clic gauche pour capturer la souris (mode relatif SDL2) :
+                // seulement hors overlay (sinon ce clic vise un bouton F6/F10
+                // et ne doit pas en plus capturer), sur la fenêtre
+                // principale, et seulement si la souris logicielle est
+                // activée (config.toml [mouse] ou panneau F6) — capturer
+                // pour un périphérique qu'aucun logiciel ne lira n'aurait
+                // aucun sens et ne ferait que piéger le curseur sans raison.
+                // Ce premier clic ne doit PAS remonter comme un bouton
+                // enfoncé côté CPC : voir plus bas, le `MouseButtonDown`
+                // générique est dans un bras `if` distinct qui l'exclut.
+                Event::MouseButtonDown {
+                    mouse_btn: MouseButton::Left,
+                    window_id,
+                    ..
+                } if window_id == main_window_id
+                    && !mouse_captured
+                    && !(quick_bar_visible || config_panel_visible || keyboard_panel_visible)
+                    && machine.bus.mouse.borrow().enabled =>
+                {
+                    sdl_context.mouse().set_relative_mouse_mode(true);
+                    mouse_captured = true;
+                }
+                // Clic milieu pour relâcher — ne remonte pas non plus côté
+                // CPC, même logique que la capture ci-dessus.
+                Event::MouseButtonDown {
+                    mouse_btn: MouseButton::Middle,
+                    window_id,
+                    ..
+                } if window_id == main_window_id && mouse_captured => {
+                    sdl_context.mouse().set_relative_mouse_mode(false);
+                    mouse_captured = false;
+                }
+                // Mouvement relatif : en mode capturé, SDL2 rend `xrel`/`yrel`
+                // au lieu d'une position absolue recentrée chaque trame — pas
+                // besoin de calculer nous-mêmes un delta depuis la position
+                // précédente.
+                Event::MouseMotion {
+                    window_id,
+                    xrel,
+                    yrel,
+                    ..
+                } if window_id == main_window_id && mouse_captured => {
+                    machine.bus.mouse.borrow_mut().on_motion(xrel, yrel);
+                }
+                // Boutons transmis tels quels pendant la capture (hors clic
+                // gauche/milieu de capture/relâche eux-mêmes, déjà consommés
+                // par les bras ci-dessus qui les interceptent en premier —
+                // l'ordre des bras `match` compte ici).
+                Event::MouseButtonDown {
+                    mouse_btn,
+                    window_id,
+                    ..
+                } if window_id == main_window_id && mouse_captured => {
+                    if let Some(button) = mouse_button_index(mouse_btn) {
+                        machine.bus.mouse.borrow_mut().set_button(button, true);
+                    }
+                }
+                Event::MouseButtonUp {
+                    mouse_btn,
+                    window_id,
+                    ..
+                } if window_id == main_window_id && mouse_captured => {
+                    if let Some(button) = mouse_button_index(mouse_btn) {
+                        machine.bus.mouse.borrow_mut().set_button(button, false);
+                    }
                 }
                 // Taille d'affichage : F1 normale, F2 x2, F3 x3, F4 plein
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
@@ -1220,6 +1323,23 @@ pub fn run(
         // Recalculé chaque trame plutôt qu'à chaque évènement individuel
         // (Enter/Leave, F6, F10...) : plus simple, et 60 fois par seconde
         // est largement assez réactif pour un simple show/hide de curseur.
+        // Filet de sécurité, recalculé chaque trame comme le show/hide du
+        // curseur juste en dessous : la capture doit se relâcher dès qu'un
+        // overlay s'ouvre (F6/F7/F10, quelle que soit la touche qui l'a fait
+        // — sinon un clic viserait un bouton du panneau tout en continuant à
+        // piloter la souris émulée en douce) ou que la souris logicielle est
+        // désactivée en cours de capture (ex. commande console "mouse off"
+        // tapée dans F11 sans passer par F6).
+        if mouse_captured
+            && (quick_bar_visible
+                || config_panel_visible
+                || keyboard_panel_visible
+                || !machine.bus.mouse.borrow().enabled)
+        {
+            sdl_context.mouse().set_relative_mouse_mode(false);
+            mouse_captured = false;
+        }
+
         sdl_context.mouse().show_cursor(
             !mouse_over_main_window
                 || quick_bar_visible
