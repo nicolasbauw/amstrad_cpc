@@ -559,6 +559,51 @@ pub fn run(
 
     while running {
         for event in event_pump.poll_iter() {
+            // `egui_sdl2_event::translate_virtual_key_code` ne connaît que
+            // `Keycode::Return`, pas `Keycode::KpEnter` (absent de sa table
+            // de traduction, silencieusement ignoré) : la touche Entrée du
+            // pavé numérique ne validait donc jamais un champ de saisie
+            // egui (F10/F11/F12), gênant pour une saisie massive au pavé
+            // numérique. Corrigé ici plutôt qu'en patchant la dépendance :
+            // un événement réécrit, seulement pour les panneaux egui
+            // ci-dessous — surtout PAS pour le passthrough clavier CPC plus
+            // bas dans cette boucle, qui doit continuer à distinguer
+            // KpEnter (une vraie touche CPC à part, (0,6) dans la matrice)
+            // de Return.
+            let egui_event = match &event {
+                Event::KeyDown {
+                    timestamp,
+                    window_id,
+                    keycode: Some(sdl2::keyboard::Keycode::KpEnter),
+                    scancode,
+                    keymod,
+                    repeat,
+                } => Event::KeyDown {
+                    timestamp: *timestamp,
+                    window_id: *window_id,
+                    keycode: Some(sdl2::keyboard::Keycode::Return),
+                    scancode: *scancode,
+                    keymod: *keymod,
+                    repeat: *repeat,
+                },
+                Event::KeyUp {
+                    timestamp,
+                    window_id,
+                    keycode: Some(sdl2::keyboard::Keycode::KpEnter),
+                    scancode,
+                    keymod,
+                    repeat,
+                } => Event::KeyUp {
+                    timestamp: *timestamp,
+                    window_id: *window_id,
+                    keycode: Some(sdl2::keyboard::Keycode::Return),
+                    scancode: *scancode,
+                    keymod: *keymod,
+                    repeat: *repeat,
+                },
+                _ => event.clone(),
+            };
+
             // Alimente egui même quand le panneau est caché : sinon la
             // première trame après un F12 le retrouverait avec un état
             // d'entrée périmé (position de souris, modificateurs...). Sans
@@ -567,8 +612,8 @@ pub fn run(
             // `EguiSDL2State::sdl2_input_to_egui` filtre les événements sur
             // l'identifiant de fenêtre — une frappe faite dans la fenêtre
             // principale (jouer, taper au BASIC...) ne les atteint jamais.
-            status_panel.handle_event(&event);
-            console_window.handle_event(&event);
+            status_panel.handle_event(&egui_event);
+            console_window.handle_event(&egui_event);
             // La barre rapide F10, le panneau de configuration F6 et le
             // clavier virtuel F7, eux, sont superposés à la fenêtre
             // PRINCIPALE (même wgpu, voir renderer.rs) : ce filtre par
@@ -581,7 +626,7 @@ pub fn run(
             // déversaient d'un coup, à l'ouverture, dans le premier champ
             // de saisie venu.
             if quick_bar_visible || config_panel_visible || keyboard_panel_visible {
-                renderer.handle_event(&event);
+                renderer.handle_event(&egui_event);
             }
             match event {
                 Event::Quit { .. } => {
