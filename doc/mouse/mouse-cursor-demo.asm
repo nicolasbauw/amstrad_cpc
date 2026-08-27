@@ -1,7 +1,7 @@
 ; Minimal example built on top of mouse-driver.asm: moves character 0xF4
 ; of the CPC charset (a filled triangle, used here as a crude
-; pseudo-pointer) around the screen, one character cell at a time,
-; following the sign of each mouse delta. See mouse-interface.md.
+; pseudo-pointer) around the screen, following the sign of each mouse
+; delta. See mouse-interface.md.
 ;
 ; Deliberately avoids every firmware (ROM) call, like dune-cpc's own
 ; poc/test_souris.asm and poc/demo_curseur.asm: a snapshot built by RASM's
@@ -13,14 +13,24 @@
 ; blank screen). Plotting the glyph directly into screen memory sidesteps
 ; the whole issue, and needs no firmware at all.
 ;
+; Vertical resolution is one PIXEL, horizontal is one character CELL (8
+; pixels) — deliberately asymmetric. A first version moved by one whole
+; character row (8 pixels) vertically too: harmless on paper (same step
+; size as horizontally), but nowhere near as convincing in practice —
+; jumping a full text-line height at once reads as imprecise/laggy in a
+; way an equivalent horizontal jump doesn't, precisely because a real
+; pointer's vertical motion is the axis people track most closely for
+; "does this feel right". Horizontal stayed cell-based: 8px steps read
+; fine on that axis, and it keeps the column math (and this file) simpler.
+;
 ; Build + run:
 ;   rasm mouse-cursor-demo.asm -oi mouse-cursor-demo.sna -v2 && bb --snapshot=mouse-cursor-demo.sna
 ;
 ; Expected behaviour: a white triangle sits near the middle of a black
 ; screen (MODE 2, set by this program itself). With the mouse enabled (F6
 ; "Enable mouse") and captured (left-click in the window), moving the
-; mouse steps it one character cell at a time in the matching direction,
-; clamped well inside the visible screen.
+; mouse steps it in the matching direction, clamped well inside the
+; visible screen.
 
 BUILDSNA
 ; BANK 1, not BANK 0 — see the detailed comment in dune-cpc's
@@ -36,19 +46,19 @@ RUN  #4000
 
 INCLUDE "mouse-driver.asm"
 
-; MODE 2 is 640x200 pixels, 80x25 8x8 character cells, exactly 1 byte per
-; scanline per cell (1 bit per pixel) — the simplest of the three screen
-; modes to plot into directly, and a convenient match for the CPC font
-; ROM's own 1-bit-per-pixel glyph format (see POINTER_GLYPH below).
+; MODE 2 is 640x200 pixels, 1 byte per scanline per 8-pixel-wide character
+; column (1 bit per pixel) — the simplest of the three screen modes to
+; plot into directly, and a convenient match for the CPC font ROM's own
+; 1-bit-per-pixel glyph format (see POINTER_GLYPH below).
 ;
-; Column/row are 0-based character-cell coordinates here (screen memory
-; addressing, NOT the firmware's 1-based TXT_SET_CURSOR convention, which
-; this program never calls). Margins keep the pointer well inside the
-; visible screen at all times.
+; cursor_col is a character-cell column (0-79). cursor_row is an ABSOLUTE
+; PIXEL row (0-199), not a character row — see the header comment for why.
+; Margins keep the 8x8 pointer well inside the visible screen at all
+; times (ROW_MAX leaves room for its 8-pixel height).
 COL_MIN EQU 4
 COL_MAX EQU 75
-ROW_MIN EQU 2
-ROW_MAX EQU 22
+ROW_MIN EQU 8
+ROW_MAX EQU 184
 
 SCREEN_BASE EQU #C000
 
@@ -58,6 +68,11 @@ cursor_row: defb (ROW_MIN + ROW_MAX) / 2
 ; See main_loop's comment: BC doesn't survive a call to erase_glyph.
 saved_dx: defb 0
 saved_dy: defb 0
+
+; Scanline offset (0-7) of the glyph row currently being plotted by
+; draw_glyph/erase_glyph — see their comments for why this lives in
+; memory rather than a register.
+plot_i: defb 0
 
 ; Character 0xF4 of the CPC ROM font (core/bin/OS6128-AZERTY.rom, font
 ; table at offset #3900 + (code-32)*8) — a solid triangle pointing up,
@@ -113,7 +128,7 @@ main_loop:
     ; unbounded accumulated position — see mouse-interface.md.
     ;
     ; Stashed in memory, not kept in BC across the erase_glyph call below:
-    ; calc_cursor_addr uses BC as scratch space for its own row*16
+    ; calc_pixel_addr uses BC as scratch space for its own row*80
     ; computation, and both draw_glyph/erase_glyph use B as their own loop
     ; counter — either alone silently destroys whatever the caller had in
     ; BC. Cost this test: the pointer never moved at all, dx/dy always
@@ -151,7 +166,8 @@ col_dec:
     ld   (cursor_col), a
 
 row_step:
-    ; Same logic for the row, from dy.
+    ; Same logic for the row, from dy — but one pixel at a time, not one
+    ; character row, see the header comment.
     ld   a, (saved_dy)
     or   a
     jr   z, redraw
@@ -176,59 +192,92 @@ redraw:
 
 ; --- Screen plotting -------------------------------------------------
 
-; HL = SCREEN_BASE + cursor_row*80 + cursor_col — the address of scanline
-; 0 of the character cell at (cursor_col, cursor_row). Subsequent
-; scanlines of the same cell are &800 bytes apart (see mouse-interface.md
-; for the formula and its source). Clobbers: A, BC, DE, HL.
-calc_cursor_addr:
-    ld   a, (cursor_row)
+; HL = the screen address of absolute pixel row A (0-199) at the current
+; cursor_col. Splits A into a character row (A/8) and a scanline-within-
+; row (A AND 7): address = SCREEN_BASE + (A/8)*80 + cursor_col +
+; (A AND 7)*&800 — see mouse-interface.md for the formula and its source.
+; Needed (rather than the simpler "fixed character row, +&800 per
+; scanline" version this demo started with) because cursor_row is now an
+; unaligned pixel offset: the 8 scanlines of one glyph can straddle two
+; different character rows once vertical movement isn't restricted to
+; multiples of 8. Clobbers: A, BC, DE, HL.
+calc_pixel_addr:
+    ld   b, a                  ; b = y, preserved for the AND 7 part below
+    srl  a
+    srl  a
+    srl  a                     ; a = y/8 (character row, 0-24)
     ld   l, a
     ld   h, 0
-    add  hl, hl                ; row*2
-    add  hl, hl                ; row*4
-    add  hl, hl                ; row*8
-    add  hl, hl                ; row*16
-    ld   b, h
-    ld   c, l                  ; bc = row*16
-    add  hl, hl                ; row*32
-    add  hl, hl                ; row*64
-    add  hl, bc                ; row*64 + row*16 = row*80
+    add  hl, hl                ; *2
+    add  hl, hl                ; *4
+    add  hl, hl                ; *8
+    add  hl, hl                ; *16
+    ld   d, h
+    ld   e, l                  ; de = (y/8)*16
+    add  hl, hl                ; *32
+    add  hl, hl                ; *64
+    add  hl, de                ; *64 + *16 = *80
+
+    ld   a, b
+    and  7                     ; a = y AND 7 (scanline within the row, 0-7)
+    ld   c, a
+    or   a
+    jr   z, pixel_addr_add_col
+pixel_addr_scanline_loop:
+    ld   de, #0800
+    add  hl, de
+    dec  c
+    jr   nz, pixel_addr_scanline_loop
+
+pixel_addr_add_col:
     ld   a, (cursor_col)
     ld   e, a
     ld   d, 0
-    add  hl, de                ; + col
+    add  hl, de
     ld   de, SCREEN_BASE
     add  hl, de
     ret
 
-; Plots pointer_glyph at (cursor_col, cursor_row). Clobbers: A, BC, DE,
-; HL, IX.
+; Plots pointer_glyph at (cursor_col, cursor_row). `plot_i` (0-7) and IX
+; (glyph byte pointer) carry the loop state across each calc_pixel_addr
+; call instead of a register: calc_pixel_addr clobbers A/BC/DE/HL, so
+; nothing there would survive anyway. Clobbers: A, BC, DE, HL.
 draw_glyph:
-    call calc_cursor_addr
+    xor  a
+    ld   (plot_i), a
     ld   ix, pointer_glyph
-    ld   b, 8
 draw_loop:
+    ld   a, (cursor_row)
+    ld   b, a
+    ld   a, (plot_i)
+    add  a, b                  ; a = cursor_row + plot_i, this scanline's absolute pixel row
+    call calc_pixel_addr
     ld   a, (ix+0)
     ld   (hl), a
     inc  ix
-    push bc
-    ld   de, #0800
-    add  hl, de
-    pop  bc
-    djnz draw_loop
+    ld   a, (plot_i)
+    inc  a
+    ld   (plot_i), a
+    cp   8
+    jr   nz, draw_loop
     ret
 
 ; Blanks whatever is at (cursor_col, cursor_row) — call before moving to
-; the new position, so the pointer doesn't leave a trail. Clobbers: A, BC,
-; DE, HL.
+; the new position, so the pointer doesn't leave a trail. Clobbers: A,
+; BC, DE, HL.
 erase_glyph:
-    call calc_cursor_addr
-    ld   b, 8
+    xor  a
+    ld   (plot_i), a
 erase_loop:
+    ld   a, (cursor_row)
+    ld   b, a
+    ld   a, (plot_i)
+    add  a, b
+    call calc_pixel_addr
     ld   (hl), 0
-    push bc
-    ld   de, #0800
-    add  hl, de
-    pop  bc
-    djnz erase_loop
+    ld   a, (plot_i)
+    inc  a
+    ld   (plot_i), a
+    cp   8
+    jr   nz, erase_loop
     ret

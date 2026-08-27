@@ -83,8 +83,17 @@ clic/déplacement, retour visuel à l'écran) dans le projet dune-cpc.
 ## Exemple : déplacer un pointeur (`mouse-cursor-demo.asm`)
 
 Programme complet et autonome, construit sur `mouse-driver.asm` : déplace un
-petit triangle (caractère `0xF4` de la police ROM du CPC) sur l'écran, d'une
-cellule à la fois, dans le sens de chaque delta souris.
+petit triangle (caractère `0xF4` de la police ROM du CPC) sur l'écran, dans
+le sens de chaque delta souris. Résolution volontairement asymétrique :
+verticalement au pixel près, horizontalement à la cellule de caractère (8
+pixels) — une première version se déplaçait aussi d'une ligne de caractère
+entière verticalement, anodin sur le papier (même pas qu'horizontalement),
+mais nettement moins convaincant à l'usage : un saut d'une hauteur de ligne
+de texte d'un coup se voit bien plus qu'un saut horizontal équivalent, parce
+que c'est justement l'axe qu'on surveille le plus pour juger si un pointeur
+"a l'air juste". L'axe horizontal, lui, restait à la cellule : les pas de
+8px s'y voient très bien, et ça garde le calcul de colonne (et ce fichier)
+plus simple.
 
 ```
 rasm mouse-cursor-demo.asm -oi mouse-cursor-demo.sna -v2 && bb --snapshot=mouse-cursor-demo.sna
@@ -99,13 +108,24 @@ de cette démo utilisant `TXT_WR_CHAR`/`TXT_SET_CURSOR` affichait un écran
 uniformément vide). La démo pose donc directement les octets en mémoire
 écran (MODE 2, qu'elle configure elle-même — 1 bit par pixel, correspondant
 exactement au format de la police ROM), à l'adresse
-`&C000 + ligne*80 + colonne + balayage*&800` (25 lignes de caractères, 8
-balayages chacune, `&800` octets entre deux balayages consécutifs d'une
-même ligne).
+`&C000 + (ligne_pixel/8)*80 + colonne + (ligne_pixel AND 7)*&800` — `&800`
+octets séparent deux balayages consécutifs d'une même ligne de caractère,
+`80` sépare deux lignes de caractère consécutives. La division/le AND
+gèrent la position verticale au pixel près : les 8 balayages d'un même
+glyphe peuvent ainsi chevaucher deux lignes de caractère différentes dès
+que sa position verticale n'est plus un multiple de 8, cas qui ne se
+produit jamais si l'on ne se déplace qu'à la ligne de caractère (d'où le
+calcul plus simple d'une première version, insuffisant une fois passé à la
+résolution pixel).
 
-Piège rencontré et corrigé pendant la mise au point : les routines
-`calc_cursor_addr`/`draw_glyph`/`erase_glyph` utilisent toutes `BC` (calcul
-intermédiaire ou compteur de boucle) — un appelant qui y range encore le
-delta souris le perd silencieusement à l'appel suivant. Les deltas sont
-donc mis de côté en mémoire, pas gardés en registre, le temps de ces
-appels.
+Deux pièges rencontrés et corrigés pendant la mise au point :
+- Les routines `calc_pixel_addr`/`draw_glyph`/`erase_glyph` utilisent
+  toutes `BC` (calcul intermédiaire ou compteur de boucle) — un appelant
+  qui y range encore le delta souris le perd silencieusement à l'appel
+  suivant. Les deltas sont donc mis de côté en mémoire, pas gardés en
+  registre, le temps de ces appels.
+- Le compteur de balayage (0-7) de `draw_glyph`/`erase_glyph` est lui
+  aussi en mémoire (`plot_i`), pas en registre : `calc_pixel_addr` étant
+  appelée une fois par balayage et clobbant A/BC/DE/HL, aucun registre
+  (sauf IX, réservé au pointeur vers le glyphe) ne survit d'un appel à
+  l'autre.

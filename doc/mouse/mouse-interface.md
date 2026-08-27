@@ -84,7 +84,16 @@ click/motion, visual feedback on screen) in the dune-cpc project.
 
 A complete, self-contained program built on top of `mouse-driver.asm`:
 moves a small triangle (character `0xF4` of the CPC's ROM font) around
-the screen, one cell at a time, in the direction of each mouse delta.
+the screen, in the direction of each mouse delta. Deliberately asymmetric
+resolution: pixel-precise vertically, character-cell (8 pixels)
+horizontally — an earlier version moved by one whole character row
+vertically too, harmless on paper (same step size as horizontally), but
+much less convincing in practice: jumping a full text-line height at once
+stands out far more than an equivalent horizontal jump, precisely because
+vertical motion is the axis people scrutinise most closely when judging
+whether a pointer "feels right". Horizontal stayed cell-based: 8px steps
+read fine on that axis, and it keeps the column math (and this file)
+simpler.
 
 ```
 rasm mouse-cursor-demo.asm -oi mouse-cursor-demo.sna -v2 && bb --snapshot=mouse-cursor-demo.sna
@@ -98,12 +107,23 @@ empty, and calling into it does nothing (verified: an earlier version of
 this demo using `TXT_WR_CHAR`/`TXT_SET_CURSOR` just produced a blank
 screen). The demo instead pokes bytes directly into screen memory (MODE 2,
 which it configures itself — 1 bit per pixel, exactly matching the ROM
-font's own format), at address `&C000 + row*80 + column + scanline*&800`
-(25 character rows, 8 scanlines each, `&800` bytes between two consecutive
-scanlines of the same row).
+font's own format), at address
+`&C000 + (pixel_row/8)*80 + column + (pixel_row AND 7)*&800` — `&800`
+bytes separate two consecutive scanlines of the same character row, `80`
+separates two consecutive character rows. The division/AND handle the
+pixel-precise vertical position: one glyph's 8 scanlines can straddle two
+different character rows as soon as its vertical position isn't a
+multiple of 8, which never happens if movement is restricted to whole
+character rows (hence the simpler address computation an earlier version
+used, no longer enough once vertical resolution dropped to the pixel).
 
-Pitfall hit and fixed while building this: `calc_cursor_addr`/
-`draw_glyph`/`erase_glyph` all use `BC` internally (scratch computation or
-loop counter) — a caller still holding the mouse delta there loses it
-silently on the next call. Deltas are therefore stashed in memory, not
-kept in a register, across these calls.
+Two pitfalls hit and fixed while building this:
+- `calc_pixel_addr`/`draw_glyph`/`erase_glyph` all use `BC` internally
+  (scratch computation or loop counter) — a caller still holding the
+  mouse delta there loses it silently on the next call. Deltas are
+  therefore stashed in memory, not kept in a register, across these
+  calls.
+- `draw_glyph`/`erase_glyph`'s own scanline counter (0-7) is likewise kept
+  in memory (`plot_i`), not a register: `calc_pixel_addr` is called once
+  per scanline and clobbers A/BC/DE/HL, so nothing survives one call to
+  the next except IX (reserved for the glyph byte pointer).
