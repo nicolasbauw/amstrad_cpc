@@ -153,63 +153,97 @@ main_loop:
     ld   b, a
     ld   a, (saved_dy)
     or   b                    ; both deltas zero -> nothing moved this poll
-    jr   z, main_loop
+    jp   z, main_loop          ; jr's range doesn't reach: jp, not jr
 
     call erase_glyph
 
-    ; Step the column by one pixel in the sign of dx, clamped. 16-bit
-    ; compare against COL_MIN/COL_MAX: Z80 has no direct 16-bit CP,
-    ; "sbc hl,de" against a disposable copy of cursor_col stands in for
-    ; one (it clobbers HL, hence reloading it below on the branch not
-    ; taken).
+    ; Column += dx, clamped to [COL_MIN, COL_MAX] — the actual MAGNITUDE
+    ; of dx, not just its sign: an earlier version only ever stepped by
+    ; one pixel regardless of how far the mouse actually moved in a poll,
+    ; which (a) made the pointer barely responsive to a fast swipe, worth
+    ; many pixels of real motion, and (b) let a one-pixel accidental
+    ; vertical wobble — unavoidable moving a real mouse "in a straight
+    ; line" — read as visually significant as deliberate horizontal
+    ; travel, making a clean horizontal trajectory practically impossible.
+    ; Scaling the step to the real delta fixes both: genuine motion now
+    ; dominates incidental jitter by the same ratio it does physically.
+    ;
+    ; dx is sign-extended into DE (same trick as add_signed_to_word in
+    ; mouse-driver.asm: double A into carry, then SBC A,A gives &00 or
+    ; &FF). The sum can come out "negative" in 16-bit two's complement
+    ; (wrapped near &FFFF) if dx overshoots cursor_col past COL_MIN by
+    ; more than cursor_col's own distance to 0 — checked via HL's top bit
+    ; before comparing against the clamps, since an unsigned compare alone
+    ; would otherwise mistake that wrapped value for "way past COL_MAX".
     ld   a, (saved_dx)
-    or   a
-    jr   z, row_step
-    bit  7, a
-    jr   nz, col_dec
+    ld   e, a
+    add  a, a
+    sbc  a, a
+    ld   d, a
     ld   hl, (cursor_col)
-    ld   de, COL_MAX
-    or   a
-    sbc  hl, de
-    jr   z, row_step           ; already at COL_MAX
-    ld   hl, (cursor_col)
-    inc  hl
-    ld   (cursor_col), hl
-    jr   row_step
-col_dec:
-    ld   hl, (cursor_col)
+    add  hl, de
+    bit  7, h
+    jr   nz, col_use_min
     ld   de, COL_MIN
     or   a
+    push hl
     sbc  hl, de
-    jr   z, row_step           ; already at COL_MIN
-    ld   hl, (cursor_col)
-    dec  hl
+    pop  hl
+    jr   c, col_use_min         ; sum < COL_MIN
+    ld   de, COL_MAX
+    or   a
+    push hl
+    sbc  hl, de
+    pop  hl
+    jr   nc, col_use_max        ; sum >= COL_MAX
+    jr   col_store
+col_use_min:
+    ld   hl, COL_MIN
+    jr   col_store
+col_use_max:
+    ld   hl, COL_MAX
+col_store:
     ld   (cursor_col), hl
 
-row_step:
-    ; Same logic for the row, from dy — 8-bit here, cursor_row's range
-    ; (0-199) fits a byte, so a plain CP does the job.
+    ; Same idea for the row, from dy — kept in a 16-bit register pair for
+    ; the computation/clamp even though cursor_row's storage is 8-bit
+    ; (0-199 always fits), for the same wrap-safety reason as the column.
     ld   a, (saved_dy)
+    ld   e, a
+    add  a, a
+    sbc  a, a
+    ld   d, a
+    ld   a, (cursor_row)
+    ld   l, a
+    ld   h, 0
+    add  hl, de
+    bit  7, h
+    jr   nz, row_use_min
+    ld   de, ROW_MIN
     or   a
-    jr   z, redraw
-    bit  7, a
-    jr   nz, row_dec
-    ld   a, (cursor_row)
-    cp   ROW_MAX
-    jr   z, redraw
-    inc  a
-    ld   (cursor_row), a
-    jr   redraw
-row_dec:
-    ld   a, (cursor_row)
-    cp   ROW_MIN
-    jr   z, redraw
-    dec  a
+    push hl
+    sbc  hl, de
+    pop  hl
+    jr   c, row_use_min
+    ld   de, ROW_MAX
+    or   a
+    push hl
+    sbc  hl, de
+    pop  hl
+    jr   nc, row_use_max
+    jr   row_store
+row_use_min:
+    ld   hl, ROW_MIN
+    jr   row_store
+row_use_max:
+    ld   hl, ROW_MAX
+row_store:
+    ld   a, l
     ld   (cursor_row), a
 
 redraw:
     call draw_glyph
-    jr   main_loop
+    jp   main_loop             ; jr's range doesn't reach: jp, not jr
 
 ; --- Screen plotting -------------------------------------------------
 

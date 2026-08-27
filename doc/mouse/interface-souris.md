@@ -84,7 +84,21 @@ clic/déplacement, retour visuel à l'écran) dans le projet dune-cpc.
 
 Programme complet et autonome, construit sur `mouse-driver.asm` : déplace un
 petit triangle (caractère `0xF4` de la police ROM du CPC) sur l'écran, dans
-le sens de chaque delta souris, **au pixel près sur les deux axes**.
+le sens de chaque delta souris, **au pixel près sur les deux axes, à
+l'amplitude réelle du delta** (`cursor_col`/`cursor_row` += delta, borné,
+pas juste ±1 selon son signe).
+
+Une version intermédiaire ne bougeait que du signe du delta, un pixel à la
+fois quelle que soit sa grandeur réelle : peu sensible (un mouvement rapide
+de la souris ne parcourait toujours qu'un pixel par lecture de port), et
+surtout impossible à garder droit — un minuscule tremblement vertical
+accidentel (inévitable à la main) pesait alors visuellement exactement
+autant qu'un déplacement horizontal volontaire, quelle que soit son
+amplitude réelle. Utiliser l'amplitude corrige les deux d'un coup : un
+mouvement franc l'emporte désormais sur le tremblement dans la même
+proportion qu'à la souris physique. Ce réglage fin (proportion delta ->
+pixels, zone morte éventuelle...) resservira tel quel pour le futur projet
+de jeu maniable à la souris.
 
 Une version intermédiaire ne l'était qu'à la verticale (voir plus bas
 pourquoi), l'horizontale restant à la cellule de caractère (8 pixels) —
@@ -128,7 +142,7 @@ l'astuce classique du décalage 16 bits d'une paire de registres —
 `cursor_col` doit donc être sur 16 bits (`defw`), 600 ne tenant pas dans un
 octet.
 
-Trois pièges rencontrés et corrigés pendant la mise au point :
+Quatre pièges rencontrés et corrigés pendant la mise au point :
 - Les routines `calc_row_addr`/`draw_glyph`/`erase_glyph` utilisent toutes
   `BC` (calcul intermédiaire ou compteur de boucle) — un appelant qui y
   range encore le delta souris le perd silencieusement à l'appel suivant.
@@ -142,3 +156,10 @@ Trois pièges rencontrés et corrigés pendant la mise au point :
   besoin remonté par un test réel en diagonale — les deux axes testés
   séparément (horizontal seul, vertical seul) ne suffisaient pas à
   détecter le déséquilibre de sensibilité entre eux.
+- Même chose pour l'amplitude réelle du delta plutôt que son seul signe :
+  la démo semblait fonctionner (déplacement dans le bon sens, aux deux
+  bornes) sans elle, jusqu'à un vrai test de trajectoire tenue à la main,
+  seul capable de révéler la faible sensibilité et la dérive verticale.
+  Au passage, additionner un delta signé de pleine amplitude (pas
+  seulement ±1) au lieu d'incrémenter/décrémenter a fait dépasser à deux
+  `jr` la portée relative de ±127 octets ; convertis en `jp`.

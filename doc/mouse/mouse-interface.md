@@ -85,7 +85,19 @@ click/motion, visual feedback on screen) in the dune-cpc project.
 A complete, self-contained program built on top of `mouse-driver.asm`:
 moves a small triangle (character `0xF4` of the CPC's ROM font) around
 the screen, in the direction of each mouse delta, **pixel-precise on both
-axes**.
+axes, scaled to the delta's actual magnitude** (`cursor_col`/`cursor_row`
++= delta, clamped, not just ±1 by its sign).
+
+An intermediate version only moved by the delta's sign, one pixel at a
+time regardless of how large it actually was: not very responsive (a fast
+mouse swipe still only advanced one pixel per port read), and worse, it
+made a straight line practically impossible to hold — a tiny accidental
+vertical wobble (unavoidable moving a real mouse "straight") then read as
+visually significant as deliberate horizontal travel, whatever its actual
+size. Scaling to the magnitude fixes both at once: genuine motion now
+dominates incidental jitter in the same proportion it does physically.
+This fine-tuning (delta-to-pixels ratio, any dead zone...) will carry over
+as-is to the future mouse-driven game project.
 
 An intermediate version only was vertically (see below why), leaving
 horizontal at character-cell (8 pixel) resolution — harmless-looking
@@ -126,7 +138,7 @@ contributions (left byte, right byte) via the classic 16-bit-register-pair
 shift trick — `cursor_col` has to be 16-bit (`defw`) for this, 600 doesn't
 fit in a byte.
 
-Three pitfalls hit and fixed while building this:
+Four pitfalls hit and fixed while building this:
 - `calc_row_addr`/`draw_glyph`/`erase_glyph` all use `BC` internally
   (scratch computation or loop counter) — a caller still holding the
   mouse delta there loses it silently on the next call. Deltas are
@@ -140,3 +152,10 @@ Three pitfalls hit and fixed while building this:
   genuine diagonal test was tried — testing each axis on its own (straight
   horizontal, then straight vertical) wasn't enough to catch the
   sensitivity mismatch between them.
+- Same story for scaling to the delta's actual magnitude rather than just
+  its sign: the demo looked fine (moved the right way, clamped at both
+  ends) without it, until an actual hand-held straight-line test — the
+  only thing that exposed the low sensitivity and the vertical drift.
+  Adding a full-magnitude signed delta instead of incrementing/
+  decrementing by one pushed two `jr`s past their ±127-byte relative
+  range; switched to `jp`.
