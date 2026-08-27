@@ -809,6 +809,45 @@ pub fn run(
                         machine.bus.mouse.borrow_mut().set_button(button, false);
                     }
                 }
+                // Glisser-déposer d'un .SNA/.DSK/.CDT sur la fenêtre
+                // principale : même chargement que les commandes console
+                // "snapload"/"disk"/"tape", choisi par extension
+                // (insensible à la casse). Le lecteur A est le seul choix
+                // possible pour un .dsk déposé — pas d'interface pour
+                // viser le lecteur B ici, comme le glisser-déposer web
+                // (bytebox-web/src/dropfile.rs, même principe).
+                Event::DropFile {
+                    window_id,
+                    filename,
+                    ..
+                } if window_id == main_window_id => {
+                    let lower = filename.to_ascii_lowercase();
+                    let result = if lower.ends_with(".sna") {
+                        machine
+                            .load_snapshot(&filename)
+                            .map(|()| format!("Snapshot loaded: {filename}"))
+                    } else if lower.ends_with(".dsk") {
+                        machine
+                            .load_disk(&filename)
+                            .map(|()| format!("Disk inserted: {filename}"))
+                    } else if lower.ends_with(".cdt") {
+                        machine
+                            .load_tape(&filename)
+                            .map(|()| format!("Tape inserted: {filename}"))
+                    } else {
+                        Err(format!("Unrecognized file type: {filename}"))
+                    };
+                    match result {
+                        Ok(msg) => {
+                            app_log!("{msg}");
+                            osd.show(msg);
+                        }
+                        Err(e) => {
+                            app_log!("Drag-and-drop load failed: {e}");
+                            osd.show(e);
+                        }
+                    }
+                }
                 // Taille d'affichage : F1 normale, F2 x2, F3 x3, F4 plein
                 // écran. Repasser par F1/F2/F3 quitte aussi le plein écran,
                 // pour ne jamais y rester coincé sans savoir comment en
