@@ -1,5 +1,5 @@
 - Par rapport à l'interface souris, et notamment au programme de test:
 1) c'est moyennement réactif
-2) surtout, ça manque de précision, exemple : lors d'un mouvement vers la droite ou la gauche, parfois, le curseur descend de beaucoup - mais je pense que ce qui fausse mon impression, c'est que le curseur monte ou descend de l'équivalent d'une ligne de texte d'un seul coup, n'est-ce pas ? Par contre horizontalement c'est OK. Il faudrait que la résolution verticale soit le pixel, pas la ligne de caractère.
+2) surtout, ça manque de précision, exemple : lors d'un mouvement vers la droite ou la gauche, parfois, le curseur descend de beaucoup - mais je pense que ce qui fausse mon impression, c'est que le curseur monte ou descend de l'équivalent d'une ligne de texte d'un seul coup, n'est-ce pas ? Par contre horizontalement c'est OK. Il faudrait que la résolution verticale soit le pixel, pas la ligne de caractère : le programme de démo pour l'interface souris doit être convaincant au sujet de la fonctionnalité elle-même, et surtout, elle remettrait en cause le projet de portage du jeu Dune sur CPC.
 
 - Etudier la possibilité de glisser-déposer directement sur l'écran de l'émulateur des fichiers DSK, CDT ou SNA
