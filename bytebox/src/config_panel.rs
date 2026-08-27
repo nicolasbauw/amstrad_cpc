@@ -245,7 +245,10 @@ impl ConfigPanel {
             ui.text_edit_singleline(&mut self.blank_disk_name);
             ui.checkbox(&mut self.blank_disk_drive_b, "drive B");
             if ui
-                .add_enabled(!self.blank_disk_name.is_empty(), egui::Button::new("Create"))
+                .add_enabled(
+                    !self.blank_disk_name.is_empty(),
+                    egui::Button::new("Create"),
+                )
                 .clicked()
             {
                 let arg2 = if self.blank_disk_drive_b { "b" } else { "" };
@@ -357,11 +360,7 @@ impl ConfigPanel {
         }
     }
 
-    fn hardware_section(
-        ui: &mut egui::Ui,
-        machine: &Machine,
-        cmd_sender: &Sender<MonitorMessage>,
-    ) {
+    fn hardware_section(ui: &mut egui::Ui, machine: &Machine, cmd_sender: &Sender<MonitorMessage>) {
         let mut drive_b_enabled = machine.bus.fdc.borrow().drive_b_enabled;
         if ui
             .checkbox(&mut drive_b_enabled, "Enable drive B")
@@ -372,7 +371,10 @@ impl ConfigPanel {
         }
 
         let mut mouse_enabled = machine.bus.mouse.borrow().enabled;
-        if ui.checkbox(&mut mouse_enabled, "Enable mouse").changed() {
+        if ui
+            .checkbox(&mut mouse_enabled, "Enable mouse interface")
+            .changed()
+        {
             let arg = if mouse_enabled { "on" } else { "off" };
             let _ = cmd_sender.send((MonitorCmd::Mouse, arg.to_string(), String::new()));
         }
@@ -395,20 +397,15 @@ impl ConfigPanel {
             // (Dk'tronics et consorts) ajouterait par-dessus — voir le
             // tooltip, pour la confusion venue une fois de "pourquoi 0 est
             // une valeur possible".
-            let response = ui
-                .add(egui::Slider::new(&mut banks, 0..=56))
-                .on_hover_text(
-                    "On top of the 6128's standard 128 KB, which is already \
+            let response = ui.add(egui::Slider::new(&mut banks, 0..=56)).on_hover_text(
+                "On top of the 6128's standard 128 KB, which is already \
                      included and not affected by this setting. Only for a \
                      third-party expansion (Dk'tronics and the like) — 0, \
                      the default, is a plain, unexpanded 6128.",
-                );
+            );
             if response.changed() {
-                let _ = cmd_sender.send((
-                    MonitorCmd::ExtraRamBanks,
-                    banks.to_string(),
-                    String::new(),
-                ));
+                let _ =
+                    cmd_sender.send((MonitorCmd::ExtraRamBanks, banks.to_string(), String::new()));
             }
         });
 
@@ -458,10 +455,7 @@ impl ConfigPanel {
         // dédié à l'un des deux réglages écraserait silencieusement l'autre
         // avec sa valeur par défaut à chaque sauvegarde.
         ui.horizontal(|ui| {
-            ui.label(format!(
-                "Current zoom: {}",
-                current_zoom.as_config_str()
-            ));
+            ui.label(format!("Current zoom: {}", current_zoom.as_config_str()));
             if ui.button("Save as startup default").clicked() {
                 let display = bytebox_core::config::DisplayConfig {
                     default_zoom: Some(current_zoom.as_config_str().to_string()),
@@ -480,16 +474,13 @@ impl ConfigPanel {
         // le clavier masque l'écran sur lequel on tape.
         ui.horizontal(|ui| {
             let mut percent = keyboard_settings.default_size_percent * 100.0;
-            let response =
-                ui.add(egui::Slider::new(&mut percent, 10.0..=100.0).suffix(" %"));
+            let response = ui.add(egui::Slider::new(&mut percent, 10.0..=100.0).suffix(" %"));
             ui.label("Virtual keyboard (F7) default size");
             if response.changed() {
                 keyboard_settings.default_size_percent = percent / 100.0;
             }
             if ui.button("Save").clicked() {
-                match bytebox_core::config::save_keyboard_config(
-                    &keyboard_settings.to_config(),
-                ) {
+                match bytebox_core::config::save_keyboard_config(&keyboard_settings.to_config()) {
                     Ok(()) => app_log!("Keyboard settings saved to config.toml"),
                     Err(e) => app_log!("Could not save keyboard settings: {e}"),
                 }
@@ -515,15 +506,10 @@ impl ConfigPanel {
             egui::Slider::new(&mut settings.scanline_beam, 1.0..=24.0).text("Scanline beam width"),
         );
         ui.add(
-            egui::Slider::new(&mut settings.scanline_strength, 0.0..=1.0)
-                .text("Scanline strength"),
+            egui::Slider::new(&mut settings.scanline_strength, 0.0..=1.0).text("Scanline strength"),
         );
-        ui.add(
-            egui::Slider::new(&mut settings.beam_bloom, 0.05..=1.0).text("Beam bloom (bright)"),
-        );
-        ui.add(
-            egui::Slider::new(&mut settings.bright_boost, 1.0..=2.5).text("Brightness boost"),
-        );
+        ui.add(egui::Slider::new(&mut settings.beam_bloom, 0.05..=1.0).text("Beam bloom (bright)"));
+        ui.add(egui::Slider::new(&mut settings.bright_boost, 1.0..=2.5).text("Brightness boost"));
         // Bornée à 1.0 : au-delà, le noyau à 5 colonnes du shader
         // (`BLUR_TAPS`) tronquerait visiblement la gaussienne. À 0, on
         // retrouve le pixel net d'origine.
@@ -572,9 +558,7 @@ impl ConfigPanel {
                 ui.heading("Function keys");
                 ui.label(egui::RichText::new(FUNCTION_KEYS).monospace());
                 ui.separator();
-                ui.label(
-                    egui::RichText::new(bytebox_core::machine::HELP.trim_start()).monospace(),
-                );
+                ui.label(egui::RichText::new(bytebox_core::machine::HELP.trim_start()).monospace());
             });
     }
 
@@ -582,22 +566,17 @@ impl ConfigPanel {
         let mut volume_pct = (machine.volume() * 100.0).round();
         ui.horizontal(|ui| {
             ui.label("Volume:");
-            let response =
-                ui.add(egui::Slider::new(&mut volume_pct, 0.0..=100.0).suffix(" %"));
+            let response = ui.add(egui::Slider::new(&mut volume_pct, 0.0..=100.0).suffix(" %"));
             if response.changed() {
-                let _ = cmd_sender.send((
-                    MonitorCmd::Volume,
-                    volume_pct.to_string(),
-                    String::new(),
-                ));
+                let _ =
+                    cmd_sender.send((MonitorCmd::Volume, volume_pct.to_string(), String::new()));
             }
         });
 
         let mut tape_pct = (machine.bus.psg.sound.tape_amplitude() * 100.0).round();
         ui.horizontal(|ui| {
             ui.label("Tape signal in mix:");
-            let response =
-                ui.add(egui::Slider::new(&mut tape_pct, 0.0..=100.0).suffix(" %"));
+            let response = ui.add(egui::Slider::new(&mut tape_pct, 0.0..=100.0).suffix(" %"));
             if response.changed() {
                 let _ = cmd_sender.send((
                     MonitorCmd::TapeAmplitude,
