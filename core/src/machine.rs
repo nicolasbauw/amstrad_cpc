@@ -435,6 +435,19 @@ impl Machine {
         self.config.memory.extra_ram_banks
     }
 
+    /// Fixe le nombre de banques de RAM étendue, plafonné au maximum
+    /// adressable (`memory::MAX_EXTRA_RAM_GROUPS`) — même logique que la
+    /// commande console "ram"/`MonitorCmd::ExtraRamBanks`, pour une façade
+    /// qui manipule `Machine` directement plutôt que par ce canal (la
+    /// façade web, panneau "Settings" > General). Renvoie la valeur
+    /// effectivement retenue (après plafonnement). S'applique au prochain
+    /// cycle d'alimentation, pas à chaud — voir `extra_ram_banks`.
+    pub fn set_extra_ram_banks(&mut self, banks: u32) -> u32 {
+        let capped = banks.min(crate::memory::MAX_EXTRA_RAM_GROUPS);
+        self.config.memory.extra_ram_banks = capped;
+        capped
+    }
+
     /// Renseigne la cadence mesurée par la boucle principale : vitesse en %
     /// du temps réel, et nombre de trames ayant manqué leur échéance.
     ///
@@ -515,6 +528,13 @@ impl Machine {
                 fdc.drive_b_enabled,
             )
         };
+        // Même principe que `drive_b_enabled` ci-dessus : une interface
+        // activée à chaud (commande console "mouse", panneau F6/Settings)
+        // est un choix de l'utilisateur sur CETTE session, pas un état
+        // remis à zéro par un redémarrage à froid de la machine émulée —
+        // le vrai matériel d'interface souris reste branché, lui, après un
+        // power cycle.
+        let mouse_enabled = self.bus.mouse.borrow().enabled;
         // La bande, elle, revient à son début : le lecteur du CPC n'a pas de
         // mémoire de position, et sur un vrai magnétophone on rembobine.
         let tape = self.bus.tape.borrow().current_filename.clone();
@@ -542,6 +562,7 @@ impl Machine {
                 let _ = fdc.load_disk_b(&filename);
             }
         }
+        self.bus.mouse.borrow_mut().enabled = mouse_enabled;
 
         if let Some(filename) = tape {
             // Le chemin conservé est déjà résolu : on repasse par le lecteur
