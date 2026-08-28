@@ -296,6 +296,7 @@ impl Machine {
                 crt: config::CrtConfig::default(),
                 keyboard: config::KeyboardConfig::default(),
                 mouse: config::MouseConfig::default(),
+                audio: config::AudioConfig::default(),
             }
         });
 
@@ -303,7 +304,7 @@ impl Machine {
         let bus = CpcBus::new(memory);
         let cpu = CPU::new();
 
-        let m = Self {
+        let mut m = Self {
             cpu,
             bus,
             total_ticks: 0,
@@ -319,7 +320,7 @@ impl Machine {
             running: true,
             stopped_at_breakpoint: false,
             waiting_for_key: false,
-            volume: 0.5,
+            volume: config.audio.volume.unwrap_or(0.5).clamp(0.0, 1.0),
             measured_speed: 100.0,
             late_frames: 0,
             measured_frame_lines: 312,
@@ -341,6 +342,13 @@ impl Machine {
         m.bus.mouse.borrow_mut().enabled = m.config.mouse.enabled;
         if m.config.mouse.enabled {
             app_log!("Mouse enabled (config.toml)");
+        }
+
+        if let Some(tape_amplitude) = m.config.audio.tape_amplitude {
+            m.bus
+                .psg
+                .sound
+                .set_tape_amplitude(tape_amplitude.clamp(0.0, 1.0));
         }
 
         m

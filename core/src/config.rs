@@ -47,6 +47,25 @@ pub struct Config {
     pub keyboard: KeyboardConfig,
     #[serde(default)]
     pub mouse: MouseConfig,
+    #[serde(default)]
+    pub audio: AudioConfig,
+}
+
+/// Volume global et part de la cassette dans le mix, enregistrés depuis le
+/// panneau F6 (bouton "Save as defaults", onglet General) — même schéma
+/// `Option` que `CrtConfig` : un champ absent laisse la valeur par défaut
+/// compilée (`Machine::new`, `volume: 0.5` ; `Sound::new`, cassette
+/// silencieuse), un champ présent l'outrepasse.
+///
+/// Section `[audio]`, distincte de `debugger.audio` (`[debugger] audio`) :
+/// ce dernier ne fait que journaliser les interventions de la régulation
+/// audio, aucun rapport avec le niveau de volume lui-même.
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
+pub struct AudioConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tape_amplitude: Option<f32>,
 }
 
 /// Souris logicielle ByteBox (voir `crate::mouse::Mouse`) — désactivée par
@@ -138,8 +157,8 @@ pub struct FileConfig {
 }
 
 /// `Serialize` en plus de `Deserialize`, comme `CrtConfig`/`KeyboardConfig` :
-/// réécrite par `save_display_config` depuis le panneau F6 ("Save current
-/// zoom as startup default"), pas seulement lue.
+/// réécrite par `save_display_config` depuis le panneau F6 ("Save as
+/// defaults", onglet General), pas seulement lue.
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 pub struct DisplayConfig {
     /// Niveau de zoom au démarrage : "x1", "x2", "x3" ou "fullscreen".
@@ -476,6 +495,36 @@ pub fn save_display_config(display: &DisplayConfig) -> Result<(), MachineError> 
     write_config_section("display", &body)
 }
 
+/// Réécrit la seule section `[drives]` du fichier de configuration — voir
+/// [`write_config_section`]. Contrairement aux sections ci-dessus (toutes
+/// `Option`/partielles), `[drives]` est requise telle quelle : `DriveConfig`
+/// n'a qu'un champ, sans schéma `Option` à respecter.
+pub fn save_drive_config(drives: &DriveConfig) -> Result<(), MachineError> {
+    let body = toml::to_string(drives).map_err(|_e| MachineError::ConfigFileFmt)?;
+    write_config_section("drives", &body)
+}
+
+/// Réécrit la seule section `[mouse]` du fichier de configuration — voir
+/// [`write_config_section`].
+pub fn save_mouse_config(mouse: &MouseConfig) -> Result<(), MachineError> {
+    let body = toml::to_string(mouse).map_err(|_e| MachineError::ConfigFileFmt)?;
+    write_config_section("mouse", &body)
+}
+
+/// Réécrit la seule section `[memory]` du fichier de configuration — voir
+/// [`write_config_section`].
+pub fn save_memory_config(memory: &MemoryConfig) -> Result<(), MachineError> {
+    let body = toml::to_string(memory).map_err(|_e| MachineError::ConfigFileFmt)?;
+    write_config_section("memory", &body)
+}
+
+/// Réécrit la seule section `[audio]` du fichier de configuration — voir
+/// [`write_config_section`].
+pub fn save_audio_config(audio: &AudioConfig) -> Result<(), MachineError> {
+    let body = toml::to_string(audio).map_err(|_e| MachineError::ConfigFileFmt)?;
+    write_config_section("audio", &body)
+}
+
 /// Remplace le corps de la section TOML `section` par `body`, ou l'ajoute si
 /// elle est absente. La section réécrite est toujours placée en fin de
 /// fichier (l'ordre des sections n'a aucune importance en TOML) ; seul effet
@@ -538,6 +587,7 @@ mod tests {
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
             mouse: MouseConfig::default(),
+            audio: AudioConfig::default(),
         }
     }
 
@@ -721,8 +771,8 @@ mod tests {
     }
 
     /// Même tour complet que `a_saved_crt_section_reads_back_identically`,
-    /// pour la section `[display]` réécrite par le bouton "Save as startup
-    /// default" (panneau F6, onglet General).
+    /// pour la section `[display]` réécrite par le bouton "Save as
+    /// defaults" (panneau F6, onglet General).
     #[test]
     fn a_saved_display_section_reads_back_identically() {
         let display = DisplayConfig {
@@ -735,6 +785,62 @@ mod tests {
         let reread: Config = toml::from_str(&updated).expect("fichier reecrit invalide");
         assert_eq!(reread.display, display);
         assert!(reread.drives.drive_b, "le reste du fichier doit survivre");
+    }
+
+    /// Même tour complet, pour la section `[audio]` (volume global, part de
+    /// la cassette dans le mix) — nouvelle, réécrite par le même bouton
+    /// "Save as defaults" que `[display]` ci-dessus.
+    #[test]
+    fn a_saved_audio_section_reads_back_identically() {
+        let audio = AudioConfig {
+            volume: Some(0.75),
+            tape_amplitude: Some(0.4),
+        };
+        let original = "[drives]\ndrive_b = true\n\n[debugger]\nkeyboard = false\n";
+        let body = toml::to_string(&audio).expect("serialisation refusee");
+        let updated = replace_section(original, "audio", &body);
+        let reread: Config = toml::from_str(&updated).expect("fichier reecrit invalide");
+        assert_eq!(reread.audio, audio);
+        assert!(reread.drives.drive_b, "le reste du fichier doit survivre");
+    }
+
+    /// `[drives]`/`[mouse]`/`[memory]` étaient jusqu'ici seulement LUES —
+    /// jamais réécrites par l'émulateur lui-même (contrairement à
+    /// `[crt]`/`[keyboard]`/`[display]`) avant `save_drive_config`/
+    /// `save_mouse_config`/`save_memory_config`, elles aussi appelées par
+    /// "Save as defaults". Un seul test pour les trois : même mécanisme
+    /// déjà vérifié en détail ci-dessus, rien de spécifique à chacune.
+    #[test]
+    fn saved_drive_mouse_and_memory_sections_read_back_identically() {
+        let original = "[drives]\ndrive_b = false\n\n[debugger]\nkeyboard = false\n";
+
+        let drives = DriveConfig { drive_b: true };
+        let updated = replace_section(
+            original,
+            "drives",
+            &toml::to_string(&drives).expect("serialisation refusee"),
+        );
+
+        let mouse = MouseConfig { enabled: true };
+        let updated = replace_section(
+            &updated,
+            "mouse",
+            &toml::to_string(&mouse).expect("serialisation refusee"),
+        );
+
+        let memory = MemoryConfig {
+            extra_ram_banks: 16,
+        };
+        let updated = replace_section(
+            &updated,
+            "memory",
+            &toml::to_string(&memory).expect("serialisation refusee"),
+        );
+
+        let reread: Config = toml::from_str(&updated).expect("fichier reecrit invalide");
+        assert!(reread.drives.drive_b);
+        assert!(reread.mouse.enabled);
+        assert_eq!(reread.memory.extra_ram_banks, 16);
     }
 
     #[test]
@@ -783,6 +889,7 @@ mod tests {
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
             mouse: MouseConfig::default(),
+            audio: AudioConfig::default(),
         };
         assert_eq!(config.resolve_new_disk_path("d.dsk"), "bin/d.dsk");
 
@@ -823,6 +930,7 @@ mod tests {
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
             mouse: MouseConfig::default(),
+            audio: AudioConfig::default(),
         };
         // AmstradDiag.cdt existe bien dans bin/ (dsk_path), mais
         // resolve_tape_path ne doit chercher que dans cdt_path : le nom doit
@@ -856,6 +964,7 @@ mod tests {
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
             mouse: MouseConfig::default(),
+            audio: AudioConfig::default(),
         };
         assert_eq!(
             config.resolve_tape_path("AmstradDiag.cdt"),
@@ -940,6 +1049,7 @@ mod tests {
             crt: CrtConfig::default(),
             keyboard: KeyboardConfig::default(),
             mouse: MouseConfig::default(),
+            audio: AudioConfig::default(),
         };
         assert_eq!(
             config.resolve_new_disk_path("d.dsk"),

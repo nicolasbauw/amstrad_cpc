@@ -199,6 +199,13 @@ impl ConfigPanel {
                         ui.separator();
                         ui.heading("Audio");
                         Self::audio_section(ui, machine, cmd_sender);
+                        ui.separator();
+                        Self::save_defaults_section(
+                            ui,
+                            machine,
+                            current_zoom,
+                            *disk_indicator_enabled,
+                        );
                     }
                     Tab::Crt => {
                         Self::crt_section(ui, &mut crt_settings, &mut self.crt_enabled_at_startup)
@@ -444,29 +451,13 @@ impl ConfigPanel {
             "Show a red dot on the emulator screen during disk access",
         );
 
-        // Pas de second groupe de boutons pour choisir un zoom "par
-        // défaut" : ce serait dupliquer les quatre boutons ci-dessus pour
-        // une différence purement sémantique. On enregistre plutôt le zoom
-        // courant tel quel — `current_zoom` reflète toujours l'état réel de
-        // la fenêtre (`sdl.rs`), pas seulement ce qui a été choisi ici.
-        // Un seul bouton pour le zoom ET l'indicateur ci-dessus, pas deux
-        // boutons "Save" séparés : `save_display_config` réécrit toute la
-        // section [display] d'un coup (voir son commentaire) — un bouton
-        // dédié à l'un des deux réglages écraserait silencieusement l'autre
-        // avec sa valeur par défaut à chaque sauvegarde.
-        ui.horizontal(|ui| {
-            ui.label(format!("Current zoom: {}", current_zoom.as_config_str()));
-            if ui.button("Save as startup default").clicked() {
-                let display = bytebox_core::config::DisplayConfig {
-                    default_zoom: Some(current_zoom.as_config_str().to_string()),
-                    show_disk_access_indicator: Some(*disk_indicator_enabled),
-                };
-                match bytebox_core::config::save_display_config(&display) {
-                    Ok(()) => app_log!("Display settings saved to config.toml"),
-                    Err(e) => app_log!("Could not save display settings: {e}"),
-                }
-            }
-        });
+        // Plus de bouton "Save as startup default" ici : le zoom courant
+        // (avec l'indicateur ci-dessus) est maintenant enregistré par le
+        // bouton "Save as defaults" tout en bas de cet onglet, avec le
+        // reste — `current_zoom` reflète toujours l'état réel de la fenêtre
+        // (`sdl.rs`), pas seulement ce qui a été choisi ici, donc ce label
+        // seul suffit à savoir ce qui serait enregistré.
+        ui.label(format!("Current zoom: {}", current_zoom.as_config_str()));
 
         // Taille par défaut du clavier virtuel (F7) : en fraction de la
         // hauteur de la fenêtre CPC, voir le commentaire de
@@ -585,5 +576,52 @@ impl ConfigPanel {
                 ));
             }
         });
+    }
+
+    /// Un seul bouton pour tout l'onglet "General", tout en bas — remplace
+    /// l'ancien "Save as startup default" du zoom (Display), qui n'écrivait
+    /// que `[display]` : lecteur B, souris, RAM étendue, volume/cassette et
+    /// zoom/indicateur disque partagent maintenant un seul geste plutôt que
+    /// plusieurs boutons "Save" épars dans chaque sous-section. Chaque
+    /// section reste un fichier TOML à part (voir `write_config_section`
+    /// côté core) — cinq écritures séquentielles, pas une transaction, mais
+    /// chacune correcte indépendamment même si une autre échouait.
+    fn save_defaults_section(
+        ui: &mut egui::Ui,
+        machine: &Machine,
+        current_zoom: ZoomChoice,
+        disk_indicator_enabled: bool,
+    ) {
+        if ui.button("Save as defaults").clicked() {
+            let drives = bytebox_core::config::DriveConfig {
+                drive_b: machine.bus.fdc.borrow().drive_b_enabled,
+            };
+            let mouse = bytebox_core::config::MouseConfig {
+                enabled: machine.bus.mouse.borrow().enabled,
+            };
+            let memory = bytebox_core::config::MemoryConfig {
+                extra_ram_banks: machine.extra_ram_banks(),
+            };
+            let audio = bytebox_core::config::AudioConfig {
+                volume: Some(machine.volume()),
+                tape_amplitude: Some(machine.bus.psg.sound.tape_amplitude()),
+            };
+            let display = bytebox_core::config::DisplayConfig {
+                default_zoom: Some(current_zoom.as_config_str().to_string()),
+                show_disk_access_indicator: Some(disk_indicator_enabled),
+            };
+
+            let results = [
+                bytebox_core::config::save_drive_config(&drives),
+                bytebox_core::config::save_mouse_config(&mouse),
+                bytebox_core::config::save_memory_config(&memory),
+                bytebox_core::config::save_audio_config(&audio),
+                bytebox_core::config::save_display_config(&display),
+            ];
+            match results.into_iter().find_map(Result::err) {
+                None => app_log!("General settings saved to config.toml"),
+                Some(e) => app_log!("Could not save general settings: {e}"),
+            }
+        }
     }
 }
