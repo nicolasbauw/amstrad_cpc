@@ -205,6 +205,7 @@ impl ConfigPanel {
                             machine,
                             current_zoom,
                             *disk_indicator_enabled,
+                            &keyboard_settings,
                         );
                     }
                     Tab::Crt => {
@@ -462,19 +463,15 @@ impl ConfigPanel {
         // Taille par défaut du clavier virtuel (F7) : en fraction de la
         // hauteur de la fenêtre CPC, voir le commentaire de
         // `KeyboardPanel::ui` sur ce plafond de hauteur — trop grand en x1,
-        // le clavier masque l'écran sur lequel on tape.
+        // le clavier masque l'écran sur lequel on tape. Plus de bouton
+        // "Save" ici non plus : enregistré par "Save as defaults", tout en
+        // bas de l'onglet, comme le zoom ci-dessus.
         ui.horizontal(|ui| {
             let mut percent = keyboard_settings.default_size_percent * 100.0;
             let response = ui.add(egui::Slider::new(&mut percent, 10.0..=100.0).suffix(" %"));
             ui.label("Virtual keyboard (F7) default size");
             if response.changed() {
                 keyboard_settings.default_size_percent = percent / 100.0;
-            }
-            if ui.button("Save").clicked() {
-                match bytebox_core::config::save_keyboard_config(&keyboard_settings.to_config()) {
-                    Ok(()) => app_log!("Keyboard settings saved to config.toml"),
-                    Err(e) => app_log!("Could not save keyboard settings: {e}"),
-                }
             }
         });
     }
@@ -579,18 +576,20 @@ impl ConfigPanel {
     }
 
     /// Un seul bouton pour tout l'onglet "General", tout en bas — remplace
-    /// l'ancien "Save as startup default" du zoom (Display), qui n'écrivait
-    /// que `[display]` : lecteur B, souris, RAM étendue, volume/cassette et
-    /// zoom/indicateur disque partagent maintenant un seul geste plutôt que
-    /// plusieurs boutons "Save" épars dans chaque sous-section. Chaque
+    /// les anciens "Save as startup default" (zoom) et "Save" (taille du
+    /// clavier virtuel), chacun limité à sa propre section : lecteur B,
+    /// souris, RAM étendue, volume/cassette, zoom/indicateur disque et
+    /// taille du clavier virtuel partagent maintenant un seul geste plutôt
+    /// que plusieurs boutons "Save" épars dans chaque sous-section. Chaque
     /// section reste un fichier TOML à part (voir `write_config_section`
-    /// côté core) — cinq écritures séquentielles, pas une transaction, mais
+    /// côté core) — six écritures séquentielles, pas une transaction, mais
     /// chacune correcte indépendamment même si une autre échouait.
     fn save_defaults_section(
         ui: &mut egui::Ui,
         machine: &Machine,
         current_zoom: ZoomChoice,
         disk_indicator_enabled: bool,
+        keyboard_settings: &KeyboardSettings,
     ) {
         if ui.button("Save as defaults").clicked() {
             let drives = bytebox_core::config::DriveConfig {
@@ -610,6 +609,7 @@ impl ConfigPanel {
                 default_zoom: Some(current_zoom.as_config_str().to_string()),
                 show_disk_access_indicator: Some(disk_indicator_enabled),
             };
+            let keyboard = keyboard_settings.to_config();
 
             let results = [
                 bytebox_core::config::save_drive_config(&drives),
@@ -617,6 +617,7 @@ impl ConfigPanel {
                 bytebox_core::config::save_memory_config(&memory),
                 bytebox_core::config::save_audio_config(&audio),
                 bytebox_core::config::save_display_config(&display),
+                bytebox_core::config::save_keyboard_config(&keyboard),
             ];
             match results.into_iter().find_map(Result::err) {
                 None => app_log!("General settings saved to config.toml"),
