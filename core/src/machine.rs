@@ -643,6 +643,13 @@ impl Machine {
         crate::snapshot::load_from_bytes(self, name, bytes)
     }
 
+    /// Construit l'instantané `.SNA` courant en mémoire, sans écriture
+    /// disque — pour une façade qui le persiste ailleurs (la façade web,
+    /// dans `localStorage`).
+    pub fn save_snapshot_to_bytes(&self) -> Result<Vec<u8>, String> {
+        crate::snapshot::save_to_bytes(self)
+    }
+
     /// Éjecte la cassette.
     pub fn eject_tape(&mut self) {
         self.bus.tape.borrow_mut().eject_tape();

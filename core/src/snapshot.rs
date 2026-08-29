@@ -164,6 +164,18 @@ fn build_header(machine: &Machine, ram_kb: u16) -> [u8; HEADER_LEN] {
 /// format, et l'inclure produirait un fichier que personne ne saurait
 /// relire correctement.
 pub fn save(machine: &Machine, filename: &str) -> Result<(), String> {
+    let bytes = save_to_bytes(machine)?;
+    let mut f = File::create(filename).map_err(|e| e.to_string())?;
+    f.write_all(&bytes).map_err(|e| e.to_string())?;
+    app_log!("Snapshot saved: {filename}");
+    Ok(())
+}
+
+/// Cœur de [`save`], sans écriture disque — même raison d'être que
+/// [`load_from_bytes`] pour la lecture : utilisable là où il n'y a pas de
+/// vrai système de fichiers (la façade web, qui persiste ces octets dans
+/// `localStorage` plutôt que sur disque).
+pub fn save_to_bytes(machine: &Machine) -> Result<Vec<u8>, String> {
     const STANDARD_RAM: usize = 128 * 1024;
     let ram = &machine.bus.memory.ram;
     if ram.len() < STANDARD_RAM {
@@ -174,12 +186,10 @@ pub fn save(machine: &Machine, filename: &str) -> Result<(), String> {
     }
     let header = build_header(machine, 128);
 
-    let mut f = File::create(filename).map_err(|e| e.to_string())?;
-    f.write_all(&header).map_err(|e| e.to_string())?;
-    f.write_all(&ram[..STANDARD_RAM])
-        .map_err(|e| e.to_string())?;
-    app_log!("Snapshot saved: {filename}");
-    Ok(())
+    let mut bytes = Vec::with_capacity(HEADER_LEN + STANDARD_RAM);
+    bytes.extend_from_slice(&header);
+    bytes.extend_from_slice(&ram[..STANDARD_RAM]);
+    Ok(bytes)
 }
 
 /// Restaure l'état contenu dans un fichier `.sna`.
