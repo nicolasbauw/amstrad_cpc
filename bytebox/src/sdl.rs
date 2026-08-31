@@ -212,6 +212,11 @@ fn to_core_keycode(kc: sdl2::keyboard::Keycode) -> Option<bytebox_core::keys::Ke
         SdlK::Num6 => K::Num6,
         SdlK::Num7 => K::Num7,
         SdlK::Num8 => K::Num8,
+        // Dedicated "!" key on a standard PC keyboard (distinct from the
+        // physical "8" key, already mapped above): same CPC target, since
+        // "8"/"!" share one CPC key whose unshifted legend is "!" — mirrors
+        // bytebox-web/src/keyboard.rs's own `"!" => K::Num8` mapping.
+        SdlK::Exclaim => K::Num8,
         SdlK::Num9 => K::Num9,
         SdlK::Up => K::Up,
         SdlK::Down => K::Down,
