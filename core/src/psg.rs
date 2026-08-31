@@ -39,6 +39,10 @@ pub struct Psg {
     /// aussi relâcher le SHIFT du CPC (uniquement si cette touche l'a
     /// elle-même synthétisé — voir le commentaire de `Scancode::NonUsBackslash`).
     less_greater_target: Option<((usize, u8), bool)>,
+    /// Position CPC ciblée par la touche PC AZERTY "8 / _" (scancode
+    /// `Num8`), verrouillée au premier appui pour la même raison que
+    /// `dollar_asterisk_target`.
+    num8_target: Option<(usize, u8)>,
     /// Écritures de bit matrice différées de quelques cycles Z80 (voir
     /// `DEFER_TICKS` et `tick`) : jamais présenter au firmware deux
     /// changements de bit dans la même scrutation clavier. Un vrai clavier
@@ -85,6 +89,7 @@ impl Psg {
             controller_state: [0; 8],
             dollar_asterisk_target: None,
             less_greater_target: None,
+            num8_target: None,
             deferred: Vec::new(),
             sound: Sound::new(),
         }
@@ -362,6 +367,32 @@ impl Psg {
                     if synthesized_shift {
                         self.set_bit_now(2, 5, false);
                     }
+                }
+            }
+
+            // Touche PC AZERTY "8 / _" (position physique, scancode Num8).
+            // Cette légende PC ("8" SHIFTée / "_" non shiftée) ne correspond
+            // pas à la légende native de la touche CPC à cette même position
+            // matricielle ("8" non shiftée / "!" shiftée, voir Keycode::Num8
+            // plus haut) : sans ce découplage, taper "8" sur un clavier PC
+            // AZERTY (donc SHIFT réel + cette touche) fuitait le SHIFT tel
+            // quel vers le CPC et donnait "!" au lieu de "8" ; et la position
+            // non shiftée (qui tape "_" côté PC) n'avait aucun mapping du
+            // tout. Verrouillé au premier appui comme `dollar_asterisk_target`
+            // ci-dessus, pour viser la même cible au relâchement même si le
+            // SHIFT réel change d'état entre-temps.
+            Scancode::Num8 => {
+                if pressed {
+                    if self.num8_target.is_none() {
+                        let bit = if shift_held { (5, 0) } else { (3, 0) };
+                        self.num8_target = Some(bit);
+                        self.set_bit_now(2, 5, !shift_held); // synthétise SHIFT pour "_" seulement
+                        self.set_bit_deferred(bit.0, bit.1, true);
+                    }
+                } else if let Some(bit) = self.num8_target.take() {
+                    self.cancel_deferred(bit.0, bit.1);
+                    self.set_bit_now(bit.0, bit.1, false);
+                    self.set_bit_now(2, 5, false);
                 }
             }
         }

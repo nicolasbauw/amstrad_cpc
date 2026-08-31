@@ -116,4 +116,5 @@ pub enum Scancode {
     Grave,
     RightBracket,
     NonUsBackslash,
+    Num8,
 }

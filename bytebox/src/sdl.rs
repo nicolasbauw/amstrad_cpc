@@ -278,6 +278,7 @@ fn to_core_scancode(sc: sdl2::keyboard::Scancode) -> Option<bytebox_core::keys::
         SdlS::Grave => S::Grave,
         SdlS::RightBracket => S::RightBracket,
         SdlS::NonUsBackslash => S::NonUsBackslash,
+        SdlS::Num8 => S::Num8,
         _ => return None,
     })
 }
