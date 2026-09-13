@@ -38,7 +38,7 @@ zilog_z80 = "1.1.2"
 # "bytebox-frontend", qui tirerait bytebox-core/image/rfd/zilog_z80 une
 # seconde fois pour rien, cette fois via zilog_silicon plutôt que
 # directement).
-zilog_silicon = { path = "../../zilog_silicon", default-features = false }
+zilog_silicon = { git = "ssh://git@github.com/nicolasbauw/zilog_silicon.git", branch = "master", default-features = false }
 sdl2 = { version = "0.38.0", features = ["raw-window-handle"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # M0 a demarre sur la version utilisee par l'exemple officiel

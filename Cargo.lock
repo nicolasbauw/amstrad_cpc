@@ -2453,7 +2453,8 @@ checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 
 [[package]]
 name = "zilog_silicon"
-version = "0.1.0"
+version = "1.0.0"
+source = "git+ssh://git@github.com/nicolasbauw/zilog_silicon.git?branch=master#cad51f81ab470a4f462e3f7d12b7a655b1ff0a0f"
 dependencies = [
  "bytemuck",
  "egui",
