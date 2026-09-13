@@ -9,8 +9,8 @@
 //! `console_panel.rs`, embarquée dans la fenêtre d'émulation), qui n'en
 //! montre qu'une ligne.
 
-use crate::console_log::ConsoleLog;
-use crate::egui_gpu::EguiGpu;
+use zilog_silicon::console_log::ConsoleLog;
+use zilog_silicon::egui_gpu::EguiGpu;
 use bytebox_core::monitor::{MonitorMessage, parse_command};
 use sdl2::video::Window;
 use std::sync::mpsc::Sender;

@@ -156,6 +156,7 @@ dependencies = [
  "rfd",
  "sdl2",
  "wgpu",
+ "zilog_silicon",
  "zilog_z80",
 ]
 
@@ -2449,6 +2450,20 @@ name = "zeroize"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+
+[[package]]
+name = "zilog_silicon"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "egui-sdl2-event",
+ "egui-wgpu",
+ "embed-resource",
+ "pollster 0.2.5",
+ "sdl2",
+ "wgpu",
+]
 
 [[package]]
 name = "zilog_z80"

@@ -1,16 +1,11 @@
 mod audio;
 mod config_panel;
-mod console_log;
 mod console_panel;
 mod console_window;
-mod egui_gpu;
 mod keyboard_panel;
 mod osd;
-mod renderer;
 mod rom_install_panel;
 mod sdl;
-mod status_panel;
-mod ui_scale;
 
 use bytebox_core::app_log;
 use bytebox_core::autotype;

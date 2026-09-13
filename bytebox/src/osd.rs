@@ -39,7 +39,7 @@ impl Osd {
     }
 
     /// `window_size` : même mécanisme que les autres panneaux superposés à
-    /// la fenêtre principale (voir `crate::ui_scale`) — un message minuscule
+    /// la fenêtre principale (voir `zilog_silicon::ui_scale`) — un message minuscule
     /// en plein écran 4K serait aussi peu utile que l'était le panneau F6
     /// avant ce correctif.
     pub fn ui(&mut self, ctx: &egui::Context, window_size: egui::Vec2) {
@@ -50,13 +50,13 @@ impl Osd {
             self.message = None;
             return;
         }
-        let scale = crate::ui_scale::content_scale(window_size);
+        let scale = zilog_silicon::ui_scale::content_scale(window_size);
         let text = text.clone();
         egui::Area::new(egui::Id::new("osd"))
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0 * scale))
             .interactable(false)
             .show(ctx, |ui| {
-                ui.set_style(crate::ui_scale::scaled_style(ui.style(), scale));
+                ui.set_style(zilog_silicon::ui_scale::scaled_style(ui.style(), scale));
                 egui::Frame::default()
                     .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 25, 235))
                     .corner_radius(6.0 * scale)

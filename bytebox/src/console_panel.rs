@@ -9,7 +9,7 @@
 //! la console complète — `Machine` ne voit donc aucune différence entre les
 //! deux façades.
 
-use crate::console_log::ConsoleLog;
+use zilog_silicon::console_log::ConsoleLog;
 use bytebox_core::monitor::{MonitorMessage, parse_command};
 use std::sync::mpsc::Sender;
 
@@ -34,7 +34,7 @@ impl QuickCommandBar {
 
     /// `window_size` : taille réelle de la fenêtre CPC (`sdl.rs`), pour
     /// grossir police/espacements avec le zoom (F1-F4) — même mécanisme que
-    /// `ConfigPanel` (F6), voir `crate::ui_scale`. Un `TopBottomPanel`
+    /// `ConfigPanel` (F6), voir `zilog_silicon::ui_scale`. Un `TopBottomPanel`
     /// recalcule sa hauteur à chaque trame (contrairement à un
     /// `egui::Window`, dont `default_width`/`default_pos` ne s'appliquent
     /// qu'à la toute première apparition) : pas besoin ici d'un id changeant
@@ -46,7 +46,7 @@ impl QuickCommandBar {
         log: &mut ConsoleLog,
         window_size: egui::Vec2,
     ) {
-        let scale = crate::ui_scale::content_scale(window_size);
+        let scale = zilog_silicon::ui_scale::content_scale(window_size);
         egui::TopBottomPanel::bottom("quick_command_bar")
             .resizable(false)
             .exact_height(if log.last_line().is_some() { 56.0 } else { 34.0 } * scale)
@@ -56,7 +56,7 @@ impl QuickCommandBar {
                     .inner_margin(6.0 * scale),
             )
             .show(ctx, |ui| {
-                ui.set_style(crate::ui_scale::scaled_style(ui.style(), scale));
+                ui.set_style(zilog_silicon::ui_scale::scaled_style(ui.style(), scale));
                 // Jamais plus d'une ligne de retour : c'est ce qui distingue
                 // cette barre de la console complète (F11).
                 if let Some(last) = log.last_line() {

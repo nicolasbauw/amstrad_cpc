@@ -10,12 +10,56 @@
 //! ne voit aucune différence entre les deux façades.
 
 use crate::keyboard_panel::KeyboardSettings;
-use crate::renderer::CrtSettings;
+use zilog_silicon::renderer::CrtSettings;
 use bytebox_core::app_log;
+use bytebox_core::config::CrtConfig;
 use bytebox_core::machine::Machine;
 use bytebox_core::monitor::{MonitorCmd, MonitorMessage};
 use std::path::Path;
 use std::sync::mpsc::Sender;
+
+/// Applique les valeurs enregistrées dans `config.toml` par-dessus les
+/// valeurs par défaut, champ par champ : une section `[crt]` partielle
+/// (ou absente) reste donc parfaitement valable. Vivait comme méthode
+/// inhérente de `CrtSettings` avant l'extraction de ce type vers
+/// `zilog_silicon` (partagé avec trust-80, qui n'a que faire de
+/// `config.toml`/`CrtConfig`, propres à bytebox) - une fonction libre ici
+/// fait aussi bien, sans avoir besoin d'un trait d'extension pour un type
+/// qui n'est plus le nôtre.
+pub fn crt_settings_from_config(crt: &CrtConfig) -> CrtSettings {
+    let d = CrtSettings::default();
+    CrtSettings {
+        mask_cell_px: crt.mask_cell_px.unwrap_or(d.mask_cell_px),
+        mask_min: crt.mask_min.unwrap_or(d.mask_min),
+        mask_strength: crt.mask_strength.unwrap_or(d.mask_strength),
+        scanline_beam: crt.scanline_beam.unwrap_or(d.scanline_beam),
+        scanline_strength: crt.scanline_strength.unwrap_or(d.scanline_strength),
+        beam_bloom: crt.beam_bloom.unwrap_or(d.beam_bloom),
+        bright_boost: crt.bright_boost.unwrap_or(d.bright_boost),
+        horizontal_blur: crt.horizontal_blur.unwrap_or(d.horizontal_blur),
+    }
+}
+
+/// Réciproque de [`crt_settings_from_config`], pour l'enregistrement : tous
+/// les champs sont renseignés, même ceux restés à leur valeur par défaut.
+/// Enregistrer, c'est figer un rendu — si une version ultérieure change les
+/// valeurs par défaut, l'utilisateur doit retrouver le sien.
+pub fn crt_settings_to_config(settings: CrtSettings) -> CrtConfig {
+    CrtConfig {
+        mask_cell_px: Some(settings.mask_cell_px),
+        mask_min: Some(settings.mask_min),
+        mask_strength: Some(settings.mask_strength),
+        scanline_beam: Some(settings.scanline_beam),
+        scanline_strength: Some(settings.scanline_strength),
+        beam_bloom: Some(settings.beam_bloom),
+        bright_boost: Some(settings.bright_boost),
+        horizontal_blur: Some(settings.horizontal_blur),
+        // Hors du champ de `CrtSettings` (voir sa doc) : laissé à la charge
+        // de l'appelant (plus bas dans ce fichier), qui le renseigne depuis
+        // la case "Enable at startup" avant d'enregistrer.
+        enabled_at_startup: None,
+    }
+}
 
 /// Niveau de zoom demandé depuis le panneau. Le zoom est un état de
 /// présentation (la fenêtre SDL2), pas un état de la machine émulée : il ne
@@ -156,7 +200,7 @@ impl ConfigPanel {
         // son commentaire) fait partie de l'id de la fenêtre pour que ce
         // calcul se refasse à chaque changement de zoom, pas seulement à la
         // toute première ouverture.
-        let scale = crate::ui_scale::content_scale(window_size);
+        let scale = zilog_silicon::ui_scale::content_scale(window_size);
         let default_width = 420.0 * scale;
         // Coin haut-gauche fixe : sans `default_pos`, egui place chaque
         // nouvelle fenêtre (un nouvel id à chaque changement de
@@ -172,7 +216,7 @@ impl ConfigPanel {
             .default_width(default_width)
             .default_pos(egui::pos2(margin, margin))
             .show(ctx, |ui| {
-                ui.set_style(crate::ui_scale::scaled_style(ui.style(), scale));
+                ui.set_style(zilog_silicon::ui_scale::scaled_style(ui.style(), scale));
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.tab, Tab::General, "General");
                     ui.selectable_value(&mut self.tab, Tab::Crt, "CRT Shader");
@@ -515,7 +559,7 @@ impl ConfigPanel {
             // config.toml, juste par des chemins différents (`CrtSettings`
             // pour les curseurs, ce bool à part pour la case).
             if ui.button("Save").clicked() {
-                let mut crt_config = settings.to_config();
+                let mut crt_config = crt_settings_to_config(*settings);
                 crt_config.enabled_at_startup = Some(*enabled_at_startup);
                 match bytebox_core::config::save_crt_config(&crt_config) {
                     Ok(()) => app_log!("CRT settings saved to config.toml"),

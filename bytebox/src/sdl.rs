@@ -6,12 +6,12 @@
 use bytebox_core::app_log;
 use bytebox_core::autotype::AutoTyper;
 use crate::config_panel::{ConfigPanel, ZoomChoice};
-use crate::console_log::ConsoleLog;
+use zilog_silicon::console_log::ConsoleLog;
 use crate::console_panel::QuickCommandBar;
 use crate::console_window::ConsoleWindow;
 use crate::keyboard_panel::{KeyboardPanel, KeyboardSettings};
 use bytebox_core::machine::{self, Machine};
-use crate::renderer::{CrtSettings, Renderer};
+use zilog_silicon::renderer::{CrtSettings, Renderer};
 use bytebox_core::video;
 use sdl2::event::Event;
 use sdl2::mouse::MouseButton;
@@ -429,7 +429,8 @@ pub fn run(
         app_log!("Can't set debug window icon: {e}");
     }
     let debug_window_id = debug_window.id();
-    let mut status_panel = crate::status_panel::StatusPanel::new(debug_window)?;
+    let mut status_panel =
+        zilog_silicon::status_panel::StatusPanel::new(debug_window, "bytebox status panel device")?;
 
     // Console complète (F11), cachée par défaut, sur le même modèle que la
     // fenêtre de statut ci-dessus : elle remplace entièrement la console
@@ -489,10 +490,17 @@ pub fn run(
     if let Err(e) = set_window_icon(&mut window) {
         app_log!("Can't set window icon: {e}");
     }
-    let mut renderer = Renderer::new(window)?;
+    let mut renderer = Renderer::new(
+        window,
+        video::SCREEN_WIDTH,
+        video::SCREEN_HEIGHT,
+        video::PIXELS_PER_SCANLINE as f32,
+    )?;
     // Une section [crt] dans config.toml (écrite par le bouton du panneau F6)
     // outrepasse les valeurs par défaut du shader, champ par champ.
-    renderer.set_crt_settings(CrtSettings::from_config(machine.crt_config()));
+    renderer.set_crt_settings(crate::config_panel::crt_settings_from_config(
+        machine.crt_config(),
+    ));
     if machine.crt_config().enabled_at_startup.unwrap_or(false) {
         renderer.set_crt_enabled(true);
     }
@@ -1550,7 +1558,7 @@ pub fn run(
             }
             osd.ui(ctx, window_size);
             if disk_access {
-                let scale = crate::ui_scale::content_scale(window_size);
+                let scale = zilog_silicon::ui_scale::content_scale(window_size);
                 egui::Area::new(egui::Id::new("disk_access_indicator"))
                     .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0) * scale)
                     .interactable(false)
