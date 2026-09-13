@@ -18,6 +18,28 @@ use bytebox_core::monitor::{MonitorCmd, MonitorMessage};
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
+/// Valeurs par défaut réglées à l'oeil (F6, itération visuelle) - PAS
+/// `zilog_silicon::renderer::CrtSettings::default()` : ce type/cette
+/// valeur par défaut sont partagés avec trust-80, qui outrepasse certains
+/// champs mais hérite des autres (`mask_cell_px`/`mask_min`/
+/// `mask_strength`/`beam_bloom`) tels quels via `..CrtSettings::default()`
+/// - les modifier ici changerait aussi silencieusement le rendu de
+/// trust-80. Une fonction locale, comme celle que trust-80 a lui-même pour
+/// sa propre raison symétrique (`tuned_crt_defaults` dans son
+/// `display.rs`), garde les deux réglages entièrement indépendants.
+pub fn tuned_crt_defaults() -> CrtSettings {
+    CrtSettings {
+        mask_cell_px: 2.0,
+        mask_min: 0.6,
+        mask_strength: 0.6,
+        scanline_beam: 20.0,
+        scanline_strength: 0.65,
+        beam_bloom: 0.55,
+        bright_boost: 1.6,
+        horizontal_blur: 0.6,
+    }
+}
+
 /// Applique les valeurs enregistrées dans `config.toml` par-dessus les
 /// valeurs par défaut, champ par champ : une section `[crt]` partielle
 /// (ou absente) reste donc parfaitement valable. Vivait comme méthode
@@ -27,7 +49,7 @@ use std::sync::mpsc::Sender;
 /// fait aussi bien, sans avoir besoin d'un trait d'extension pour un type
 /// qui n'est plus le nôtre.
 pub fn crt_settings_from_config(crt: &CrtConfig) -> CrtSettings {
-    let d = CrtSettings::default();
+    let d = tuned_crt_defaults();
     CrtSettings {
         mask_cell_px: crt.mask_cell_px.unwrap_or(d.mask_cell_px),
         mask_min: crt.mask_min.unwrap_or(d.mask_min),
@@ -552,7 +574,7 @@ impl ConfigPanel {
         ui.checkbox(enabled_at_startup, "Enable at startup");
         ui.horizontal(|ui| {
             if ui.button("Reset to defaults").clicked() {
-                *settings = CrtSettings::default();
+                *settings = tuned_crt_defaults();
             }
             // Enregistrés ensemble : les curseurs ci-dessus et la case
             // "Enable at startup" forment tous les deux `[crt]` dans
