@@ -17,6 +17,21 @@ use sdl2::event::Event;
 use sdl2::mouse::MouseButton;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::surface::Surface;
+use std::time::{Duration, Instant};
+
+/// Durée pendant laquelle toute activité manette est ignorée après
+/// l'ouverture du périphérique - voir le commentaire de `gamepad_opened_at`
+/// dans `run` pour la raison d'être (rafale d'évènements factices à
+/// l'ouverture, observée sur une Logitech Precision Gamepad).
+const GAMEPAD_SETTLE_GRACE: Duration = Duration::from_millis(750);
+
+/// `true` une fois `GAMEPAD_SETTLE_GRACE` écoulée depuis l'ouverture de la
+/// manette (ou s'il n'y en a pas/plus - `opened_at` est alors `None`) :
+/// c'est seulement à ce moment que les évènements d'axe/bouton doivent
+/// commencer à agir sur la machine émulée.
+fn gamepad_settled(opened_at: Option<Instant>) -> bool {
+    opened_at.is_none_or(|t| t.elapsed() >= GAMEPAD_SETTLE_GRACE)
+}
 
 /// Pose `assets/bytebox_icon.png` comme icône de la fenêtre donnée.
 /// Décodage en pur Rust via la crate `image` (plutôt que la feature
@@ -359,6 +374,27 @@ pub fn run(
     } else {
         None
     };
+    // Instant d'ouverture de la manette active (démarrage ou branchement à
+    // chaud, voir `Event::ControllerDeviceAdded`/`JoyDeviceAdded` plus bas) -
+    // `GAMEPAD_SETTLE_GRACE` après cet instant, tout évènement d'axe/bouton
+    // est ignoré. Constaté avec une Logitech Precision Gamepad ("la manette
+    // USB qui reste tout le temps branchée") : ouvrir le périphérique
+    // déclenche une rafale d'évènements factices balayant les extrêmes de
+    // chaque axe (0, -32511, 128, 32767, 128, ...) et togglant un bouton,
+    // sur près d'une trentaine d'évènements - ni un signal utilisateur réel
+    // (l'utilisateur ne touche à rien), ni un simple décalage de centrage
+    // (les valeurs vont bien aux deux extrêmes, pas seulement autour d'un
+    // repos non nul) : tout indique un test de calibration interne au
+    // firmware de la manette (ou une resynchronisation du pilote joydev),
+    // rejoué UNE SEULE FOIS à l'ouverture du périphérique - jamais revu tant
+    // que le process tourne, d'où un bug qui ne touche que le tout premier
+    // lancement et jamais un simple "power cycle" de la machine émulée (qui
+    // ne referme/rouvre pas la manette). Ignorer purement et simplement
+    // toute activité manette dans les instants qui suivent l'ouverture est
+    // la parade la plus sûre : aucun joueur ne bouge un stick dans les
+    // 750ms qui suivent le lancement de l'appli.
+    let mut gamepad_opened_at = (active_controller.is_some() || active_joystick.is_some())
+        .then(Instant::now);
 
     // 4. Ouverture de la sortie audio. Une machine sans carte son utilisable
     // ne doit pas empêcher l'émulateur de démarrer : on continue en silence.
@@ -1142,7 +1178,7 @@ pub fn run(
                         machine.bus.psg.set_key_state(kc, false);
                     }
                 }
-                Event::ControllerButtonDown { button, .. } => {
+                Event::ControllerButtonDown { button, .. } if gamepad_settled(gamepad_opened_at) => {
                     let btn_idx = match button {
                         sdl2::controller::Button::DPadUp => 0,
                         sdl2::controller::Button::DPadDown => 1,
@@ -1157,7 +1193,7 @@ pub fn run(
                         machine.bus.psg.set_controller_button(btn_idx, true);
                     }
                 }
-                Event::ControllerButtonUp { button, .. } => {
+                Event::ControllerButtonUp { button, .. } if gamepad_settled(gamepad_opened_at) => {
                     let btn_idx = match button {
                         sdl2::controller::Button::DPadUp => 0,
                         sdl2::controller::Button::DPadDown => 1,
@@ -1172,7 +1208,7 @@ pub fn run(
                         machine.bus.psg.set_controller_button(btn_idx, false);
                     }
                 }
-                Event::ControllerAxisMotion { axis, value, .. } => {
+                Event::ControllerAxisMotion { axis, value, .. } if gamepad_settled(gamepad_opened_at) => {
                     let threshold = 10000;
                     match axis {
                         sdl2::controller::Axis::LeftX => {
@@ -1215,6 +1251,11 @@ pub fn run(
                             Ok(c) => {
                                 app_log!("Controller opened: {}", c.name());
                                 osd.show(format!("Controller connected: {}", c.name()));
+                                // Même raison qu'à l'ouverture initiale (voir
+                                // `gamepad_opened_at` plus haut) : un
+                                // branchement à chaud rejoue la même rafale
+                                // d'évènements factices à l'ouverture.
+                                gamepad_opened_at = Some(Instant::now());
                                 active_controller = Some(c);
                             }
                             Err(e) => app_log!("Failed to open controller {which}: {e}"),
@@ -1252,6 +1293,7 @@ pub fn run(
                     if active_joystick
                         .as_ref()
                         .is_some_and(|j| j.instance_id() == which)
+                        && gamepad_settled(gamepad_opened_at)
                     {
                         let threshold = 10000;
                         match axis_idx {
@@ -1289,6 +1331,7 @@ pub fn run(
                     if active_joystick
                         .as_ref()
                         .is_some_and(|j| j.instance_id() == which)
+                        && gamepad_settled(gamepad_opened_at)
                     {
                         // Pas de nom de bouton sans mapping : les trois
                         // premiers de la manette servent de tir 1/2/3, comme
@@ -1307,6 +1350,7 @@ pub fn run(
                     if active_joystick
                         .as_ref()
                         .is_some_and(|j| j.instance_id() == which)
+                        && gamepad_settled(gamepad_opened_at)
                         && let 0..=2 = button_idx
                     {
                         machine
@@ -1329,6 +1373,9 @@ pub fn run(
                             Ok(j) => {
                                 app_log!("Joystick opened (generic mapping): {}", j.name());
                                 osd.show(format!("Controller connected: {}", j.name()));
+                                // Même raison qu'à l'ouverture initiale (voir
+                                // `gamepad_opened_at` plus haut).
+                                gamepad_opened_at = Some(Instant::now());
                                 active_joystick = Some(j);
                             }
                             Err(e) => app_log!("Failed to open joystick {which}: {e}"),
