@@ -207,7 +207,7 @@ mod tests {
         psg.tick(4 * 100_000);
         let samples = psg.sound.take_samples();
         assert!(
-            samples.iter().any(|&s| s > 0.3) && samples.iter().any(|&s| s == 0.0),
+            samples.iter().any(|&s| s > 0.3) && samples.contains(&0.0),
             "un ton audible etait attendu"
         );
     }

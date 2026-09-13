@@ -575,10 +575,8 @@ mod tests {
         // vides seraient identiques eux aussi. On exige donc que l'image
         // comparée contienne vraiment quelque chose — l'écran BASIC a du
         // texte jaune sur fond bleu, donc plusieurs couleurs distinctes.
-        let distinct: std::collections::HashSet<[u8; 3]> = frame_original
-            .chunks_exact(3)
-            .map(|p| [p[0], p[1], p[2]])
-            .collect();
+        let distinct: std::collections::HashSet<[u8; 3]> =
+            frame_original.as_chunks::<3>().0.iter().copied().collect();
         assert!(
             distinct.len() > 1,
             "l'ecran compare est uniforme : le test ne prouverait rien"

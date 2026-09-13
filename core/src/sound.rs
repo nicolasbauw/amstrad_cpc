@@ -821,7 +821,7 @@ mod tests {
             assert!(pair[1] > pair[0], "table non monotone : {pair:?}");
         }
         // Échelle logarithmique : le pas 7 est loin de la moitié du maximum.
-        assert!(VOLUME_TABLE[7] < 0.25, "l'echelle doit etre logarithmique");
+        const { assert!(VOLUME_TABLE[7] < 0.25, "l'echelle doit etre logarithmique") };
     }
 
     /// Le signal cassette doit s'entendre : c'est le sifflement

@@ -289,10 +289,7 @@ mod tests {
                 padding: TARGET_LATENCY_SAMPLES
             }
         );
-        assert!(
-            TARGET_LATENCY_SAMPLES > FRAME,
-            "le coussin doit depasser une trame"
-        );
+        const { assert!(TARGET_LATENCY_SAMPLES > FRAME, "le coussin doit depasser une trame") };
     }
 
     /// Le coussin de démarrage se distingue d'un remplissage subi : le premier
@@ -402,7 +399,7 @@ mod tests {
         let mut min = f32::MAX;
         let mut max = f32::MIN;
         for i in 0..SAMPLE_RATE as usize {
-            let input = if (i / half) % 2 == 0 { 1.0 } else { 0.0 };
+            let input = if (i / half).is_multiple_of(2) { 1.0 } else { 0.0 };
             let out = f.filter(input);
             // On ignore le régime transitoire du début.
             if i > SAMPLE_RATE as usize / 2 {

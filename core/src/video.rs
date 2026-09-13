@@ -67,7 +67,7 @@ pub fn render(machine: &Machine, frame_buffer: &mut [u8]) {
         let lines_since_vsync = y as i32 / PIXELS_PER_SCANLINE + V_BACK_PORCH_LINES;
         let (br, bg, bb) = state_at(lines_since_vsync + vsync_scanline).rgb(16);
         let row = &mut frame_buffer[y * SCREEN_WIDTH * 3..(y + 1) * SCREEN_WIDTH * 3];
-        for pixel in row.chunks_exact_mut(3) {
+        for pixel in row.as_chunks_mut::<3>().0 {
             pixel[0] = br;
             pixel[1] = bg;
             pixel[2] = bb;
