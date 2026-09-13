@@ -36,7 +36,7 @@ zilog_z80 = "1.1.2"
 # par trust-80. Ce crate n'a plus de bin "bytebox" propre (ce code CPC-
 # spécifique a été rapatrié ici une fois cette dépendance en place) - une
 # dépendance en lib toute simple.
-zilog_silicon = { git = "ssh://git@github.com/nicolasbauw/zilog_silicon.git", branch = "master" }
+zilog_silicon = { git = "https://github.com/nicolasbauw/zilog_silicon.git", branch = "master" }
 sdl2 = { version = "0.38.0", features = ["raw-window-handle"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # M0 a demarre sur la version utilisee par l'exemple officiel
