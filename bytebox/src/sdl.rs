@@ -19,29 +19,6 @@ use sdl2::pixels::PixelFormatEnum;
 use sdl2::surface::Surface;
 use std::time::{Duration, Instant};
 
-// CRT shader-only, deliberately NOT `video::PIXELS_PER_SCANLINE`: that
-// constant does double duty in core (it also drives the actual per-scanline
-// border-color rendering, with dedicated tests pinning its exact value) -
-// reusing it here would make an experiment about how the shader LOOKS
-// silently change real emulation accuracy too.
-//
-// The CPC was built to double as both a direct-RGB monitor and a
-// TV-via-RF-modulator target, so its own sync generator already runs at
-// genuine PAL line/field rates - unlike a fully custom, non-broadcast-
-// compatible sync, this means its own raster lines already sit on real
-// physical scanlines to some degree. But its standard graphics modes only
-// use about 200 of PAL's ~576 active lines (the rest is solid-color
-// border, not distinct picture detail) - a real CRT's fixed-frequency
-// raster has no reason to spread exactly 1 physical scanline over each of
-// those 200 content rows either. ~2 real scanlines per CPC pixel row is a
-// plausible order of magnitude, by the same reasoning that led to
-// trust-80's own 2.5 (NTSC active lines / TRS-80 logical lines).
-//
-// video::PIXELS_PER_SCANLINE (2) buffer rows already represent one CPC
-// raster line; halving it here (1.0) tests "one CPC raster line = 2 real
-// monitor scanlines" without touching that core constant at all.
-const CRT_PIXELS_PER_SCANLINE: f32 = video::PIXELS_PER_SCANLINE as f32 / 2.0;
-
 /// Durée pendant laquelle toute activité manette est ignorée après
 /// l'ouverture du périphérique - voir le commentaire de `gamepad_opened_at`
 /// dans `run` pour la raison d'être (rafale d'évènements factices à
@@ -513,12 +490,7 @@ pub fn run(
     if let Err(e) = set_window_icon(&mut window) {
         app_log!("Can't set window icon: {e}");
     }
-    let mut renderer = Renderer::new(
-        window,
-        video::SCREEN_WIDTH,
-        video::SCREEN_HEIGHT,
-        CRT_PIXELS_PER_SCANLINE,
-    )?;
+    let mut renderer = Renderer::new(window, video::SCREEN_WIDTH, video::SCREEN_HEIGHT)?;
     // Une section [crt] dans config.toml (écrite par le bouton du panneau F6)
     // outrepasse les valeurs par défaut du shader, champ par champ.
     renderer.set_crt_settings(crate::config_panel::crt_settings_from_config(

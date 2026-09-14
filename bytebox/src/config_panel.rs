@@ -29,16 +29,33 @@ use std::sync::mpsc::Sender;
 /// `display.rs`), garde les deux réglages entièrement indépendants.
 pub fn tuned_crt_defaults() -> CrtSettings {
     CrtSettings {
+        // Valeurs restaurées telles quelles depuis avant les expérimentations
+        // sur pixels_per_scanline (commit c117fac5), jugées meilleures à
+        // l'usage que celles essayées entre-temps.
         mask_cell_px: 2.0,
         mask_min: 0.6,
-        mask_strength: 0.6,
-        scanline_beam: 20.0,
-        scanline_strength: 0.65,
-        beam_bloom: 0.55,
+        mask_strength: 0.35,
+        scanline_beam: 9.0,
+        scanline_strength: 0.6,
+        beam_bloom: 0.66,
         bright_boost: 1.6,
-        horizontal_blur: 0.6,
+        horizontal_blur: 0.65,
+        // PAL-theoretical value (see `crt_section`'s "🎯" button): the CPC
+        // drives its RGB monitor directly at the CRTC's own line rate, no
+        // broadcast PAL interlacing involved - one CRTC scanline is one
+        // real physical scanline (see e.g. cpctech.cpcwiki.de/docs/
+        // graphics.html). `video::PIXELS_PER_SCANLINE` (2) is exactly this:
+        // the core's own doc comment on it says outright that 2 buffer rows
+        // are "the true period of a [real] scanline" - so that's the
+        // shader-facing `line_height` value too, giving 2 / 2 = 1.0 real
+        // scanline per CPC pixel row.
+        pixels_per_scanline: bytebox_core::video::PIXELS_PER_SCANLINE as f32,
     }
 }
+
+/// Valeur théorique PAL de `pixels_per_scanline`, pour le bouton-repère du
+/// curseur — voir le commentaire de `tuned_crt_defaults` pour le calcul.
+const PAL_THEORETICAL_PIXELS_PER_SCANLINE: f32 = bytebox_core::video::PIXELS_PER_SCANLINE as f32;
 
 /// Applique les valeurs enregistrées dans `config.toml` par-dessus les
 /// valeurs par défaut, champ par champ : une section `[crt]` partielle
@@ -59,6 +76,7 @@ pub fn crt_settings_from_config(crt: &CrtConfig) -> CrtSettings {
         beam_bloom: crt.beam_bloom.unwrap_or(d.beam_bloom),
         bright_boost: crt.bright_boost.unwrap_or(d.bright_boost),
         horizontal_blur: crt.horizontal_blur.unwrap_or(d.horizontal_blur),
+        pixels_per_scanline: crt.pixels_per_scanline.unwrap_or(d.pixels_per_scanline),
     }
 }
 
@@ -76,6 +94,7 @@ pub fn crt_settings_to_config(settings: CrtSettings) -> CrtConfig {
         beam_bloom: Some(settings.beam_bloom),
         bright_boost: Some(settings.bright_boost),
         horizontal_blur: Some(settings.horizontal_blur),
+        pixels_per_scanline: Some(settings.pixels_per_scanline),
         // Hors du champ de `CrtSettings` (voir sa doc) : laissé à la charge
         // de l'appelant (plus bas dans ce fichier), qui le renseigne depuis
         // la case "Enable at startup" avant d'enregistrer.
@@ -571,6 +590,38 @@ impl ConfigPanel {
             egui::Slider::new(&mut settings.horizontal_blur, 0.0..=1.0)
                 .text("Horizontal blur (px)"),
         );
+        ui.horizontal(|ui| {
+            // `settings.pixels_per_scanline` is the raw shader parameter
+            // (`line_height`: how many *buffer* rows make up one real CRT
+            // scanline) - bigger means FEWER, coarser scanlines, the
+            // opposite of what the number suggests. The CPC's own buffer
+            // already duplicates each raster line twice
+            // (`video::PIXELS_PER_SCANLINE`), so real scanlines per CPC
+            // pixel row = PIXELS_PER_SCANLINE / pixels_per_scanline - the
+            // slider shows THIS instead, so bigger number = more, finer
+            // scanlines, matching what's actually counted on screen.
+            let mut scanlines_per_pixel =
+                bytebox_core::video::PIXELS_PER_SCANLINE as f32 / settings.pixels_per_scanline;
+            let response = ui.add(
+                egui::Slider::new(&mut scanlines_per_pixel, 0.5..=4.0)
+                    .text("Real scanlines per CPC pixel row"),
+            );
+            if response.changed() {
+                settings.pixels_per_scanline =
+                    bytebox_core::video::PIXELS_PER_SCANLINE as f32 / scanlines_per_pixel;
+            }
+            let pal_scanlines_per_pixel = bytebox_core::video::PIXELS_PER_SCANLINE as f32
+                / PAL_THEORETICAL_PIXELS_PER_SCANLINE;
+            if ui
+                .button("🎯 PAL")
+                .on_hover_text(format!(
+                    "Theoretical value for a PAL screen: {pal_scanlines_per_pixel}"
+                ))
+                .clicked()
+            {
+                settings.pixels_per_scanline = PAL_THEORETICAL_PIXELS_PER_SCANLINE;
+            }
+        });
         ui.checkbox(enabled_at_startup, "Enable at startup");
         ui.horizontal(|ui| {
             if ui.button("Reset to defaults").clicked() {
